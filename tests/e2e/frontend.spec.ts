@@ -481,7 +481,17 @@ for (const failure of [
       const degraded = await generationFault(failure, payload);
       await route.fulfill({ response: actual, json: degraded });
     });
-    await search(page);
+    // This test boots a real Python replay process; on Windows cold imports can
+    // exceed the default 5s UI assertion timeout. Wait for its bounded response.
+    const replayResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/recommendations") &&
+        response.request().method() === "POST",
+      { timeout: 20000 },
+    );
+    await page.locator(".find-button").click();
+    await replayResponse;
+    await expect(cards(page)).toHaveCount(3);
     await expect(results(page).locator(":scope > .fallback-label")).toHaveText(
       "Объяснение составлено по данным каталога",
     );

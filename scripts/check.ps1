@@ -44,7 +44,7 @@ try {
     }
 
     Invoke-Check 'locked Python workspace' $uv @('sync', '--locked', '--all-packages')
-    Invoke-Check 'Python tests' $uv @('run', '--locked', '--no-env-file', 'pytest')
+    Invoke-Check 'Python tests' $uv @('run', '--locked', '--no-env-file', 'pytest', '--basetemp', '.pytest_cache/windows-tmp')
     Invoke-Check 'HTTP smoke self-test' $uv @('run', '--locked', '--no-env-file', 'python', 'scripts/smoke.py', '--self-test')
     Invoke-Check 'canonical contract fixtures' $uv @('run', '--locked', '--no-env-file', 'python', 'verify_contracts.py')
     Invoke-Check 'generated artifacts' $uv @('run', '--locked', '--no-env-file', 'python', 'scripts/generate_contracts.py', '--check')
