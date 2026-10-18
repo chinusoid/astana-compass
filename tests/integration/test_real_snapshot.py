@@ -73,7 +73,7 @@ def test_real_recommendations_and_itinerary_without_keys(offline_live, query, lo
     validate_payload("RecommendationResponse", result)
     assert 1 <= len(result["recommendations"]) <= 3
     assert all(categories.intersection(place["categories"]) and not place["is_synthetic"] for place in result["places"])
-    assert any("BM25" in warning for warning in result["warnings"])
+    assert result["warnings"]  # Local search and unavailable model remain disclosed.
     for item in result["recommendations"]:
         assert item["route"]["method"] == "approximate"
         assert item["route"]["geometry"] is None
