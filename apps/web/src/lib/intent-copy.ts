@@ -16,9 +16,9 @@ const copy = {
     "Review suggestions",
   ],
   hint: [
-    "Отправляется только текст пожелания и язык. Новые условия применятся после вашего подтверждения.",
-    "Тек сұрау мәтіні мен тілі жіберіледі. Жаңа шарттар сіз растағаннан кейін қолданылады.",
-    "Only your request text and language are sent. New settings apply after your confirmation.",
+    "Если подключён внешний ИИ, текст пожелания и язык отправляются настроенному провайдеру OpenAI или NVIDIA. Фото, чат и геокоординаты не добавляются; сведения, написанные вами в тексте, отправятся вместе с ним. Новые условия применятся после вашего подтверждения.",
+    "Сыртқы ЖИ қосылған болса, сұрау мәтіні мен тілі бапталған OpenAI немесе NVIDIA провайдеріне жіберіледі. Фото, чат және геокоординаттар қосылмайды; мәтінге өзіңіз жазған мәліметтер онымен бірге жіберіледі. Жаңа шарттар сіз растағаннан кейін қолданылады.",
+    "If external AI is connected, your request text and language are sent to the configured OpenAI or NVIDIA provider. Photos, chat and coordinates are not added; anything you write in the text is sent with it. New settings apply after your confirmation.",
   ],
   rules: [
     "Разбор по правилам",
