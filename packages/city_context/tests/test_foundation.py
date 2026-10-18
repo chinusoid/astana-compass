@@ -15,6 +15,7 @@ pytest.importorskip("astana_recommender")
 pytest.importorskip("astana_api")
 from fastapi.testclient import TestClient
 
+from astana_contracts import validate_payload
 from astana_contracts.validation import load_examples
 from astana_recommender import DefaultRecommendationService
 from astana_api.app import create_app
@@ -30,6 +31,7 @@ def example(definition):
 class SyntheticRepository:
     def __init__(self, *, schedule="24/7"):
         self.places = []
+        self.nearby_calls = 0
         for index in range(3):
             place = example("Place")
             place["id"] = f"synthetic:place:context-{index}"
@@ -44,6 +46,7 @@ class SyntheticRepository:
         return next((deepcopy(p) for p in self.places if p["id"] == place_id), None)
 
     async def nearby(self, **kwargs):
+        self.nearby_calls += 1
         return deepcopy(self.places)
 
 
@@ -55,8 +58,11 @@ class SyntheticRetriever:
         response = example("RetrievalResponse")
         response["places"] = deepcopy(self.repository.places)
         template = response["hits"][0]
-        response["hits"] = [dict(deepcopy(template), place_id=p["id"]) for p in response["places"]]
-        return response
+        # This fixture makes no semantic-match claim. In particular, the source
+        # example's indoor key is absent from these schedule-only places.
+        response["hits"] = [dict(deepcopy(template), place_id=p["id"], matched_fact_keys=[])
+                            for p in response["places"]]
+        return validate_payload("RetrievalResponse", response)
 
 
 class SyntheticWalkingPort:
@@ -99,6 +105,15 @@ def setup(*, schedule="24/7"):
     return repository, router, context, service, request
 
 
+def test_synthetic_retrieval_fixture_passes_contract_before_orchestration():
+    async def run():
+        repository = SyntheticRepository()
+        response = await SyntheticRetriever(repository).retrieve({})
+        assert validate_payload("RetrievalResponse", response)
+        assert all(hit["matched_fact_keys"] == [] for hit in response["hits"])
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("locale", ["ru", "kk", "en"])
 def test_dynamic_required_passes_real_enrichment_before_final_policy(locale):
     async def run():
@@ -109,6 +124,7 @@ def test_dynamic_required_passes_real_enrichment_before_final_policy(locale):
             result = await service.recommend(request)
             assert result["status"] in {"matched", "partial"} and len(result["recommendations"]) == 3
             assert len(router.calls) == 3
+            assert repo.nearby_calls == 0
             assert repo.places == original
             assert all(next(f for f in p["facts"] if f["key"] == "open_at_requested_time")["value"] is True for p in result["places"])
         finally:
@@ -118,11 +134,32 @@ def test_dynamic_required_passes_real_enrichment_before_final_policy(locale):
 
 def test_dynamic_required_stays_unknown_and_root_rejects_it():
     async def run():
-        _, router, context, service, request = setup(schedule=None)
+        repo, router, context, service, request = setup(schedule=None)
         try:
             result = await service.recommend(request)
             assert result["status"] == "no_match" and result["places"] == [] and result["recommendations"] == []
             assert result["warnings"] and router.calls == []
+            assert repo.nearby_calls == 0
+        finally:
+            await context.aclose()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("schedule", [
+    "Mo 22:00-02:00; Mo 10:00-12:00",
+    "2026 Oct 19 22:00-02:00; 2026 Oct 19 10:00-12:00",
+])
+def test_required_opening_rejects_replaced_overnight_hours(schedule):
+    async def run():
+        repo, router, context, service, request = setup(schedule=schedule)
+        request["start_at"] = "2026-10-20T01:00:00+05:00"
+        original = deepcopy(repo.places)
+        try:
+            result = await service.recommend(request)
+            assert result["status"] == "no_match"
+            assert result["places"] == [] and result["recommendations"] == []
+            assert router.calls == [] and repo.nearby_calls == 0
+            assert repo.places == original
         finally:
             await context.aclose()
     asyncio.run(run())

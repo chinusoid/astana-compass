@@ -157,6 +157,93 @@ def test_impossible_geometry_leg_distance_is_rejected():
     assert run(router(FakeHTTP(data)))["method"] == "approximate"
 
 
+def snapped_response(destinations, returned, coordinates):
+    """Consistent graph geometry/totals with independently requested waypoints."""
+    data = response(len(destinations), returned)
+    points = [[p["lon"], p["lat"]] for p in [ORIGIN, *destinations]]
+    if returned:
+        points.append(points[0].copy())
+    data["metadata"]["query"]["coordinates"] = points
+    feature = data["features"][0]
+    feature["geometry"]["coordinates"] = deepcopy(coordinates)
+    distances = [_distance(a, b) for a, b in zip(coordinates, coordinates[1:])]
+    feature["properties"] = {
+        "way_points": list(range(len(coordinates))),
+        "segments": [{"distance": d, "duration": d / 1.4} for d in distances],
+        "summary": {"distance": sum(distances), "duration": sum(distances) / 1.4},
+    }
+    return data
+
+
+@pytest.mark.parametrize("count", [1, 2, 3])
+@pytest.mark.parametrize("returned", [False, True])
+def test_distinct_requested_stops_cannot_collapse_to_zero_trip(count, returned):
+    destinations = [{"lat": ORIGIN["lat"] + (i + 1) * 0.0005, "lon": ORIGIN["lon"]}
+                    for i in range(count)]
+    midpoint = [ORIGIN["lon"], (ORIGIN["lat"] + destinations[-1]["lat"]) / 2]
+    coordinates = [midpoint.copy() for _ in range(1 + count + int(returned))]
+    data = snapped_response(destinations, returned, coordinates)
+    points = data["metadata"]["query"]["coordinates"]
+    assert all(_distance(point, midpoint) < 100 for point in points)
+    result = run(router(FakeHTTP(data)), count, returned, destinations=destinations)
+    assert result["method"] == "approximate" and result["geometry"] is None
+    assert result["duration_seconds"] > 0
+    assert result["distance_meters"] == sum(_distance(a, b) for a, b in zip(points, points[1:]))
+    with pytest.raises(ProviderError, match="provider_unavailable"):
+        run(router(FakeHTTP(data), allow_approximate=False), count, returned,
+            destinations=destinations)
+
+
+@pytest.mark.parametrize("leg_index", [0, 1, 2, 3])
+def test_each_selected_leg_and_return_are_checked_even_when_total_hides_collapse(leg_index):
+    destinations = [{"lat": ORIGIN["lat"] + (i + 1) * 0.0002, "lon": ORIGIN["lon"]}
+                    for i in range(3)]
+    points = [[p["lon"], p["lat"]] for p in [ORIGIN, *destinations, ORIGIN]]
+    coordinates = deepcopy(points)
+    coordinates[leg_index + 1] = coordinates[leg_index].copy()
+    data = snapped_response(destinations, True, coordinates)
+    # Snapping a middle stop backward makes the next leg longer: validating
+    # only the trip total would miss that the requested stop was skipped.
+    if leg_index < 2:
+        assert math.isclose(data["features"][0]["properties"]["summary"]["distance"],
+                            sum(_distance(a, b) for a, b in zip(points, points[1:])))
+    assert run(router(FakeHTTP(data)), 3, True, destinations=destinations)["method"] == "approximate"
+
+
+def test_nonzero_snapped_shortcut_cannot_understate_requested_leg():
+    destinations = [{"lat": ORIGIN["lat"] + 0.0012, "lon": ORIGIN["lon"]}]
+    coordinates = [[ORIGIN["lon"], ORIGIN["lat"] + offset] for offset in [0.0005, 0.0007]]
+    data = snapped_response(destinations, False, coordinates)
+    assert data["features"][0]["properties"]["summary"]["distance"] > 0
+    assert run(router(FakeHTTP(data)), destinations=destinations)["method"] == "approximate"
+
+
+def test_zero_leg_cannot_use_rounding_tolerance_to_skip_a_distinct_nearby_stop():
+    destinations = [{"lat": ORIGIN["lat"] + 0.000001, "lon": ORIGIN["lon"]}]
+    coordinates = [[ORIGIN["lon"], ORIGIN["lat"]]] * 2
+    data = snapped_response(destinations, False, coordinates)
+    assert run(router(FakeHTTP(data)), destinations=destinations)["method"] == "approximate"
+
+
+@pytest.mark.parametrize("returned", [False, True])
+def test_zero_trip_remains_valid_for_coincident_requested_locations(returned):
+    destinations = [deepcopy(ORIGIN)]
+    coordinates = [[ORIGIN["lon"], ORIGIN["lat"]]] * (2 + int(returned))
+    data = snapped_response(destinations, returned, coordinates)
+    result = run(router(FakeHTTP(data), allow_approximate=False), 1, returned,
+                 destinations=destinations)
+    assert result["method"] == "routed" and result["duration_seconds"] == 0
+
+
+def test_small_nonzero_snap_keeps_existing_distance_rounding_tolerance():
+    destinations = [{"lat": ORIGIN["lat"] + 0.001, "lon": ORIGIN["lon"]}]
+    coordinates = [[ORIGIN["lon"], ORIGIN["lat"] + 0.00004],
+                   [destinations[0]["lon"], destinations[0]["lat"]]]
+    data = snapped_response(destinations, False, coordinates)
+    result = run(router(FakeHTTP(data), allow_approximate=False), destinations=destinations)
+    assert result["method"] == "routed"
+
+
 @pytest.mark.parametrize("error", [ProviderError("provider_unavailable", retryable=True),
                                   ProviderError("rate_limited", retryable=True)])
 def test_timeout_and_quota_honest_fallback_or_strict_error(error):

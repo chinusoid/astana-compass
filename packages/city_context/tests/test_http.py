@@ -1,6 +1,7 @@
 """Offline I/O boundary tests, with no requests to hosted providers."""
 import asyncio
 from datetime import timezone
+import gzip
 
 import httpx
 import pytest
@@ -69,6 +70,110 @@ def test_invalid_or_oversized_payload(body):
         try:
             with pytest.raises(ProviderError, match="invalid_provider_response"):
                 await http.request("GET", "https://provider.invalid/")
+        finally:
+            await http.aclose()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "deflate", "br", "gzip, identity"])
+def test_compressed_response_rejected_before_body_read_or_decompression(encoding):
+    async def run():
+        # The original bug inflated this ~8 KiB wire body to 8 MiB before
+        # checking a 1 KiB limit. The fixed boundary must not read it at all.
+        compressed = gzip.compress(b'{"value":"' + b"x" * (8 * 1024 * 1024) + b'"}')
+
+        class EncodedBody(httpx.AsyncByteStream):
+            read_started = False
+            closed = False
+
+            async def __aiter__(self):
+                self.read_started = True
+                yield compressed
+
+            async def aclose(self):
+                self.closed = True
+
+        stream = EncodedBody()
+        calls = []
+        caller_headers = {"accept-encoding": "gzip", "Authorization": "synthetic-test-key"}
+
+        def respond(request):
+            calls.append(request)
+            assert request.headers["accept-encoding"] == "identity"
+            assert request.headers["authorization"] == "synthetic-test-key"
+            return httpx.Response(200, headers={"Content-Encoding": encoding}, stream=stream)
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(respond),
+                                   headers={"Accept-Encoding": "gzip, deflate"})
+        http = JsonHTTP(client=client, max_bytes=1024, retries=2)
+        try:
+            with pytest.raises(ProviderError, match="invalid_provider_response") as failure:
+                await http.request("GET", "https://provider.invalid/", headers=caller_headers)
+            assert not failure.value.retryable
+            assert len(calls) == 1
+            assert not stream.read_started and stream.closed
+            assert caller_headers["accept-encoding"] == "gzip"
+        finally:
+            await http.aclose()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("encoding", [None, "identity", " Identity "])
+def test_raw_identity_stream_succeeds_at_exact_size_limit(encoding):
+    async def run():
+        payload = b'{"ok":true}'
+
+        class RawBody(httpx.AsyncByteStream):
+            closed = False
+
+            async def __aiter__(self):
+                yield payload[:4]
+                yield payload[4:]
+
+            async def aclose(self):
+                self.closed = True
+
+        stream = RawBody()
+        headers = {} if encoding is None else {"Content-Encoding": encoding}
+        client = httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, headers=headers, stream=stream)))
+        http = JsonHTTP(client=client, max_bytes=len(payload))
+        try:
+            assert await http.request("GET", "https://provider.invalid/") == {"ok": True}
+            assert stream.closed
+        finally:
+            await http.aclose()
+    asyncio.run(run())
+
+
+def test_oversized_raw_stream_stops_reading_and_closes_without_retry():
+    async def run():
+        class RawBody(httpx.AsyncByteStream):
+            chunks_read = 0
+            closed = False
+
+            async def __aiter__(self):
+                for _ in range(10):
+                    self.chunks_read += 1
+                    yield b"x" * 1024
+
+            async def aclose(self):
+                self.closed = True
+
+        stream = RawBody()
+        calls = []
+
+        def respond(request):
+            calls.append(request)
+            return httpx.Response(200, stream=stream)
+
+        http = JsonHTTP(client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+                        max_bytes=1024, retries=2)
+        try:
+            with pytest.raises(ProviderError, match="invalid_provider_response"):
+                await http.request("GET", "https://provider.invalid/")
+            assert stream.closed and stream.chunks_read < 10
+            assert len(calls) == 1
         finally:
             await http.aclose()
     asyncio.run(run())

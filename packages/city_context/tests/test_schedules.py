@@ -95,6 +95,37 @@ def test_supported_schedules(schedule, at, expected):
 
 
 @pytest.mark.parametrize("schedule", [
+    "Mo 22:00-02:00; Mo 10:00-12:00",
+    "Mo-Fr 22:00-02:00; Mo 10:00-12:00",
+    "2026 Oct 19 22:00-02:00; 2026 Oct 19 10:00-12:00",
+    "Oct 19 22:00-02:00; Oct 19 10:00-12:00",
+])
+def test_replacing_previous_day_hours_removes_their_overnight_spill(schedule):
+    # The replacement closes Monday night, including its Tuesday continuation.
+    for at in ["2026-10-19T23:00:00+05:00", "2026-10-20T01:00:00+05:00"]:
+        result, warnings = derive(schedule, at)
+        assert result["status"] == "known" and result["value"] is False
+        assert warnings == []
+
+
+@pytest.mark.parametrize(("schedule", "at", "expected"), [
+    ("Mo 22:00-04:00; Mo 23:00-02:00", "2026-10-20T01:00:00+05:00", True),
+    ("Mo 22:00-04:00; Mo 23:00-02:00", "2026-10-20T02:00:00+05:00", False),
+    ("2026 Oct 19 22:00-04:00; Oct 19 23:00-02:00", "2026-10-20T03:00:00+05:00", False),
+    # Replacing Monday's spill must preserve independent Tuesday hours.
+    ("Tu 00:00-03:00; Mo 22:00-02:00; Mo 10:00-12:00", "2026-10-20T01:00:00+05:00", True),
+    ("Oct 20 00:00-03:00; Oct 19 22:00-02:00; Oct 19 10:00-12:00", "2026-10-20T01:00:00+05:00", True),
+    # Neither a different weekday nor a different explicit date replaces Monday.
+    ("Mo 22:00-02:00; We 10:00-12:00", "2026-10-20T01:00:00+05:00", True),
+    ("2026 Oct 19 22:00-02:00; 2027 Oct 19 10:00-12:00", "2026-10-20T01:00:00+05:00", True),
+])
+def test_overnight_replacement_preserves_other_opening_intervals(schedule, at, expected):
+    result, warnings = derive(schedule, at)
+    assert result["status"] == "known" and result["value"] is expected
+    assert warnings == []
+
+
+@pytest.mark.parametrize("schedule", [
     "Mo-Fr 09:00-18:00; PH off", "24/7; SH off", "PH 10:00-20:00",
     "Mo-Fr 09:00-18:00; PH,Su off",
 ])
