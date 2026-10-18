@@ -29,7 +29,8 @@ def offline_live(monkeypatch):
         calls.append(True)
         raise AssertionError("Snapshot integration tests must not call external providers")
 
-    monkeypatch.setattr(httpx.AsyncClient, "request", reject_external_call)
+    # Both request() and stream() reach send(); context adapters use streaming I/O.
+    monkeypatch.setattr(httpx.AsyncClient, "send", reject_external_call)
     with TestClient(create_app(Settings(mode="live", llm_provider="none"))) as client:
         yield client
     assert not calls, "A real-data, no-key request attempted external I/O"
