@@ -153,24 +153,31 @@ def _evaluate(rules: list[_Rule], at: datetime) -> bool:
     today = at.date()
     yesterday = today - timedelta(days=1)
     minute = at.hour * 60 + at.minute + at.second / 60 + at.microsecond / 60_000_000
-    opened = False
+    # Keep the source day of an opening interval. Replacing yesterday's normal
+    # hours must also replace their spillover, without erasing unrelated hours
+    # selected explicitly for today.
+    opened_today = False
+    opened_yesterday = False
     for rule in rules:
         current = rule.applies(today)
         previous = rule.applies(yesterday)
-        active = (
-            current and any(start <= minute < end for start, end in rule.intervals)
-        ) or (
-            previous and any(start <= minute + 1440 < end for start, end in rule.intervals)
-        )
+        current_active = current and any(start <= minute < end for start, end in rule.intervals)
+        previous_active = previous and any(start <= minute + 1440 < end for start, end in rule.intervals)
         if rule.closed:
             # OSM closed rules only cut the times they match.
-            if active:
-                opened = False
-        elif current or active:
-            # A later normal rule replaces earlier hours for the selected day.
-            # An overnight interval within the SAME rule retains its spillover.
-            opened = active
-    return opened
+            if current_active or previous_active:
+                opened_today = opened_yesterday = False
+        else:
+            if current:
+                # Today's normal rule also replaces an earlier incoming spill.
+                opened_today = current_active
+                opened_yesterday = False
+            if previous:
+                # This assignment is required even when the replacement has no
+                # overnight interval: the old overnight hours no longer apply.
+                # When the same rule selects both days, retain its own spill.
+                opened_yesterday = previous_active
+    return opened_today or opened_yesterday
 
 
 def enrich_schedule(place: JSON, *, at: datetime, locale: str) -> tuple[JSON, list[str]]:

@@ -61,7 +61,8 @@ class JsonHTTP:
         self._gate = asyncio.Semaphore(4)
         self._client = client or httpx.AsyncClient(
             timeout=timeout_seconds, follow_redirects=False, trust_env=False,
-            headers={"User-Agent": "AstanaCompass-Context/0.1", "Accept": "application/json"},
+            headers={"User-Agent": "AstanaCompass-Context/0.1", "Accept": "application/json",
+                     "Accept-Encoding": "identity"},
         )
         self._closed = False
         self._close_task: asyncio.Task | None = None
@@ -74,13 +75,17 @@ class JsonHTTP:
             raise ProviderError("provider_unavailable")
         if method not in {"GET", "POST"} or not url.startswith("https://"):
             raise ProviderError("invalid_request")
+        # Enforce the same policy for injected clients and caller-provided
+        # headers without mutating the caller's dictionary or authentication.
+        request_headers = httpx.Headers(headers)
+        request_headers["Accept-Encoding"] = "identity"
         try:
             async with asyncio.timeout(self.timeout_seconds):
                 async with self._gate:
                     for attempt in range(self.retries + 1):
                         try:
                             async with self._client.stream(
-                                method, url, headers=headers, json=json, params=params,
+                                method, url, headers=request_headers, json=json, params=params,
                                 timeout=self.timeout_seconds, follow_redirects=False,
                             ) as response:
                                 if response.status_code == 429:
@@ -89,11 +94,24 @@ class JsonHTTP:
                                     raise ProviderError("provider_unavailable", retryable=True)
                                 if not 200 <= response.status_code < 300:
                                     raise ProviderError("provider_unavailable")
-                                body = bytearray()
-                                async for chunk in response.aiter_bytes():
-                                    body.extend(chunk)
+                                encoding = response.headers.get("content-encoding", "identity").strip().lower()
+                                if encoding not in {"", "identity"}:
+                                    # Reject before HTTPX can decompress a small
+                                    # encoded body into an unbounded allocation.
+                                    raise ProviderError("invalid_provider_response")
+                                if response.is_stream_consumed:
+                                    # Custom in-memory transports may preload a
+                                    # response. Real network responses stream raw.
+                                    body = response.content
                                     if len(body) > self.max_bytes:
                                         raise ProviderError("invalid_provider_response")
+                                else:
+                                    body = bytearray()
+                                    chunk_size = min(4096, self.max_bytes + 1)
+                                    async for chunk in response.aiter_raw(chunk_size=chunk_size):
+                                        if len(body) + len(chunk) > self.max_bytes:
+                                            raise ProviderError("invalid_provider_response")
+                                        body.extend(chunk)
                                 try:
                                     def reject_constant(_):
                                         raise ValueError("Nonfinite JSON constant")

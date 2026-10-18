@@ -198,6 +198,16 @@ class ORSWalkingRouter:
             distance, duration = _number(segment["distance"]), _number(segment["duration"])
             if (distance > 0 and duration <= 0) or (distance <= 0 and duration > 0):
                 raise ValueError("Inconsistent leg duration")
+            # ORS measures between snapped graph points. Two distinct requested
+            # stops can snap to one node, or to nodes much closer together, even
+            # when both individual snaps are within the allowed radius. Such a
+            # leg does not account for the trip between the requested locations.
+            minimum_distance = _distance(points[i], points[i + 1])
+            if ((distance == 0 and minimum_distance > 1e-6)
+                    or (distance < minimum_distance and not math.isclose(
+                        distance, minimum_distance, rel_tol=0.02, abs_tol=10,
+                    ))):
+                raise ValueError("Snapped route omits travel between requested locations")
             if "way_points" in segment and segment["way_points"] != waypoints[i:i + 2]:
                 raise ValueError("Inconsistent segment waypoints")
             path = coordinates[waypoints[i]:waypoints[i + 1] + 1]
