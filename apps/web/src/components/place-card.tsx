@@ -12,6 +12,40 @@ import type { Place, Recommendation } from "@astana/api-client";
 import { duration } from "@/lib/format";
 import { t, label, type Locale } from "@/lib/i18n";
 import { Sources, RouteNotes, Warnings } from "./details";
+import OsmAttribution from "./osm-attribution";
+
+const cardCopy = {
+  ru: {
+    evidence: "Условия и подтверждения",
+    distance: "Путь",
+    roundTrip: "туда и обратно",
+    oneWay: "в одну сторону",
+    estimate: "Время посещения — ориентир",
+    partial: "Есть неподтверждённые или невыполненные пожелания",
+    meters: "м",
+    kilometers: "км",
+  },
+  kk: {
+    evidence: "Талаптар мен дәлелдер",
+    distance: "Жол",
+    roundTrip: "барып-қайту",
+    oneWay: "бір бағытта",
+    estimate: "Бару уақыты шамамен берілген",
+    partial: "Кейбір қалаулар расталмаған немесе орындалмаған",
+    meters: "м",
+    kilometers: "км",
+  },
+  en: {
+    evidence: "Conditions and evidence",
+    distance: "Journey",
+    roundTrip: "round trip",
+    oneWay: "one way",
+    estimate: "Visit time is an estimate",
+    partial: "Some preferences are unverified or not met",
+    meters: "m",
+    kilometers: "km",
+  },
+};
 
 type Props = {
   place: Place;
@@ -39,6 +73,16 @@ export default function PlaceCard({
   onAdd,
   onSave,
 }: Props) {
+  const copy = cardCopy[locale];
+  const distance =
+    item &&
+    new Intl.NumberFormat(locale, {
+      maximumFractionDigits: item.route.distance_meters >= 1000 ? 1 : 0,
+    }).format(
+      item.route.distance_meters >= 1000
+        ? item.route.distance_meters / 1000
+        : item.route.distance_meters,
+    );
   return (
     <article
       className={`place-card ${active ? "active" : ""}`}
@@ -89,6 +133,14 @@ export default function PlaceCard({
               <b>{duration(item.visit_duration_seconds, locale)}</b>
             </div>
           </div>
+          <p className="walk-distance">
+            <Footprints size={15} aria-hidden="true" />
+            {copy.distance}: {distance}{" "}
+            {item.route.distance_meters >= 1000 ? copy.kilometers : copy.meters}
+            {" · "}
+            {item.route.includes_return ? copy.roundTrip : copy.oneWay}
+          </p>
+          <p className="small muted visit-estimate">{copy.estimate}</p>
           <span
             className={`badge ${item.route.method === "approximate" || !item.route.geometry ? "amber" : "green"}`}
           >
@@ -99,13 +151,19 @@ export default function PlaceCard({
                 : "approximate",
             )}
           </span>
+          <div className="why-summary">
+            <strong>{t(locale, "why")}</strong>
+            <p>{item.why}</p>
+          </div>
+          {item.constraint_evaluations.some(
+            (e) => e.outcome !== "satisfied",
+          ) && <p className="preference-caution">{copy.partial}</p>}
           <div className="activity">
             <span>{t(locale, "suggestion")}</span>
             <p>{item.suggested_activity}</p>
           </div>
           <details className="why">
-            <summary>{t(locale, "why")}</summary>
-            <p>{item.why}</p>
+            <summary>{copy.evidence}</summary>
             {item.constraint_evaluations.map((e) => (
               <div className="evaluation" key={e.key}>
                 <strong>{label(locale, e.key)}</strong>
@@ -137,6 +195,10 @@ export default function PlaceCard({
           <p className="catalog-description">{place.description}</p>
         )
       )}
+      {!place.is_synthetic &&
+        place.evidence.some(
+          (e) => e.source_type === "osm" && !e.is_synthetic,
+        ) && <OsmAttribution locale={locale} />}
       {place.facts.some((f) => f.status !== "known") && (
         <p className="small muted unknown-note">
           {t(locale, "unknown")}:{" "}

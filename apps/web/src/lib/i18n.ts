@@ -3,6 +3,75 @@ import type { RecommendationRequest } from "@astana/api-client";
 export type Locale = RecommendationRequest["locale"];
 export const locales: Locale[] = ["ru", "kk", "en"];
 const messages = {
+  discover: ["Карта", "Карта", "Discover"],
+  walk: ["Прогулка", "Серуен", "Walk"],
+  about: ["О проекте", "Жоба туралы", "About"],
+  eventPoint: ["Точка события", "Оқиға нүктесі", "Event point"],
+  eventPointChosen: [
+    "Точка события выбрана",
+    "Оқиға нүктесі таңдалды",
+    "Event point selected",
+  ],
+  chooseEventPoint: [
+    "Нажмите на карту в месте события",
+    "Оқиға орнын картадан басыңыз",
+    "Click the event location on the map",
+  ],
+  events: ["События", "Оқиғалар", "Events"],
+  quiet: ["Тихое место", "Тыныш орын", "Quiet place"],
+  has_power_outlets: ["Есть розетки", "Розеткалар бар", "Power outlets"],
+  art: ["Искусство", "Өнер", "Art"],
+  nightlife: ["Ночная жизнь", "Түнгі өмір", "Nightlife"],
+  event: ["Событие", "Оқиға", "Event"],
+  party: ["Компания", "Топ", "Together"],
+  navigation: ["Разделы приложения", "Қолданба бөлімдері", "App navigation"],
+  discoveryIntro: [
+    "Выберите точку старта на карте. Найдите место в каталоге или соберите прогулку под своё время.",
+    "Картадан бастау нүктесін таңдаңыз. Каталогтан орын табыңыз немесе уақытыңызға сай серуен құрыңыз.",
+    "Choose your start on the map. Explore the catalog or plan a walk that fits your time.",
+  ],
+  planWalk: ["Подобрать прогулку", "Серуен таңдау", "Plan a walk"],
+  chooseStart: [
+    "Нажмите на карту, где начнётся прогулка",
+    "Серуен басталатын жерді картадан басыңыз",
+    "Click the map where your walk begins",
+  ],
+  startChosen: [
+    "Точка старта выбрана",
+    "Бастау нүктесі таңдалды",
+    "Starting point selected",
+  ],
+  changeStart: ["Изменить точку", "Нүктені өзгерту", "Change start"],
+  manualOrigin: [
+    "Ввести координаты вручную",
+    "Координаттарды қолмен енгізу",
+    "Enter coordinates manually",
+  ],
+  manualOriginHint: [
+    "Если карта недоступна, введите широту и долготу.",
+    "Карта ашылмаса, ендік пен бойлықты енгізіңіз.",
+    "If the map is unavailable, enter latitude and longitude.",
+  ],
+  useEnteredStart: [
+    "Использовать эту точку",
+    "Осы нүктені пайдалану",
+    "Use this point",
+  ],
+  privacyTitle: [
+    "Данные и приватность",
+    "Деректер және құпиялылық",
+    "Data and privacy",
+  ],
+  privacyDetail: [
+    "Старт и пожелание используются для расчёта и остаются в памяти этой вкладки при переходе между разделами. В избранном сохраняются только названия и ID мест. Геолокация запрашивается только по вашей кнопке.",
+    "Бастау нүктесі мен қалауыңыз есептеуге қолданылады және бөлімдер арасында осы беттің жадында қалады. Таңдаулыларда тек орын атаулары мен ID сақталады. Геолокация тек батырманы басқанда сұралады.",
+    "Your start and request are used for planning and stay in this tab's memory across pages. Favorites store only place names and IDs. Location access is requested only when you press the button.",
+  ],
+  mapDataNotice: [
+    "Подложка карты загружается у выбранного поставщика: ему видны IP и область карты. Места, расписания и маршрут проверяются отдельно по источникам API; здания на карте не подтверждают доступность входа.",
+    "Карта қабаты таңдалған провайдерден жүктеледі: оған IP мен карта аймағы көрінеді. Орындар, кестелер және маршрут API дереккөздерімен бөлек тексеріледі; картадағы ғимарат кіреберістің қолжетімділігін растамайды.",
+    "The selected map provider receives your IP and viewed map area. Places, schedules and walking routes are checked separately against API sources; a mapped building does not establish entrance accessibility.",
+  ],
   tagline: [
     "Ваше время. Ваша Астана.",
     "Сіздің уақытыңыз. Сіздің Астанаңыз.",
@@ -191,9 +260,9 @@ const messages = {
   details: ["Факты и источники", "Фактілер мен дереккөздер", "Facts & sources"],
   why: ["Почему подходит", "Неліктен сәйкес келеді", "Why this fits"],
   suggestion: [
-    "Идея занятия · предложение ИИ",
-    "Не істеуге болады · ЖИ ұсынысы",
-    "Something to try · AI suggestion",
+    "Идея занятия · предложение",
+    "Не істеуге болады · ұсыныс",
+    "Something to try · suggestion",
   ],
   visit: ["Посещение ≈", "Баруға ≈", "Visit ≈"],
   travel: ["Дорога", "Жол", "Travel"],
@@ -293,6 +362,14 @@ const messages = {
   cafe: ["Кафе", "Кафе", "Café"],
   restaurant: ["Ресторан", "Мейрамхана", "Restaurant"],
   attraction: ["Достопримечательность", "Көрікті жер", "Attraction"],
+  library: ["Библиотека", "Кітапхана", "Library"],
+  garden: ["Сад", "Бақ", "Garden"],
+  playground: ["Игровая площадка", "Ойын алаңы", "Playground"],
+  theatre: ["Театр", "Театр", "Theatre"],
+  cinema: ["Кинотеатр", "Кинотеатр", "Cinema"],
+  arts_centre: ["Центр искусств", "Өнер орталығы", "Arts centre"],
+  gallery: ["Галерея", "Галерея", "Gallery"],
+  artwork: ["Произведение искусства", "Өнер туындысы", "Artwork"],
   mapIssue: [
     "Сообщить об ошибке карты",
     "Карта қатесін хабарлау",
@@ -459,4 +536,6 @@ export const constraintKeys = [
   "child_friendly",
   "free_entry",
   "open_at_requested_time",
+  "quiet",
+  "has_power_outlets",
 ] as const;

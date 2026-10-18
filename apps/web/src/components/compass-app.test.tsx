@@ -1,7 +1,14 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type {
+  IntentResponse,
   ItineraryRequest,
   ItineraryResponse,
   Place,
@@ -10,22 +17,97 @@ import type {
 import examples from "../../../../contracts.examples.json";
 import CompassApp from "./compass-app";
 import { locales, t } from "@/lib/i18n";
+import { intentText } from "@/lib/intent-copy";
+import { useSharedPlanner } from "@/lib/shared-planner";
 
-// Map rendering is independent of preset/constraint handling and needs WebGL.
-vi.mock("next/dynamic", () => ({ default: () => () => null }));
+const navigation = vi.hoisted(() => ({ pathname: "/walk" }));
+vi.mock("next/navigation", () => ({ usePathname: () => navigation.pathname }));
+// Exercise the planner/map boundary without a WebGL renderer in jsdom.
+vi.mock("next/dynamic", () => ({
+  default: () =>
+    function MapStub(props: {
+      enabled: boolean;
+      provider: string;
+      picking: boolean;
+      selectedIds: string[];
+      origin: { lat: number; lon: number } | null;
+      route: unknown;
+      onPick: (point: { lat: number; lon: number }) => void;
+    }) {
+      return (
+        <div
+          data-testid="map"
+          data-enabled={props.enabled}
+          data-provider={props.provider}
+          data-picking={props.picking}
+          data-selected={props.selectedIds.join(",")}
+          data-origin={JSON.stringify(props.origin)}
+          data-route={JSON.stringify(props.route)}
+        >
+          <button
+            type="button"
+            onClick={() => props.onPick({ lat: 51.09, lon: 71.42 })}
+          >
+            Map pick
+          </button>
+        </div>
+      );
+    },
+}));
 const dialogMethods = ["showModal", "close"] as const;
 const originalDialogMethods = dialogMethods.map((name) =>
   Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name),
 );
 afterEach(() => {
   cleanup();
+  navigation.pathname = "/walk";
+  localStorage.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   dialogMethods.forEach((name, index) => {
     const descriptor = originalDialogMethods[index];
-    if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
+    if (descriptor)
+      Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
     else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
   });
+});
+
+it("credits the live OSM catalogue on the data page when the map is disabled", async () => {
+  navigation.pathname = "/about";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      Response.json(
+        url.includes("/data-status")
+          ? {
+              total_places: 300,
+              checked_at: "2026-10-19T03:30:43+05:00",
+              sources: [
+                {
+                  source_name: "OpenStreetMap contributors (offline snapshot)",
+                  source_url: "https://www.openstreetmap.org/copyright",
+                  status: "ready",
+                  place_count: 300,
+                  last_success_at: "2026-10-19T03:30:43+05:00",
+                  warnings: [],
+                },
+              ],
+            }
+          : { places: [], next_cursor: null },
+        { headers: { "x-astana-data-mode": "live" } },
+      ),
+    ),
+  );
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures={false}
+      mapProvider="none"
+    />,
+  );
+  expect(await screen.findByRole("link", { name: "ODbL 1.0" })).toBeVisible();
+  expect(screen.getByTestId("map")).toHaveAttribute("data-provider", "none");
+  expect(screen.queryByText(t("ru", "fixtureBanner"))).not.toBeInTheDocument();
 });
 
 for (const [key, preset] of [
@@ -73,14 +155,7 @@ for (const [key, preset] of [
       );
       await user.click(screen.getByRole("button", { name: t("ru", preset) }));
       expect(constraint).toHaveValue(strength || "preferred");
-      await user.type(
-        screen.getByRole("spinbutton", { name: t("ru", "latitude") }),
-        "51.09",
-      );
-      await user.type(
-        screen.getByRole("spinbutton", { name: t("ru", "longitude") }),
-        "71.42",
-      );
+      await user.click(screen.getByRole("button", { name: "Map pick" }));
       await user.click(screen.getByRole("button", { name: t("ru", "find") }));
       await waitFor(() => expect(submitted).toBeDefined());
       expect(submitted?.constraints).toEqual(
@@ -168,7 +243,8 @@ for (const locale of locales) {
       },
     });
     const user = userEvent.setup();
-    const { container } = render(
+    navigation.pathname = "/";
+    const { container, rerender } = render(
       <CompassApp
         initialStart="2026-10-19T12:00"
         allowFixtures
@@ -179,6 +255,19 @@ for (const locale of locales) {
       screen.getByRole("combobox", { name: t("ru", "language") }),
       locale,
     );
+    for (const button of await screen.findAllByRole("button", {
+      name: t(locale, "add"),
+    }))
+      await user.click(button);
+    navigation.pathname = "/walk";
+    rerender(
+      <CompassApp
+        initialStart="2026-10-19T12:00"
+        allowFixtures
+        mapProvider="none"
+      />,
+    );
+    await user.click(screen.getByText(t(locale, "manualOrigin")));
     await user.type(
       screen.getByRole("textbox", { name: t(locale, "query") }),
       "Synthetic test",
@@ -195,10 +284,6 @@ for (const locale of locales) {
       screen.getByRole("combobox", { name: t(locale, "indoor") }),
       "preferred",
     );
-    for (const button of await screen.findAllByRole("button", {
-      name: t(locale, "add"),
-    }))
-      await user.click(button);
     await user.click(
       screen.getByRole("button", { name: t(locale, "buildPlan") }),
     );
@@ -240,3 +325,215 @@ for (const locale of locales) {
     );
   });
 }
+
+it("keeps the planner in memory across pages and isolates a group's map route", async () => {
+  const shared = structuredClone(
+    examples.cases.find((entry) => entry.name === "itinerary_valid")!.instance,
+  ) as ItineraryResponse;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({ places: shared.places, next_cursor: null }),
+    ),
+  );
+  function GroupBridge() {
+    const { currentRequest, setSharedItinerary, selectedPlaceIds } =
+      useSharedPlanner();
+    return (
+      <>
+        <button onClick={() => setSharedItinerary(shared)}>
+          Show group route
+        </button>
+        <output data-testid="request-snapshot">
+          {JSON.stringify(currentRequest())}
+        </output>
+        <output data-testid="local-selection">
+          {selectedPlaceIds.join(",")}
+        </output>
+      </>
+    );
+  }
+  const app = () => (
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    >
+      <GroupBridge />
+    </CompassApp>
+  );
+  const user = userEvent.setup();
+  navigation.pathname = "/";
+  const { rerender } = render(app());
+  expect(screen.getByTestId("map")).toHaveAttribute("data-enabled", "true");
+  expect(screen.getByTestId("map")).toHaveAttribute("data-picking", "true");
+  expect(
+    screen
+      .getByRole("spinbutton", { name: t("ru", "latitude") })
+      .closest("details"),
+  ).not.toHaveAttribute("open");
+  for (const href of ["/", "/walk", "/saved", "/party", "/events", "/about"]) {
+    expect(
+      within(screen.getByRole("navigation"))
+        .getAllByRole("link")
+        .some((link) => link.getAttribute("href") === href),
+    ).toBe(true);
+  }
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  expect(screen.getByTestId("map")).toHaveAttribute("data-picking", "false");
+  await user.click(
+    (await screen.findAllByRole("button", { name: t("ru", "add") }))[0],
+  );
+  navigation.pathname = "/walk";
+  rerender(app());
+  await user.type(
+    screen.getByRole("textbox", { name: t("ru", "query") }),
+    "Тихая прогулка",
+  );
+  await user.clear(
+    screen.getByRole("spinbutton", { name: t("ru", "timeBudget") }),
+  );
+  await user.type(
+    screen.getByRole("spinbutton", { name: t("ru", "timeBudget") }),
+    "45",
+  );
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: t("ru", "wheelchair_accessible") }),
+    "required",
+  );
+  const snapshot = JSON.parse(
+    screen.getByTestId("request-snapshot").textContent!,
+  );
+  expect(snapshot).toMatchObject({
+    origin: { lat: 51.09, lon: 71.42 },
+    query: "Тихая прогулка",
+    available_seconds: 2700,
+    constraints: [
+      { key: "wheelchair_accessible", value: true, strength: "required" },
+    ],
+  });
+  navigation.pathname = "/saved";
+  rerender(app());
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+    t("ru", "saved"),
+  );
+  expect(
+    screen.queryByRole("textbox", { name: t("ru", "query") }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByTestId("local-selection")).toHaveTextContent(
+    shared.places[0].id,
+  );
+  navigation.pathname = "/party";
+  rerender(app());
+  expect(screen.getByTestId("map")).toHaveAttribute("data-route", "null");
+  await user.click(screen.getByRole("button", { name: "Show group route" }));
+  expect(screen.getByTestId("map")).toHaveAttribute(
+    "data-route",
+    JSON.stringify(shared.route),
+  );
+  expect(screen.getByTestId("map")).toHaveAttribute(
+    "data-origin",
+    JSON.stringify(shared.request.origin),
+  );
+  navigation.pathname = "/walk";
+  rerender(app());
+  expect(screen.getByRole("textbox", { name: t("ru", "query") })).toHaveValue(
+    "Тихая прогулка",
+  );
+  expect(
+    screen.getByRole("spinbutton", { name: t("ru", "timeBudget") }),
+  ).toHaveValue(45);
+  expect(
+    screen.getByRole("combobox", { name: t("ru", "wheelchair_accessible") }),
+  ).toHaveValue("required");
+  expect(screen.getByTestId("map")).toHaveAttribute(
+    "data-origin",
+    JSON.stringify(snapshot.origin),
+  );
+  expect(screen.getByTestId("map")).toHaveAttribute("data-route", "null");
+  expect(
+    JSON.parse(screen.getByTestId("request-snapshot").textContent!),
+  ).toEqual(snapshot);
+  expect(localStorage.length).toBe(0);
+});
+
+it("applies reviewed intent without lowering must-haves or moving the origin", async () => {
+  const query = "30 минут у Байтерека, в помещении с розеткой";
+  const intent: IntentResponse = {
+    provider: "rules",
+    locale: "ru",
+    available_seconds: 1800,
+    time_evidence: "30 минут",
+    anchor_text: "Байтерека",
+    categories: ["cafe"],
+    constraints: [
+      {
+        constraint: { key: "indoor", value: true, strength: "preferred" },
+        source_quote: "в помещении",
+      },
+      {
+        constraint: {
+          key: "has_power_outlets",
+          value: true,
+          strength: "required",
+        },
+        source_quote: "с розеткой",
+      },
+    ],
+    clarification_questions: [],
+    warnings: [],
+  };
+  const fetcher = vi.fn(async (url: string) =>
+    url === "/api/v1/intent"
+      ? Response.json(intent)
+      : Response.json({ places: [], next_cursor: null }),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures={false}
+      mapProvider="none"
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  await user.type(
+    screen.getByRole("textbox", { name: t("ru", "query") }),
+    query,
+  );
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: t("ru", "indoor") }),
+    "required",
+  );
+  await user.click(
+    screen.getByRole("button", { name: intentText("ru", "analyze") }),
+  );
+  await screen.findByRole("button", { name: intentText("ru", "apply") });
+  expect(
+    screen.getByRole("spinbutton", { name: t("ru", "timeBudget") }),
+  ).toHaveValue(60);
+  expect(
+    screen.getByRole("combobox", { name: t("ru", "has_power_outlets") }),
+  ).toHaveValue("");
+  await user.click(screen.getByRole("checkbox", { name: /Применить время/ }));
+  await user.click(
+    screen.getByRole("button", { name: intentText("ru", "apply") }),
+  );
+  expect(
+    screen.getByRole("spinbutton", { name: t("ru", "timeBudget") }),
+  ).toHaveValue(30);
+  expect(screen.getByRole("combobox", { name: t("ru", "indoor") })).toHaveValue(
+    "required",
+  );
+  expect(
+    screen.getByRole("combobox", { name: t("ru", "has_power_outlets") }),
+  ).toHaveValue("required");
+  expect(screen.getByTestId("map")).toHaveAttribute(
+    "data-origin",
+    JSON.stringify({ lat: 51.09, lon: 71.42 }),
+  );
+  expect(fetcher.mock.calls.map(([url]) => url)).not.toContain(
+    "/api/v1/recommendations",
+  );
+});

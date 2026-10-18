@@ -1,11 +1,45 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { MapPin, Map as MapIcon, Compass } from "lucide-react";
-import type { Location, Place, RouteEstimate } from "@astana/api-client";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  MapPin,
+  Map as MapIcon,
+  LocateFixed,
+  RotateCcw,
+  Crosshair,
+  CarFront,
+} from "lucide-react";
+import type {
+  CommunityEvent,
+  Location,
+  Place,
+  RouteEstimate,
+  SharedLocation,
+  TrafficResponse,
+} from "@astana/api-client";
 import type { Map as LibreMap, Marker, GeoJSONSource } from "maplibre-gl";
-import { routeGeometry } from "@/lib/contracts";
 import { t, type Locale } from "@/lib/i18n";
+import { mapText } from "@/lib/map-copy";
+import {
+  ASTANA_VIEW,
+  BUILDING_LAYER,
+  basemapStyle,
+  installBuildings,
+  pickedLocation,
+  validatedRouteGeometry,
+  type MapProvider,
+} from "@/lib/map-style";
+import { startMapMotion, type MotionStatus } from "@/lib/map-motion";
+import { valid } from "@/lib/contracts";
+import {
+  fetchTraffic,
+  sampleVisibleRoads,
+  startTrafficLayer,
+  trafficText,
+  TrafficError,
+  TRAFFIC_REFRESH_MS,
+  type TrafficNotice,
+} from "@/lib/map-traffic";
 
 type Props = {
   places: Place[];
@@ -16,181 +50,331 @@ type Props = {
   locale: Locale;
   picking: boolean;
   enabled: boolean;
-  provider: "osm" | "none";
+  provider: MapProvider;
+  communityEvents?: CommunityEvent[];
+  sharedLocations?: SharedLocation[];
   onEnable: () => void;
   onPick: (point: Location) => void;
   onSelect: (id: string) => void;
 };
+
+type Camera = { center: [number, number]; zoom: number; bearing: number };
 
 export default function CityMap(props: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LibreMap | null>(null);
   const current = useRef(props);
   const markers = useRef<Marker[]>([]);
-  const [ready, setReady] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const camera = useRef<Camera | null>(null);
+  const mode = useRef(true);
+  const stopMotion = useRef<(() => void) | null>(null);
+  const stopTraffic = useRef<(() => void) | null>(null);
+  const trafficRequest = useRef<AbortController | null>(null);
+  const lastTrafficRequest = useRef(0);
+  const trafficCooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const [traffic, setTraffic] = useState<TrafficResponse | null>(null);
+  const [trafficNotice, setTrafficNotice] = useState<TrafficNotice | null>(
+    null,
+  );
+  const [trafficBusy, setTrafficBusy] = useState(false);
+  const [trafficCooldown, setTrafficCooldown] = useState(false);
+  const [status, setStatus] = useState<"loading" | "ready" | "failed">(
+    "loading",
+  );
+  const [transient, setTransient] = useState(false);
+  const [buildings, setBuildings] = useState(false);
+  const [threeD, setThreeD] = useState(true);
+  const [attempt, setAttempt] = useState(0);
+  const [picked, setPicked] = useState(false);
+  const [motionEnabled, setMotionEnabled] = useState(false);
+  const [motionStatus, setMotionStatus] = useState<MotionStatus>("empty");
+  const geometry = useMemo(
+    () => validatedRouteGeometry(props.route),
+    [props.route],
+  );
+  const ready = status === "ready";
+  const has3D = props.provider === "openfreemap" && buildings;
+  const is3D = has3D && threeD;
+  const text = (key: Parameters<typeof mapText>[1]) =>
+    mapText(props.locale, key);
+
   useEffect(() => {
     current.current = props;
   });
+
   useEffect(() => {
     if (!props.enabled || !container.current) return;
     let disposed = false;
+    let localMap: LibreMap | null = null;
+    let loadingTimer: ReturnType<typeof setTimeout> | undefined;
+    let observer: ResizeObserver | undefined;
     const host = container.current;
+    const clearLoadingTimer = () => {
+      if (loadingTimer) clearTimeout(loadingTimer);
+    };
     import("maplibre-gl")
       .then((lib) => {
         if (disposed) return;
         try {
-          setFailed(false);
+          setStatus("loading");
+          setTransient(false);
+          setBuildings(false);
           lib.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
           const map = new lib.Map({
             container: host,
-            center: [71.4305, 51.1283],
-            zoom: 12,
-            maxZoom: 19,
+            ...(camera.current ?? ASTANA_VIEW),
+            pitch:
+              props.provider === "openfreemap" && mode.current
+                ? ASTANA_VIEW.pitch
+                : 0,
+            minZoom: 3,
+            maxZoom: 20,
+            maxPitch: 70,
+            renderWorldCopies: false,
+            canvasContextAttributes: { antialias: true },
             attributionControl: false,
-            style: {
-              version: 8,
-              sources:
-                props.provider === "osm"
-                  ? {
-                      osm: {
-                        type: "raster",
-                        tiles: [
-                          "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-                        ],
-                        tileSize: 256,
-                        maxzoom: 19,
-                        attribution:
-                          '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
-                      },
-                    }
-                  : {},
-              layers: [
-                {
-                  id: "background",
-                  type: "background",
-                  paint: { "background-color": "#e5e9dd" },
-                },
-                ...(props.provider === "osm"
-                  ? [{ id: "basemap", type: "raster" as const, source: "osm" }]
-                  : []),
-              ],
-            },
+            style: basemapStyle(props.provider),
             locale: {
-              "NavigationControl.ZoomIn": t(props.locale, "mapZoomIn"),
-              "NavigationControl.ZoomOut": t(props.locale, "mapZoomOut"),
-              "NavigationControl.ResetBearing": t(props.locale, "mapNorth"),
+              "NavigationControl.ZoomIn": mapText(props.locale, "zoomIn"),
+              "NavigationControl.ZoomOut": mapText(props.locale, "zoomOut"),
+              "NavigationControl.ResetBearing": mapText(props.locale, "north"),
+              "AttributionControl.ToggleAttribution": mapText(
+                props.locale,
+                "attribution",
+              ),
+              "Popup.Close": mapText(props.locale, "closePopup"),
             },
           });
+          localMap = map;
           mapRef.current = map;
+          map
+            .getCanvas()
+            .setAttribute("aria-label", mapText(props.locale, "interactive"));
+          map
+            .getCanvas()
+            .setAttribute("aria-describedby", "map-keyboard-instructions");
           map.addControl(
-            new lib.NavigationControl({ showCompass: false }),
+            new lib.NavigationControl({
+              showCompass: true,
+              visualizePitch: true,
+            }),
             "top-right",
           );
           map.addControl(
-            new lib.AttributionControl({ compact: false }),
+            new lib.ScaleControl({ maxWidth: 100, unit: "metric" }),
+            "bottom-left",
+          );
+          map.addControl(
+            new lib.AttributionControl({ compact: true }),
             "bottom-right",
           );
+          loadingTimer = setTimeout(() => {
+            if (!disposed) setStatus("failed");
+          }, 18_000);
           map.on("load", () => {
             if (disposed) return;
-            map.addSource("journey", {
-              type: "geojson",
-              data: { type: "FeatureCollection", features: [] },
-            });
-            map.addLayer({
-              id: "journey-line",
-              type: "line",
-              source: "journey",
-              paint: { "line-color": "#146b54", "line-width": 5 },
-              layout: { "line-cap": "round", "line-join": "round" },
-            });
-            setReady(true);
+            clearLoadingTimer();
+            try {
+              setBuildings(
+                props.provider === "openfreemap" && installBuildings(map),
+              );
+              map.addSource("journey", {
+                type: "geojson",
+                data: { type: "FeatureCollection", features: [] },
+              });
+              map.addLayer({
+                id: "journey-line",
+                type: "line",
+                source: "journey",
+                paint: {
+                  "line-color": "#167a63",
+                  "line-width": 5,
+                  "line-opacity": 0.95,
+                },
+                layout: { "line-cap": "round", "line-join": "round" },
+              });
+              setStatus("ready");
+            } catch {
+              setStatus("failed");
+            }
           });
           map.on("error", () => {
-            if (!disposed) setFailed(true);
+            if (disposed) return;
+            // A missing tile/glyph must not replace an otherwise usable map with
+            // a full-screen failure. A missing root style cannot be rendered.
+            if (!map.getStyle()) {
+              clearLoadingTimer();
+              setStatus("failed");
+            } else setTransient(true);
+          });
+          map.on("webglcontextlost", () => {
+            if (!disposed) setStatus("failed");
+          });
+          map.on("webglcontextrestored", () => {
+            if (!disposed && map.isStyleLoaded()) setStatus("ready");
+          });
+          map.on("moveend", () => {
+            const center = map.getCenter();
+            camera.current = {
+              center: [center.lng, center.lat],
+              zoom: map.getZoom(),
+              bearing: map.getBearing(),
+            };
           });
           map.on("click", (event) => {
-            if (current.current.picking)
-              current.current.onPick({
-                lat: Number(event.lngLat.lat.toFixed(6)),
-                lon: Number(event.lngLat.lng.toFixed(6)),
-              });
+            if (!current.current.picking) return;
+            const point = pickedLocation(event.lngLat.lng, event.lngLat.lat);
+            if (point) {
+              setPicked(true);
+              current.current.onPick(point);
+            }
           });
-          const observer = new ResizeObserver(() => map.resize());
+          observer = new ResizeObserver(() => map.resize());
           observer.observe(host);
-          map.once("remove", () => observer.disconnect());
         } catch {
-          if (!disposed) setFailed(true);
+          clearLoadingTimer();
+          if (!disposed) setStatus("failed");
         }
       })
       .catch(() => {
-        if (!disposed) setFailed(true);
+        if (!disposed) setStatus("failed");
       });
     return () => {
       disposed = true;
+      clearLoadingTimer();
+      observer?.disconnect();
+      stopMotion.current?.();
+      stopMotion.current = null;
+      trafficRequest.current?.abort();
+      stopTraffic.current?.();
+      stopTraffic.current = null;
       markers.current.forEach((marker) => marker.remove());
-      mapRef.current?.remove();
-      mapRef.current = null;
-      setReady(false);
+      markers.current = [];
+      localMap?.remove();
+      if (mapRef.current === localMap) mapRef.current = null;
     };
-    // Locale changes rebuild the controls so their screen-reader labels stay translated.
-  }, [props.enabled, props.provider, props.locale]);
+    // Rebuilding translated native controls retains the user's camera.
+  }, [props.enabled, props.provider, props.locale, attempt]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!ready || !map) return;
     let disposed = false;
-    import("maplibre-gl").then((lib) => {
-      if (disposed) return;
-      markers.current.forEach((marker) => marker.remove());
-      const next: Marker[] = [];
-      props.places.forEach((place) => {
-        const button = document.createElement("button");
-        const index = props.selectedIds.indexOf(place.id);
-        button.className = `map-marker ${place.id === props.activeId ? "active" : ""} ${index >= 0 ? "selected" : ""}`;
-        button.type = "button";
-        button.textContent = index >= 0 ? String(index + 1) : "•";
-        button.setAttribute(
-          "aria-label",
-          `${t(props.locale, "showMap")}: ${place.name}`,
-        );
-        button.setAttribute(
-          "aria-pressed",
-          String(place.id === props.activeId),
-        );
-        button.onclick = (event) => {
-          event.stopPropagation();
-          current.current.onSelect(place.id);
-        };
-        next.push(
-          new lib.Marker({ element: button })
-            .setLngLat([place.location.lon, place.location.lat])
-            .addTo(map),
-        );
+    const expiryTimers: ReturnType<typeof setTimeout>[] = [];
+    import("maplibre-gl")
+      .then((lib) => {
+        if (disposed) return;
+        markers.current.forEach((marker) => marker.remove());
+        const next: Marker[] = [];
+        props.places.forEach((place) => {
+          const button = document.createElement("button");
+          const index = props.selectedIds.indexOf(place.id);
+          button.className = `map-marker ${place.id === props.activeId ? "active" : ""} ${index >= 0 ? "selected" : ""}`;
+          button.type = "button";
+          button.textContent = index >= 0 ? String(index + 1) : "•";
+          button.setAttribute(
+            "aria-label",
+            `${mapText(props.locale, "place")}: ${place.name}`,
+          );
+          button.setAttribute(
+            "aria-pressed",
+            String(place.id === props.activeId),
+          );
+          button.onclick = (event) => {
+            event.stopPropagation();
+            current.current.onSelect(place.id);
+          };
+          next.push(
+            new lib.Marker({ element: button })
+              .setLngLat([place.location.lon, place.location.lat])
+              .addTo(map),
+          );
+        });
+        if (props.origin) {
+          const element = document.createElement("div");
+          element.className = "origin-marker";
+          element.setAttribute("role", "img");
+          element.setAttribute("aria-label", mapText(props.locale, "start"));
+          next.push(
+            new lib.Marker({ element })
+              .setLngLat([props.origin.lon, props.origin.lat])
+              .addTo(map),
+          );
+        }
+        for (const event of props.communityEvents ?? []) {
+          const remaining = Date.parse(event.ends_at) - Date.now();
+          if (!valid("CommunityEvent", event) || remaining <= 0) continue;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "map-marker community-event-marker";
+          button.textContent = "◇";
+          button.setAttribute(
+            "aria-label",
+            `${mapText(props.locale, "community")}: ${event.title}`,
+          );
+          button.onclick = (click) => click.stopPropagation();
+          const content = document.createElement("div");
+          content.className = "map-community-popup";
+          for (const [tag, value] of [
+            ["strong", event.title],
+            ["p", mapText(props.locale, "community")],
+            ["p", event.description],
+          ]) {
+            const element = document.createElement(tag);
+            element.textContent = value;
+            content.append(element);
+          }
+          const marker = new lib.Marker({ element: button })
+            .setLngLat([event.location.lon, event.location.lat])
+            .setPopup(new lib.Popup({ offset: 24 }).setDOMContent(content))
+            .addTo(map);
+          next.push(marker);
+          if (remaining < 2_147_483_647)
+            expiryTimers.push(setTimeout(() => marker.remove(), remaining));
+        }
+        for (const shared of props.sharedLocations ?? []) {
+          const remaining = Date.parse(shared.expires_at) - Date.now();
+          if (!valid("SharedLocation", shared) || remaining <= 0) continue;
+          const element = document.createElement("div");
+          element.className = "map-marker shared-location-marker";
+          element.textContent = Array.from(shared.profile.name)[0] ?? "•";
+          element.setAttribute("role", "img");
+          element.setAttribute(
+            "aria-label",
+            `${mapText(props.locale, "shared")}: ${shared.profile.name}`,
+          );
+          element.title = `${mapText(props.locale, "shared")}: ${shared.profile.name}`;
+          element.onclick = (click) => click.stopPropagation();
+          const marker = new lib.Marker({ element })
+            .setLngLat([shared.coordinates.lon, shared.coordinates.lat])
+            .addTo(map);
+          next.push(marker);
+          // Do not retain a friend's position after its consent TTL, even when no
+          // subsequent network response or React rerender arrives.
+          expiryTimers.push(
+            setTimeout(
+              () => marker.remove(),
+              Math.min(remaining, 2_147_483_647),
+            ),
+          );
+        }
+        markers.current = next;
+        (map.getSource("journey") as GeoJSONSource | undefined)?.setData({
+          type: "FeatureCollection",
+          features: geometry
+            ? [{ type: "Feature", properties: {}, geometry }]
+            : [],
+        });
+      })
+      .catch(() => {
+        if (!disposed) setTransient(true);
       });
-      if (props.origin) {
-        const element = document.createElement("div");
-        element.className = "origin-marker";
-        element.setAttribute("role", "img");
-        element.setAttribute("aria-label", t(props.locale, "startMarker"));
-        next.push(
-          new lib.Marker({ element })
-            .setLngLat([props.origin.lon, props.origin.lat])
-            .addTo(map),
-        );
-      }
-      markers.current = next;
-      const geometry = routeGeometry(props.route);
-      (map.getSource("journey") as GeoJSONSource | undefined)?.setData({
-        type: "FeatureCollection",
-        features: geometry
-          ? [{ type: "Feature", properties: {}, geometry }]
-          : [],
-      });
-    });
     map.getCanvas().style.cursor = props.picking ? "crosshair" : "";
     return () => {
       disposed = true;
+      expiryTimers.forEach(clearTimeout);
     };
   }, [
     ready,
@@ -198,106 +382,434 @@ export default function CityMap(props: Props) {
     props.origin,
     props.activeId,
     props.selectedIds,
-    props.route,
+    geometry,
     props.locale,
     props.picking,
+    props.communityEvents,
+    props.sharedLocations,
   ]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!ready || !map) return;
-    const active = props.places.find((p) => p.id === props.activeId);
-    const point = active?.location ?? props.origin;
+    if (map.getLayer(BUILDING_LAYER))
+      map.setLayoutProperty(
+        BUILDING_LAYER,
+        "visibility",
+        is3D ? "visible" : "none",
+      );
+    map.easeTo({ pitch: is3D ? ASTANA_VIEW.pitch : 0, duration: 0 });
+  }, [ready, is3D]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map || !motionEnabled || props.provider !== "openfreemap")
+      return;
+    const stop = startMapMotion(map, setMotionStatus);
+    stopMotion.current = stop;
+    return () => {
+      stop();
+      if (stopMotion.current === stop) stopMotion.current = null;
+    };
+  }, [ready, motionEnabled, props.provider]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map || !traffic) return;
+    let active = true;
+    try {
+      const stop = startTrafficLayer(map, traffic, () => {
+        if (active) {
+          setTraffic(null);
+          setTrafficNotice("stale");
+        }
+      });
+      stopTraffic.current = stop;
+      return () => {
+        active = false;
+        stop();
+        if (stopTraffic.current === stop) stopTraffic.current = null;
+      };
+    } catch {
+      queueMicrotask(() => {
+        if (active) {
+          setTraffic(null);
+          setTrafficNotice("invalid");
+        }
+      });
+      return () => {
+        active = false;
+      };
+    }
+  }, [ready, traffic]);
+
+  useEffect(
+    () => () => {
+      trafficRequest.current?.abort();
+      stopTraffic.current?.();
+      if (trafficCooldownTimer.current)
+        clearTimeout(trafficCooldownTimer.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    const point =
+      props.places.find((place) => place.id === props.activeId)?.location ??
+      props.origin;
     if (point)
-      map.easeTo({ center: [point.lon, point.lat], zoom: 14, duration: 0 });
+      map.easeTo({
+        center: [point.lon, point.lat],
+        zoom: Math.max(map.getZoom(), ASTANA_VIEW.zoom),
+        duration: 0,
+      });
   }, [ready, props.activeId, props.origin, props.places]);
 
   useEffect(() => {
-    const geometry = routeGeometry(props.route);
     if (!ready || !mapRef.current || !geometry) return;
-    const xs = geometry.coordinates.map((point) => point[0]);
-    const ys = geometry.coordinates.map((point) => point[1]);
+    let west = Infinity,
+      south = Infinity,
+      east = -Infinity,
+      north = -Infinity;
+    for (const [lon, lat] of geometry.coordinates) {
+      west = Math.min(west, lon);
+      east = Math.max(east, lon);
+      south = Math.min(south, lat);
+      north = Math.max(north, lat);
+    }
     mapRef.current.fitBounds(
       [
-        [Math.min(...xs), Math.min(...ys)],
-        [Math.max(...xs), Math.max(...ys)],
+        [west, south],
+        [east, north],
       ],
       { padding: 65, maxZoom: 16, duration: 0 },
     );
-  }, [ready, props.route]);
+  }, [ready, geometry]);
+
+  function setDimension(value: boolean) {
+    mode.current = value;
+    setThreeD(value);
+    if (value && mapRef.current)
+      mapRef.current.easeTo({
+        zoom: Math.max(mapRef.current.getZoom(), ASTANA_VIEW.zoom),
+        duration: 0,
+      });
+  }
+  function confirmCentre() {
+    const center = mapRef.current?.getCenter();
+    const point = center && pickedLocation(center.lng, center.lat);
+    if (point && ready && props.picking) {
+      setPicked(true);
+      props.onPick(point);
+    }
+  }
+
+  async function loadTraffic() {
+    const map = mapRef.current;
+    if (!ready || !map || trafficRequest.current) return;
+    if (Date.now() - lastTrafficRequest.current < TRAFFIC_REFRESH_MS) {
+      setTrafficNotice("cooldown");
+      return;
+    }
+    let points: Location[];
+    try {
+      points = sampleVisibleRoads(map);
+    } catch {
+      points = [];
+    }
+    if (!points.length) {
+      setTrafficNotice("no_roads");
+      return;
+    }
+    const controller = new AbortController();
+    trafficRequest.current = controller;
+    lastTrafficRequest.current = Date.now();
+    setTrafficCooldown(true);
+    if (trafficCooldownTimer.current)
+      clearTimeout(trafficCooldownTimer.current);
+    trafficCooldownTimer.current = setTimeout(
+      () => setTrafficCooldown(false),
+      TRAFFIC_REFRESH_MS,
+    );
+    stopTraffic.current?.();
+    setTraffic(null);
+    setTrafficBusy(true);
+    setTrafficNotice("loading");
+    try {
+      const result = await fetchTraffic(points, controller.signal);
+      if (controller.signal.aborted) return;
+      setTrafficNotice(result.status);
+      if (result.status === "live" || result.status === "partial") {
+        stopMotion.current?.();
+        setMotionEnabled(false);
+        setTraffic(result);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted)
+        setTrafficNotice(
+          error instanceof TrafficError ? error.code : "unavailable",
+        );
+    } finally {
+      if (trafficRequest.current === controller) trafficRequest.current = null;
+      setTrafficBusy(false);
+    }
+  }
 
   return (
     <section
       className="map-panel"
       aria-labelledby="map-heading"
       data-testid="map-panel"
-      data-route-geometry={routeGeometry(props.route) ? "routed" : "none"}
+      data-route-geometry={geometry ? "routed" : "none"}
+      data-map-mode={is3D ? "3d" : "2d"}
+      data-map-status={status}
     >
       <div className="map-heading">
         <div>
           <p className="eyebrow">ASTANA / COMPASS</p>
-          <h2 id="map-heading">{t(props.locale, "map")}</h2>
-          <p>{t(props.locale, "mapHint")}</p>
+          <h2 id="map-heading">{text("title")}</h2>
+          <p>{text("hint")}</p>
         </div>
-        <Compass size={35} strokeWidth={1.3} aria-hidden="true" />
       </div>
-      <div
-        className={`map-canvas ${props.picking ? "picking" : ""}`}
-        ref={container}
-        role="region"
-        aria-label={t(props.locale, "map")}
-      />
-      {!props.enabled && (
-        <div className="map-cover">
-          <div className="map-orbit" aria-hidden="true">
-            <MapPin size={35} />
-          </div>
-          <p>
-            {t(
-              props.locale,
-              props.provider === "osm" ? "mapPrivacy" : "tilesOff",
+      <div className="map-viewport">
+        <div
+          className={`map-canvas ${props.picking ? "picking" : ""}`}
+          ref={container}
+          role="region"
+          aria-label={text("title")}
+        />
+        {props.enabled && (
+          <div
+            className="map-toolbar"
+            role="group"
+            aria-label={text("controls")}
+          >
+            <button
+              type="button"
+              className="map-tool"
+              data-testid="map-mode-2d"
+              aria-label={text("mode2d")}
+              aria-pressed={!is3D}
+              disabled={!ready}
+              onClick={() => setDimension(false)}
+            >
+              2D
+            </button>
+            <button
+              type="button"
+              className="map-tool"
+              data-testid="map-mode-3d"
+              aria-label={text("mode3d")}
+              aria-pressed={is3D}
+              disabled={!ready || !has3D}
+              title={!has3D ? text("no3d") : text("mode3d")}
+              onClick={() => setDimension(true)}
+            >
+              3D
+            </button>
+            <button
+              type="button"
+              className="map-tool"
+              data-testid="map-recenter"
+              aria-label={text("recenter")}
+              title={text("recenter")}
+              disabled={!ready}
+              onClick={() =>
+                mapRef.current?.easeTo({
+                  ...ASTANA_VIEW,
+                  pitch: is3D ? ASTANA_VIEW.pitch : 0,
+                  duration: 0,
+                })
+              }
+            >
+              <LocateFixed size={20} aria-hidden="true" />
+            </button>
+            {props.provider === "openfreemap" && (
+              <button
+                type="button"
+                className="map-tool map-motion-toggle"
+                data-testid="map-motion-toggle"
+                aria-pressed={motionEnabled}
+                disabled={!ready || traffic !== null}
+                onClick={() => setMotionEnabled((value) => !value)}
+              >
+                {text("motion")}
+              </button>
             )}
-          </p>
-          <button type="button" className="secondary" onClick={props.onEnable}>
-            <MapIcon size={18} />
-            {t(props.locale, "loadMap")}
-          </button>
-        </div>
-      )}
-      {props.picking && (
-        <p className="map-callout" role="status">
-          {t(props.locale, "picking")}
-        </p>
-      )}
-      {failed && (
-        <p className="map-callout bottom" role="status">
-          {t(props.locale, "mapUnavailable")}
-        </p>
-      )}
-      {props.enabled && props.provider === "none" && (
-        <span className="map-no-tiles">{t(props.locale, "tilesOff")}</span>
-      )}
+            {props.provider === "openfreemap" && (
+              <>
+                <button
+                  type="button"
+                  className="map-tool map-traffic-toggle"
+                  data-testid="map-traffic-toggle"
+                  aria-pressed={traffic !== null}
+                  disabled={
+                    !ready || trafficBusy || (!traffic && trafficCooldown)
+                  }
+                  title={
+                    trafficCooldown && !traffic
+                      ? trafficText(props.locale, "cooldown")
+                      : undefined
+                  }
+                  onClick={() => {
+                    if (traffic) {
+                      stopTraffic.current?.();
+                      setTraffic(null);
+                      setTrafficNotice(null);
+                    } else void loadTraffic();
+                  }}
+                >
+                  <CarFront size={18} aria-hidden="true" />
+                  {trafficText(props.locale, traffic ? "hide" : "action")}
+                </button>
+                {traffic && (
+                  <button
+                    type="button"
+                    className="map-tool"
+                    aria-label={trafficText(props.locale, "refresh")}
+                    title={trafficText(
+                      props.locale,
+                      trafficCooldown ? "cooldown" : "refresh",
+                    )}
+                    disabled={trafficBusy || trafficCooldown}
+                    onClick={() => void loadTraffic()}
+                  >
+                    <RotateCcw size={18} />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+        {!props.enabled && (
+          <div className="map-cover">
+            <div className="map-orbit" aria-hidden="true">
+              <MapPin size={35} />
+            </div>
+            <p>{text(props.provider === "none" ? "offline" : "privacy")}</p>
+            <button
+              type="button"
+              className="secondary"
+              onClick={props.onEnable}
+            >
+              <MapIcon size={18} aria-hidden="true" />
+              {text("load")}
+            </button>
+          </div>
+        )}
+        {props.enabled && status === "loading" && (
+          <div className="map-cover map-loading" role="status">
+            <MapIcon size={28} aria-hidden="true" />
+            <p>{text("loading")}</p>
+          </div>
+        )}
+        {props.enabled && status === "failed" && (
+          <div className="map-cover map-failure" role="status">
+            <MapIcon size={28} aria-hidden="true" />
+            <p>{text("failed")}</p>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setAttempt((value) => value + 1)}
+            >
+              <RotateCcw size={18} aria-hidden="true" />
+              {text("retry")}
+            </button>
+          </div>
+        )}
+        {props.enabled && ready && transient && (
+          <div className="map-status" role="status">
+            <p>{text("transient")}</p>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => setAttempt((value) => value + 1)}
+            >
+              {text("retry")}
+            </button>
+          </div>
+        )}
+        {props.enabled && ready && props.picking && (
+          <>
+            <span className="map-center-crosshair" aria-hidden="true">
+              <Crosshair size={26} />
+            </span>
+            <div className="map-pick-panel" role="status">
+              <p>{text("picking")}</p>
+              <p id="map-keyboard-instructions">{text("keyboard")}</p>
+              <button
+                type="button"
+                className="secondary"
+                data-testid="map-confirm-origin"
+                onClick={confirmCentre}
+              >
+                {text("confirm")}
+              </button>
+            </div>
+          </>
+        )}
+        {(!props.enabled || !ready || !props.picking) && (
+          <span id="map-keyboard-instructions" className="sr-only">
+            {text("keyboard")}
+          </span>
+        )}
+      </div>
       <div className="map-footer">
-        <span>
-          <i className="legend-dot" />
-          {t(props.locale, "startMarker")}
-        </span>
-        {props.route && (
-          <span>
-            {t(
-              props.locale,
-              routeGeometry(props.route) ? "routed" : "approximate",
+        {trafficNotice && (
+          <span
+            className="map-traffic-notice"
+            role="status"
+            data-testid="map-traffic-notice"
+          >
+            {trafficText(props.locale, trafficNotice)}
+            {traffic && (
+              <>
+                <span className="traffic-attribution">
+                  {" "}
+                  · {traffic.attribution}
+                </span>
+                <small>{trafficText(props.locale, "illustration")}</small>
+                <small>{trafficText(props.locale, "colors")}</small>
+              </>
             )}
           </span>
         )}
-        {props.provider === "osm" && (
-          <a
-            href="https://www.openstreetmap.org/fixthemap"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {t(props.locale, "mapIssue")}
-          </a>
+        <span>
+          <i className="legend-dot" />
+          {picked && !props.picking ? text("selected") : text("start")}
+        </span>
+        {props.route && (
+          <span>{t(props.locale, geometry ? "routed" : "approximate")}</span>
+        )}
+        {props.provider === "openfreemap" && (
+          <span className="map-height-note">{text("heights")}</span>
+        )}
+        {motionEnabled && props.provider === "openfreemap" && (
+          <span className="map-motion-status" role="status">
+            <span className="motion-car">{text("cars")}</span> ·{" "}
+            <span className="motion-walker">{text("walkers")}</span> ·{" "}
+            {text("simulation")}{" "}
+            {motionStatus !== "running" &&
+              text(motionStatus === "paused" ? "motionPaused" : "motionEmpty")}
+          </span>
+        )}
+        {props.enabled && props.provider === "none" && (
+          <span>{text("offline")}</span>
+        )}
+        {props.provider !== "none" && (
+          <details className="map-privacy">
+            <summary>{text("privacyLabel")}</summary>
+            <p>{text("privacy")}</p>
+            <a
+              href="https://www.openstreetmap.org/fixthemap"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {text("issue")}
+            </a>
+          </details>
         )}
       </div>
     </section>

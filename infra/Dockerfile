@@ -8,11 +8,12 @@ ENV UV_PYTHON_DOWNLOADS=never \
     UV_COMPILE_BYTECODE=1
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-# Copy the complete workspace: contracts, recommender, ai_providers, API, and
-# subsequently merged packages registered in the canonical root manifest.
+# Copy the complete registered workspace, including city_data and retrieval.
 COPY packages ./packages
 COPY services ./services
 RUN uv sync --locked --all-packages --no-dev --no-editable
+# Detect omitted workspace/dependency registration before producing an image.
+RUN /opt/venv/bin/python -c "from astana_city_data import create_repository; from astana_retrieval import create_retriever; from astana_city_context import create_context"
 
 FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS runtime
 ENV PATH=/opt/venv/bin:$PATH \
@@ -23,6 +24,8 @@ ENV PATH=/opt/venv/bin:$PATH \
 RUN groupadd --gid 10001 astana && useradd --uid 10001 --gid 10001 --no-create-home astana
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
+# No source snapshot is baked into the runtime. Live deployments must explicitly
+# mount a validated file and set ASTANA_POI_PATH; fixture remains an explicit mode.
 USER 10001:10001
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=4 \

@@ -7,9 +7,11 @@ members = [
     "astana-ai-providers",
     "astana-api",
     "astana-city-context",
+    "astana-city-data",
     "astana-compass",
     "astana-contracts",
     "astana-recommender",
+    "astana-retrieval",
 ]
 
 [[package]]
@@ -85,8 +87,10 @@ source = { editable = "services/api" }
 dependencies = [
     { name = "astana-ai-providers" },
     { name = "astana-city-context" },
+    { name = "astana-city-data" },
     { name = "astana-contracts" },
     { name = "astana-recommender" },
+    { name = "astana-retrieval" },
     { name = "fastapi" },
     { name = "uvicorn" },
 ]
@@ -95,8 +99,10 @@ dependencies = [
 requires-dist = [
     { name = "astana-ai-providers", editable = "packages/ai_providers" },
     { name = "astana-city-context", editable = "packages/city_context" },
+    { name = "astana-city-data", editable = "packages/city_data" },
     { name = "astana-contracts", editable = "packages/contracts" },
     { name = "astana-recommender", editable = "packages/recommender" },
+    { name = "astana-retrieval", editable = "packages/retrieval" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "uvicorn", specifier = ">=0.34,<1" },
 ]
@@ -126,6 +132,21 @@ requires-dist = [
 provides-extras = ["test"]
 
 [[package]]
+name = "astana-city-data"
+version = "0.1.0"
+source = { editable = "packages/city_data" }
+dependencies = [
+    { name = "astana-contracts" },
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "astana-contracts", editable = "packages/contracts" },
+    { name = "httpx", specifier = ">=0.28,<1" },
+]
+
+[[package]]
 name = "astana-compass"
 version = "0.1.0"
 source = { virtual = "." }
@@ -133,8 +154,10 @@ dependencies = [
     { name = "astana-ai-providers" },
     { name = "astana-api" },
     { name = "astana-city-context" },
+    { name = "astana-city-data" },
     { name = "astana-contracts" },
     { name = "astana-recommender" },
+    { name = "astana-retrieval" },
 ]
 
 [package.dev-dependencies]
@@ -150,8 +173,10 @@ requires-dist = [
     { name = "astana-ai-providers", editable = "packages/ai_providers" },
     { name = "astana-api", editable = "services/api" },
     { name = "astana-city-context", editable = "packages/city_context" },
+    { name = "astana-city-data", editable = "packages/city_data" },
     { name = "astana-contracts", editable = "packages/contracts" },
     { name = "astana-recommender", editable = "packages/recommender" },
+    { name = "astana-retrieval", editable = "packages/retrieval" },
 ]
 
 [package.metadata.requires-dev]
@@ -192,6 +217,17 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8,<10" },
 ]
 provides-extras = ["test"]
+
+[[package]]
+name = "astana-retrieval"
+version = "0.1.0"
+source = { editable = "packages/retrieval" }
+dependencies = [
+    { name = "astana-contracts" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "astana-contracts", editable = "packages/contracts" }]
 
 [[package]]
 name = "attrs"

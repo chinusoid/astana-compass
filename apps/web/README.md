@@ -1,71 +1,171 @@
-# Astana Compass web · Team 03
+# Astana Compass web
 
-Next.js App Router / TypeScript / Tailwind / MapLibre frontend for the existing
-foundation API. No registration, browser provider keys, generated city facts, or
-replacement backend. Public types are imported from `@astana/api-client` and
-network JSON is checked against the canonical root `contracts.schema.json`.
+Многостраничный интерфейс городского помощника: карта Астаны занимает основную
+область экрана, форма и результаты доступны в прокручиваемой боковой панели.
+На телефоне — карта, нижняя панель содержимого и навигация. Это браузерное
+приложение на Next.js, TypeScript и MapLibre; native-приложение, установка как
+PWA и полная работа без сети не заявлены.
 
-## Reproduce
+Публичные DTO импортируются из `@astana/api-client`. JSON проверяется по
+канонической `contracts.schema.json`, а ссылки на места, источники и порядок
+остановок — дополнительными проверками целостности.
 
-Use Node >=22.12 and pnpm 11.25.0. Exact versions and the **module-local** lock
-are in this directory; the repository's Python workspace and root lock are unchanged.
+## Шесть разделов
 
-Start the foundation from the repository root:
+| Адрес     | Что доступно                                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------------------------------ |
+| `/`       | Каталог, выбор старта кликом на карте, переход к подбору                                                           |
+| `/walk`   | Пожелание, время, required/preferred, проверяемый разбор текста, рекомендации и личный маршрут                     |
+| `/saved`  | Локальное избранное с удалением; сохраняются ID, название и synthetic-метка                                        |
+| `/party`  | Гостевой профиль, дружба и приглашения, компания до 5 человек, общий план, чат, фото и добровольная передача точки |
+| `/events` | Публикации сообщества на карте, создание и удаление собственных событий                                            |
+| `/about`  | Источники, режим API, приватность и ограничения данных                                                             |
+
+Форма личной прогулки сохраняется в памяти вкладки при переходах. Она не является
+постоянным сохранённым планом. Языки интерфейса — RU, ҚАЗ и EN; тексты источников
+не переводятся автоматически с выдумыванием фактов.
+
+## Локальный запуск
+
+Зафиксированные инструменты CI: Node 24.19.0 и pnpm 11.25.0. У frontend собственный
+`pnpm-lock.yaml` в `apps/web`; устанавливайте пакет из этой папки, сохраняя весь
+checkout для локальной зависимости `../../packages/api_client`.
+
+В корне репозитория запустить API:
 
 ```sh
-uv sync --locked
-ASTANA_MODE=fixture LLM_PROVIDER=none uv run uvicorn astana_api.app:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log
+uv sync --locked --all-packages
+ASTANA_MODE=fixture LLM_PROVIDER=none uv run --locked uvicorn astana_api.app:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
-In another terminal:
+В другом терминале:
 
 ```sh
 cd apps/web
 pnpm install --frozen-lockfile
-ASTANA_ALLOW_FIXTURES=true pnpm dev
+ASTANA_ALLOW_FIXTURES=true ASTANA_MAP_PROVIDER=openfreemap pnpm dev
 ```
 
-Open http://127.0.0.1:3000. Explicit synthetic demo: query `Прогулка без спешки`,
-latitude `51.090`, longitude `71.420`, 90 minutes, return enabled. These are the
-foundation's **synthetic** places; they do not prove real venue data or live routing.
-Choose two alternatives, then calculate the complete itinerary. Required wheelchair
-access demonstrates `no_match` because the fixture does not verify that property.
+Открыть [локальное приложение](http://127.0.0.1:3000). Если порт API занят,
+выберите другой `--port`, а frontend запустите с соответствующим
+`ASTANA_API_URL=http://127.0.0.1:18081`.
 
-For production compilation and local preview:
+В fixture-режиме API выдаёт **три синтетических места**. Для воспроизводимого
+сценария используйте запасной ручной старт `51.090, 71.420`, 90 минут и возврат.
+Реальная OpenFreeMap-подложка не превращает эти карточки в реальные POI и не
+подтверждает часы работы или пешеходный маршрут. Обязательная доступность для
+коляски демонстрирует отсутствие результата, когда этот факт неизвестен.
+
+Сборка и локальная проверка production-версии:
 
 ```sh
 pnpm build
-ASTANA_ALLOW_FIXTURES=true pnpm start
+ASTANA_ALLOW_FIXTURES=true ASTANA_MAP_PROVIDER=openfreemap pnpm start
 ```
 
-`build` and `dev` use the supported Webpack compiler because Turbopack's helper
-process cannot bind its local port in the evaluation environment. MapLibre 6's
-worker **and its shared module** are copied from the pinned package before
-dev/build/start, served from this app, and excluded from Git. Deploy `public/`
-alongside `.next/` and the normal Next runtime. No executable CDN dependency.
+`dev`/`build` используют Webpack. Перед `dev`/`build`/`start` MapLibre worker и
+его shared module копируются из закреплённой npm-зависимости в `public/`.
+Они не исполняются с внешнего CDN. Для запуска собранного приложения нужны
+обычный Next runtime, `.next/`, `public/` и установленные зависимости.
 
-## Runtime configuration
+## Конфигурация и доступ с телефона
 
-| Server environment variable | Default | Purpose |
-| --- | --- | --- |
-| `ASTANA_API_URL` | `http://127.0.0.1:8000` | Backend origin only, no userinfo, path, query, or API key |
-| `ASTANA_ALLOW_FIXTURES` | `false` | Explicitly permit synthetic API payloads and show the demo banner |
-| `ASTANA_MAP_PROVIDER` | `osm` | `osm` offers raster tiles after the user opens the map; `none` sends no external tile requests |
+| Переменная окружения Next server | Значение по умолчанию   | Назначение                                                              |
+| -------------------------------- | ----------------------- | ----------------------------------------------------------------------- |
+| `ASTANA_API_URL`                 | `http://127.0.0.1:8000` | Origin Python API без credentials, пути и query                         |
+| `ASTANA_ALLOW_FIXTURES`          | `false`                 | Разрешить synthetic payload и показать постоянную маркировку            |
+| `ASTANA_MAP_PROVIDER`            | `openfreemap`           | Векторная подложка/3D; `osm` — растровая; `none` — без внешней подложки |
 
-These are server configuration values, not `NEXT_PUBLIC_*` secrets. The browser
-uses same-origin `/api/v1/*`; a limited Next route forwards to the configured
-foundation. Only the six supported resource paths are forwarded. No credentials,
-cookies or client-provided upstream URL are forwarded. The body cap is 32 KiB;
-upstream timeout 32 seconds; browser timeout 35 seconds; no automatic retry of
-POSTs. API responses are not cached. Favorites store only name, ID and synthetic
-marker; delete-one/delete-all are available. Query and origin are kept in memory.
+`.env.example` — образец. Next читает поддерживаемые `.env*` файлы в `apps/web`,
+но копирование этого файла не настраивает окружение Python-процесса. Для команд
+выше значения передаются явно. Provider keys задаются **только Python API**:
+`TOMTOM_API_KEY` для дорожного потока, настройки OpenAI/NVIDIA для hosted AI.
+Не вставляйте их в `NEXT_PUBLIC_*`, браузер, чат или frontend bundle.
 
-Live use: start the backend with `ASTANA_MODE=live`, install/configure the three
-documented team factories, keep `ASTANA_ALLOW_FIXTURES=false`, and set
-`ASTANA_API_URL` to that backend. A missing live implementation produces an explicit
-unavailable state. The frontend never substitutes a synthetic catalog.
+По умолчанию скрипт слушает loopback — другой телефон его не видит. Для проверки
+на устройстве нужен доступный HTTPS-origin с доверенным сертификатом и reverse
+proxy к локальному frontend. Это отдельная настройка размещения, здесь она не
+выполняется автоматически. `localhost` на телефоне означает сам телефон.
+Геолокация и часть browser API требуют secure context: обычный HTTP по LAN-IP
+не гарантирует их работу. `input capture="environment"` лишь просит браузер
+открыть заднюю камеру; конкретный диалог камеры/файлов зависит от устройства.
 
-## Checks
+## Что означает карта
+
+По умолчанию предлагается OpenFreeMap Liberty без ключа. Пользователь включает
+загрузку подложки; поставщик видит IP и область карты. Кнопки 2D/3D, масштаб,
+компас и выбор старта работают независимо от геолокации. Высоты зданий
+ориентировочные, взяты из источника; отсутствие высоты не заменяется выдуманной.
+
+Два отдельных режима движения:
+
+- **Демо движения** — локальная симуляция на загруженных дорогах и тропинках,
+  выключенная по умолчанию. Она ничего не сообщает о настоящем трафике.
+- **Реальные пробки** — явный запрос к Python API, до 6 участков публичных дорог
+  в видимой области Астаны. Нужен `TOMTOM_API_KEY` на сервере. Без него появляется
+  `not_configured`, без подмены симуляцией. Цвет основан на отношении текущей
+  скорости к свободному потоку; точки — условная плотность, **не реальные машины
+  и не их количество**. Обновление по кнопке не чаще минуты, устаревший слой
+  удаляется через 90 секунд от времени получения данных сервером. Покрытие
+  выборочное, не все дороги города. При live-слое декоративная симуляция выключена.
+
+Пешая линия рисуется только для проверенного `method=routed` с геометрией.
+Approximate показывает ограничения и точки, без выдуманной прямой линии маршрута.
+Подробности и источники — в [документе о карте](../../docs/ux/maps.md).
+
+## Разбор пожеланий и честные рекомендации
+
+Кнопка разбора текста предлагает время и условия с цитатами из запроса.
+Пользователь проверяет предложения и применяет их явно; обязательные условия
+не ослабляются. Текстовый ориентир требует подтверждения точки на карте.
+Категории и уточняющие вопросы не являются фактами о местах или автоматической
+геокодировкой. Без настроенной hosted-модели используются явно обозначенные
+локальные правила. OpenAI/NVIDIA не вызываются только потому, что открыт экран.
+
+Подбор учитывает выбранный старт, время начала по `Asia/Almaty`, общий бюджет,
+возвращение и required/preferred. В карточке видны «почему», посещение и дорога
+отдельно, неопределённость и источники. Точность реальных POI, расписаний,
+маршрутизации и объяснений зависит от серверных adapters и данных. Нет обещаний
+обученной нами модели, подтверждённой безопасности или live-AI без ключей.
+
+## Компания, фото и приватность
+
+Профиль гостевой, до 24 часов. Сервер хранит временные компании, дружбу, чат,
+фото, события и маршруты в памяти; перезапуск их удаляет. Это не постоянная
+учётная запись, защищённый мессенджер или долговременное хранилище. Код дружбы
+нужно передать знакомому, затем принять запрос и приглашение в компанию.
+Групповой подбор берёт самый короткий бюджет и все совместимые обязательные
+условия. В общем маршруте 1–3 выбранные остановки; изменение условий инвалидирует
+старый расчёт. Состояние обновляется раз в 3 секунды, пока вкладка видима.
+
+Чат сохраняет последние 50 сообщений, до 1000 символов каждое, и до 6 фото.
+«Прикрепить фото» сохраняет выбор галереи/файла; «Снять фото» использует отдельный
+file input с `capture=environment`. Обе кнопки ведут к одному preview: JPEG,
+PNG или WebP до 8 МБ декодируются в новый canvas, уменьшаются и кодируются в JPEG
+без исходных EXIF/IPTC. Передаётся только полученная миниатюра в пределах 24 000
+символов data URI, после отдельного нажатия «Отправить». Доступны удаление preview
+и отказ от отправки; исходный файл не загружается на сервер.
+
+Передача геопозиции отдельная: кнопка запрашивает **одну точку**, видимую только
+текущей компании до 15 минут. Нет фонового `watchPosition`. Ожидающий запрос можно
+отменить; опубликованную точку — убрать кнопкой остановки. Карта скрывает её по
+сроку даже без очередного ответа сервера. Удаление не отменяет того, что другие
+участники уже увидели. Выход удаляет гостевой профиль.
+
+Social proxy держит bearer-токен в HttpOnly same-site cookie и не отдаёт его
+JavaScript. Браузер обращается к ограниченным same-origin API routes; provider
+keys и произвольные upstream URL не принимаются от клиента. Не публикуйте
+чувствительные сведения в группе или событиях.
+
+## События сообщества
+
+Событие содержит текст, выбранную точку и время начала/конца по Астане. Его
+может создать гостевой профиль, удалить — автор. Публикации видны в отдельном
+разделе и отмечены **«не проверено»**. Они не превращаются автоматически в
+подтверждённые POI, факт расписания или рекомендацию. Истёкшее событие убирается
+с карты; отсутствие редакционной проверки прямо обозначено.
+
+## Проверки
 
 ```sh
 pnpm typecheck
@@ -74,61 +174,13 @@ pnpm test
 pnpm build
 ```
 
-With the actual foundation fixture API running at port 8000:
+Browser E2E выполняет отдельный GitHub CI job с fixture API, `ASTANA_MAP_PROVIDER=none`
+и Chromium, соответствующим locked Playwright. Он запускает временные frontend
+на 43103 и 43104. Python replay использует `ASTANA_E2E_PYTHON` из root uv environment,
+без платных моделей. Команды и ограничения интеграции описаны в
+[FRONTEND-INTEGRATION.md](../../docs/operations/FRONTEND-INTEGRATION.md).
 
-```sh
-pnpm exec playwright install chromium
-pnpm test:e2e
-```
-
-Alternatively set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to an installed Chromium path.
-Set `ASTANA_E2E_PYTHON` to the Python executable of the root uv environment
-(normally `../../.venv/bin/python` when running from `apps/web`). It is used only
-by model-failure tests: real public generator/recommender code consumes a mocked
-provider response and synthetic replay adapters; no paid model call is made.
-Browser tests start disposable frontend servers at 43103 (fixtures permitted) and
-43104 (fixtures forbidden); existing servers are never reused or stopped.
-`ASTANA_API_URL` overrides the fixture backend origin. On this machine Chromium
-must run outside the restricted command sandbox, with a disposable profile, as
-documented by the parent AGENTS.md.
-
-Set `ASTANA_SCREENSHOT_DIR` to an artifact directory to capture real RU/KK/EN
-desktop and mobile screenshots. Failure screenshots/traces and HTML reports stay
-in ignored `test-results/` and `playwright-report/`. Do not commit binary sets.
-
-Live smoke is a separate opt-in command:
-
-```sh
-ASTANA_LIVE_WEB_URL=http://127.0.0.1:3105 pnpm test:live
-```
-
-Without that environment variable it is explicitly skipped. A successful synthetic
-suite says nothing about live POI truth, external routes or inference credentials.
-
-## Behavior and limits
-
-- Manual coordinates always work. Location permission is requested only on click;
-  a late geolocation result cannot overwrite a newer manual selection.
-- Constraints are explicit true-valued predicates. Required is never weakened;
-  preferred violations/unknowns retain explanations. Free text is not advertised
-  as automatic hard-constraint extraction.
-- Recommendation alternatives are separate trips. Only the selected ordered IDs
-  are sent to the itinerary endpoint; 1–3 stops. Failed/no-match/reordered responses
-  never replace that selection or produce a truncated success.
-- Editing time, origin, locale or constraints cancels stale requests and clears the
-  previous result/route. Selection remains editable. Reordering is an explicit action.
-- API seconds remain integers. Display includes remaining seconds; city date/time
-  uses `Asia/Almaty` independently of the browser timezone.
-- A line is drawn only for `method=routed` with non-null geometry. Approximate or
-  absent geometry shows points and a limitation, never a straight-line walking path.
-- Sources, retrieval dates, unknown/conflicting facts and AI activity suggestions
-  remain distinct. Model fallback warnings are preserved. The current API only has
-  human-readable warnings, so a small known-message recognizer adds a friendly
-  fallback label without hiding the original message.
-- Weather, training claims, model selectors, unsupported transport controls and
-  account features are absent because the accepted API does not support them.
-- Local favorites are implemented; durable saved plans and feedback storage are
-  not claimed. The foundation's feedback queue is in memory and lost on restart.
-
-See `docs/ux/TEAM-03-UX.md`, `docs/ux/TEAM-03-VERIFICATION.md`,
-`docs/pitch/TEAM-03-DEFENSE.md` and `docs/requests/team-03-frontend-integration.md`.
+Результат проверок зависит от конкретного checkout. Успешные synthetic-тесты не
+подтверждают реальную точность POI, live-трафик, hosted AI, камеру телефона или
+маршрут провайдера. Сценарии демонстрации и критерии — в
+[judging-demo.md](../../docs/ux/judging-demo.md).

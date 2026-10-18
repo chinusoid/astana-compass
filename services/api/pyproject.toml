@@ -7,7 +7,7 @@ name = "astana-api"
 version = "0.1.0"
 description = "Validated HTTP composition layer for Astana Compass"
 requires-python = ">=3.12,<3.15"
-dependencies = ["astana-contracts>=0.1.0,<0.2", "astana-recommender>=0.1.0,<0.2", "astana-ai-providers>=0.1.0,<0.2", "astana-city-context>=0.1.0,<0.2", "fastapi>=0.115,<1", "uvicorn>=0.34,<1"]
+dependencies = ["astana-contracts>=0.1.0,<0.2", "astana-recommender>=0.1.0,<0.2", "astana-ai-providers>=0.1.0,<0.2", "astana-city-context>=0.1.0,<0.2", "astana-city-data>=0.1.0,<0.2", "astana-retrieval>=0.1.0,<0.2", "fastapi>=0.115,<1", "uvicorn>=0.34,<1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/astana_api"]

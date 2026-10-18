@@ -12,7 +12,7 @@
     "build": "node scripts/prepare-map.mjs && next build --webpack",
     "start": "node scripts/prepare-map.mjs && next start --hostname 127.0.0.1",
     "typecheck": "next typegen && tsc --noEmit && tsc --noEmit -p ../../tests/e2e/tsconfig.json",
-    "lint": "eslint . && cd ../../tests/e2e && ../../apps/web/node_modules/.bin/eslint .",
+    "lint": "node scripts/lint.mjs",
     "test": "vitest run",
     "test:e2e": "playwright test --config playwright.config.ts",
     "test:live": "playwright test --config playwright.live.config.ts"

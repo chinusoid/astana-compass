@@ -1,0 +1,889 @@
+{
+  "format": 1,
+  "project": "Astana Compass",
+  "saved_at_timezone": "Asia/Almaty",
+  "saved_on": "2026-10-19",
+  "repository": "https://github.com/chinusoid/astana-compass",
+  "local_base_sha": "fbc5cfd026e2960bd5dc3490d627f886c3a759e5",
+  "remote_branch": "coordinator/city-map-3d",
+  "remote_sha_before_handoff": "77bce63cc036d12d71365001a72d1777ccd70a94",
+  "source_file_count": 200,
+  "modified": [
+    ".env.example",
+    "README.md",
+    "apps/web/.env.example",
+    "apps/web/README.md",
+    "apps/web/src/app/api/v1/[...path]/route.ts",
+    "apps/web/src/app/globals.css",
+    "apps/web/src/app/layout.tsx",
+    "apps/web/src/app/page.tsx",
+    "apps/web/src/components/city-map.tsx",
+    "apps/web/src/components/compass-app.test.tsx",
+    "apps/web/src/components/compass-app.tsx",
+    "apps/web/src/components/place-card.test.tsx",
+    "apps/web/src/components/place-card.tsx",
+    "apps/web/src/lib/i18n.ts",
+    "contracts.schema.json",
+    "docs/api/README.md",
+    "packages/api_client/src/generated.ts",
+    "packages/contracts/src/astana_contracts/data/contracts.schema.json",
+    "packages/contracts/src/astana_contracts/data/generated.json",
+    "services/api/src/astana_api/app.py",
+    "services/api/src/astana_api/composition.py",
+    "tests/e2e/frontend.spec.ts"
+  ],
+  "new": [
+    "apps/web/public/icon.svg",
+    "apps/web/src/app/about/page.tsx",
+    "apps/web/src/app/api/v1/social/[operation]/route.test.ts",
+    "apps/web/src/app/api/v1/social/[operation]/route.ts",
+    "apps/web/src/app/events/page.tsx",
+    "apps/web/src/app/manifest.ts",
+    "apps/web/src/app/party/page.tsx",
+    "apps/web/src/app/saved/page.tsx",
+    "apps/web/src/app/walk/page.tsx",
+    "apps/web/src/components/city-map.test.tsx",
+    "apps/web/src/components/events-panel.test.tsx",
+    "apps/web/src/components/events-panel.tsx",
+    "apps/web/src/components/intent-review.test.tsx",
+    "apps/web/src/components/intent-review.tsx",
+    "apps/web/src/components/party-panel.test.tsx",
+    "apps/web/src/components/party-panel.tsx",
+    "apps/web/src/lib/events-api.ts",
+    "apps/web/src/lib/events-copy.ts",
+    "apps/web/src/lib/intent-copy.ts",
+    "apps/web/src/lib/intent.test.ts",
+    "apps/web/src/lib/intent.ts",
+    "apps/web/src/lib/map-copy.ts",
+    "apps/web/src/lib/map-motion.test.ts",
+    "apps/web/src/lib/map-motion.ts",
+    "apps/web/src/lib/map-style.test.ts",
+    "apps/web/src/lib/map-style.ts",
+    "apps/web/src/lib/map-traffic.test.ts",
+    "apps/web/src/lib/map-traffic.ts",
+    "apps/web/src/lib/shared-planner.tsx",
+    "apps/web/src/lib/social-api.test.ts",
+    "apps/web/src/lib/social-api.ts",
+    "docs/ai/intent.md",
+    "docs/ux/README.md",
+    "docs/ux/judging-demo.md",
+    "docs/ux/maps.md",
+    "packages/ai_providers/src/astana_ai_providers/intents.py",
+    "packages/ai_providers/tests/test_intents.py",
+    "services/api/src/astana_api/social.py",
+    "services/api/src/astana_api/traffic.py",
+    "tests/integration/test_new_api_boundaries.py",
+    "tests/integration/test_social.py",
+    "tests/integration/test_traffic.py"
+  ],
+  "files": {
+    ".env.example": {
+      "bytes": 1479,
+      "sha256": "95dee47e999cb4ae644bbccc444dde9d447ca853c6e2a7c052d16ad5c45e3a22"
+    },
+    ".github/typescript/package-lock.json": {
+      "bytes": 12528,
+      "sha256": "b0908f49b4362696f94243c16a8716aa97c73ddffc845079433dbf428618897d"
+    },
+    ".github/typescript/package.json": {
+      "bytes": 393,
+      "sha256": "c616e03bc2dcdb50be0fdabbfa56ebc359cc8f72147510487bb424121d1eecfc"
+    },
+    ".github/workflows/ci.yaml": {
+      "bytes": 7462,
+      "sha256": "a89a113ddfa888af9c57fc90affe31a347c0ce98a6c9fdb3ed8eb315b851cd2b"
+    },
+    ".gitignore": {
+      "bytes": 334,
+      "sha256": "6a90547e4a107fafcb5fe0428b08dcd3bd5884d6e61126969914160b37c84984"
+    },
+    ".python-version": {
+      "bytes": 5,
+      "sha256": "7b55f8e67b5623c4bef3fa691288da9437d79d3aba156de48d481db32ac7d16d"
+    },
+    "AGENTS.md": {
+      "bytes": 8357,
+      "sha256": "9b7d4cdfe87035bce550af502048dbd4469bd33b84cd788b3e6c92ac874404c0"
+    },
+    "ARCHITECTURE.md": {
+      "bytes": 25000,
+      "sha256": "2f43bec7494c17c7c30d14882ee30f4a99e590b515187f4e95b06fa0a3936932"
+    },
+    "CODEOWNERS": {
+      "bytes": 91,
+      "sha256": "251e0ff3739e5c3f568039612e2de07a44e7164a68fadb7fe674829891284583"
+    },
+    "CONTRACTS.md": {
+      "bytes": 10076,
+      "sha256": "2d1271051d2c1b22d55cde4b07e6f0b73376e5901fc35ed5a90d17fa75158d39"
+    },
+    "COORDINATION.md": {
+      "bytes": 3950,
+      "sha256": "630418285ec0c440c53146c3f5509a6f2dad500de03118da9f8ca10fdd830ccb"
+    },
+    "PRODUCT.md": {
+      "bytes": 20180,
+      "sha256": "3787977cd17bc346bc0557d021adbda88f1a4cf1b67ffe51b0366c4db11e7ce1"
+    },
+    "PULL_REQUEST_TEMPLATE.md": {
+      "bytes": 837,
+      "sha256": "ffac4348c8da04b88aa9070af0539d7e3ceed69bca33d71fde32ad4571ca834e"
+    },
+    "README.md": {
+      "bytes": 10825,
+      "sha256": "d8ddfbbf813215f75fc141d856b93bd8abdd9bd132e814818d64220a4d4393e2"
+    },
+    "TASK-01-DATA.md": {
+      "bytes": 10557,
+      "sha256": "efc6190b9831aef298478d59174cc456a5b3c4cece5ff65d376cc7f481bd5cda"
+    },
+    "TASK-02-RETRIEVAL.md": {
+      "bytes": 10731,
+      "sha256": "7cab0eb0187b31251ed72f80c4c9802093cc7a7b2b46af48c972c3ddbbd2ee81"
+    },
+    "TASK-03-CONTEXT.md": {
+      "bytes": 10884,
+      "sha256": "9b29c0981aec0963eb9d344317e654da90b0c107b5dbe0129bdd97cfc98a1a55"
+    },
+    "TASK-04-API-RAG.md": {
+      "bytes": 10541,
+      "sha256": "485f2e682a9f046b2aaaf8b7ca99b0e6739fc80f1d6e2a5fb8bb7f0a51e2c094"
+    },
+    "TASK-05-FRONTEND.md": {
+      "bytes": 10626,
+      "sha256": "71aec2c87ce2e058378ae202861678bd1e6cc7b2fed9f94cbc368f6088af2d07"
+    },
+    "TASK-06-EVALUATION.md": {
+      "bytes": 10697,
+      "sha256": "8402507c596e7c4bf80091695a18df6fc46945f5c9c6087b30c3ebb26b7e2703"
+    },
+    "TASK-07-DEVOPS.md": {
+      "bytes": 10582,
+      "sha256": "b9ced0959c00c56bcd6e4d4c5fafb632c60d09bc7d6ffbc614f3bac96878863c"
+    },
+    "TASK-08-PRODUCT-QA.md": {
+      "bytes": 10896,
+      "sha256": "4f4a87a336cb5effe448da6dead7796540e01d1a1d0c1cf4baec7d7ab0ecf296"
+    },
+    "TEAM-01-DATA-SEARCH.md": {
+      "bytes": 23396,
+      "sha256": "873857c84417cd65b3e5fb043b892f0ae031edccfdb532c5be8144e31809407c"
+    },
+    "TEAM-02-CONTEXT-ROUTES.md": {
+      "bytes": 23357,
+      "sha256": "10869a1a7844560745300d9a0bf3791ba99c9726dd26ceed5ca9e4a7bece3776"
+    },
+    "TEAM-03-FRONTEND-UX.md": {
+      "bytes": 23197,
+      "sha256": "f64b2425055b972204dcadc5c6ff4921c3ead588dc320e8b361ad4873fc33d1f"
+    },
+    "WINDOWS-HANDOFF.md": {
+      "bytes": 31260,
+      "sha256": "aab156fe464c6bf155d0d34f8efdaa12e3e969e5a0180afa931d2e50b347297a"
+    },
+    "apps/web/.env.example": {
+      "bytes": 552,
+      "sha256": "f9727a6952ebbf505886ecd7b2716f95b2b7c20fd0368a011553d30f7b244d80"
+    },
+    "apps/web/.gitignore": {
+      "bytes": 45,
+      "sha256": "5e0d18b7a05aa3d03fb76c66e90ece974a777b53fca08b69ad69e742f6516a46"
+    },
+    "apps/web/AGENTS.md": {
+      "bytes": 679,
+      "sha256": "063098f6cb31bb44c6f8fbea25b3876de7ee1e5f7d00a50dbab506f6415eb7f0"
+    },
+    "apps/web/README.md": {
+      "bytes": 16122,
+      "sha256": "dd36ee7a95f2ed5996937463d6ca732045b620b7418c5093ec5115d1a9f926bf"
+    },
+    "apps/web/e2e-support.ts": {
+      "bytes": 1558,
+      "sha256": "784e79203c10dd9b055e7b8c32151a463ca89308b1e2269c2b2e926bcaf9c44e"
+    },
+    "apps/web/eslint.config.mjs": {
+      "bytes": 376,
+      "sha256": "d46910e15f8666713dfbaf258c9f5c0e9c3b97a6716391ade17eeaea62333c92"
+    },
+    "apps/web/next-env.d.ts": {
+      "bytes": 288,
+      "sha256": "1862ac4bbbc5192d4bf562161df66ea547ed3e67173100656ab606ae9797db2b"
+    },
+    "apps/web/next.config.ts": {
+      "bytes": 557,
+      "sha256": "a9569a62da8a30eaad0ef62b1dada98b51f303bcc90e645d84a65bf76c521f19"
+    },
+    "apps/web/package.json": {
+      "bytes": 1616,
+      "sha256": "6342d84504dcbe603634afeb15abfcd8711247db4a280ba6dd32aeee5ea02d43"
+    },
+    "apps/web/playwright.config.ts": {
+      "bytes": 1454,
+      "sha256": "f09fffb0d465dbce9f6f0750831f766adcf876bb8a562420340992659dbe8be8"
+    },
+    "apps/web/playwright.live.config.ts": {
+      "bytes": 423,
+      "sha256": "91a1a668de0821417f56a80903c385e9eb3e93f0c8f73221a4312d0a9e3ca8c1"
+    },
+    "apps/web/pnpm-lock.yaml": {
+      "bytes": 185648,
+      "sha256": "81a29794493a3fac63b5f6b9e86fdb3e71eadfd5705295cdc23a32dd3b598f73"
+    },
+    "apps/web/pnpm-workspace.yaml": {
+      "bytes": 85,
+      "sha256": "d7fe123c2b2e4a695612b5f735af94c6d64cd019d6404501f9c24d64da60e366"
+    },
+    "apps/web/postcss.config.mjs": {
+      "bytes": 83,
+      "sha256": "b783348d5618047d0f37e12acd15c5a2c5f02809d8711e0764c9cea52750346c"
+    },
+    "apps/web/public/icon.svg": {
+      "bytes": 347,
+      "sha256": "901e5c465d8e7efa20e2b107fa5b3c24f4f393748d1a07dd45f1b0d7a1522ee3"
+    },
+    "apps/web/scripts/prepare-map.mjs": {
+      "bytes": 698,
+      "sha256": "0c608b1df12f718000f3c4feb2a7550b278b8314996dd06ffa348eedf24ae093"
+    },
+    "apps/web/src/app/about/page.tsx": {
+      "bytes": 151,
+      "sha256": "173df71f4851105f683c84ff9e2704e50de6452dd3aca416ab1225c855db414a"
+    },
+    "apps/web/src/app/api/v1/[...path]/route.test.ts": {
+      "bytes": 2583,
+      "sha256": "1eec1c6c71ca719ade804fd3bf6c1f02cabca2e16f58eeef990e42f7d2b8f921"
+    },
+    "apps/web/src/app/api/v1/[...path]/route.ts": {
+      "bytes": 3665,
+      "sha256": "d54ad0157457d83aad46d0c2043fd37fba744b40b294b35375fd3d6168a08629"
+    },
+    "apps/web/src/app/api/v1/social/[operation]/route.test.ts": {
+      "bytes": 7632,
+      "sha256": "7dd22cba695267caf7b72dd5bb4372bbec9c3a042c0519736996c3c072a97147"
+    },
+    "apps/web/src/app/api/v1/social/[operation]/route.ts": {
+      "bytes": 6117,
+      "sha256": "ab1a93401cb5c2dfcbcee718ad72e46c47b5d83a3414aa4d90ed432b48889c70"
+    },
+    "apps/web/src/app/events/page.tsx": {
+      "bytes": 399,
+      "sha256": "3ee4b7447568ee9f8b682e2a7524feb7bbfd570a6316b74ad3f2b0c14371b0a5"
+    },
+    "apps/web/src/app/globals.css": {
+      "bytes": 42782,
+      "sha256": "1c5ecaefcd876e6a6ebb675eeff03996b5eb9583ef6ae5cc00398ba763b967aa"
+    },
+    "apps/web/src/app/icon.svg": {
+      "bytes": 349,
+      "sha256": "0582d266908da8e21844971dc7b524c0aaacdf797b1d827dcec6db02efe1132c"
+    },
+    "apps/web/src/app/layout.tsx": {
+      "bytes": 1432,
+      "sha256": "fd4ba965694a035762011b1963102d275d307b3dc91bc3b2be357feba19cd664"
+    },
+    "apps/web/src/app/manifest.ts": {
+      "bytes": 507,
+      "sha256": "f7386ba4715d1724f77d7a348d16831f17972a8f91ea57531bc179bdce09cfa3"
+    },
+    "apps/web/src/app/page.tsx": {
+      "bytes": 210,
+      "sha256": "52ff270ff431b101e34ace941a33189b31f1a176ddc911a31fc90121032b29cb"
+    },
+    "apps/web/src/app/party/page.tsx": {
+      "bytes": 191,
+      "sha256": "c9631a5b0b7edf6a1435921db6226634b3781ce527a0bce9e1b66596dbde6b52"
+    },
+    "apps/web/src/app/saved/page.tsx": {
+      "bytes": 131,
+      "sha256": "2da56885ee09f37770079aef3a5f3f00420e88e4ef5a3167dbe37457a059ba20"
+    },
+    "apps/web/src/app/walk/page.tsx": {
+      "bytes": 128,
+      "sha256": "6330e501a096492a6e1ebfb58e1489b42e708e901f4217cc6f02a021b0c951af"
+    },
+    "apps/web/src/components/city-map.test.tsx": {
+      "bytes": 11664,
+      "sha256": "f45df5e9afbc52247413e09c08899be91c029df01733bda3db012d56bd103b98"
+    },
+    "apps/web/src/components/city-map.tsx": {
+      "bytes": 27297,
+      "sha256": "5ffef1bd68b3aea141e1960754984224dec96014a3bdd90948e3b086963f08d8"
+    },
+    "apps/web/src/components/compass-app.test.tsx": {
+      "bytes": 16285,
+      "sha256": "944a0a2349b5aedbcc4ddd983f28203ed9b8e94089fce2a9711463804fdd0ebb"
+    },
+    "apps/web/src/components/compass-app.tsx": {
+      "bytes": 58088,
+      "sha256": "3c45c0c0b71761822d8a2c91ad91a4db5e69020b49f30d4d4c7c736fc87a7fe3"
+    },
+    "apps/web/src/components/details.tsx": {
+      "bytes": 6033,
+      "sha256": "372119602ec21bb2b809b6bbeda53b1d44e8c26003bf0c813f150316a6c2928b"
+    },
+    "apps/web/src/components/events-panel.test.tsx": {
+      "bytes": 6176,
+      "sha256": "e793b0688d233dba26f330d9189c8378109dc6de364bc7a429f2858bc8adc361"
+    },
+    "apps/web/src/components/events-panel.tsx": {
+      "bytes": 10208,
+      "sha256": "256e0236444e2957ddfcfd3722cb1a0a73822d0563ea16d061050f184b559205"
+    },
+    "apps/web/src/components/intent-review.test.tsx": {
+      "bytes": 4989,
+      "sha256": "a9b4e3b379815c13033447d0657ffbbb97f9dd7313eeaf97ba44d5cd4fc95a32"
+    },
+    "apps/web/src/components/intent-review.tsx": {
+      "bytes": 6473,
+      "sha256": "68b1e3bd160c25c78f17611cb71f146d17436c79d76fc7ad76a322112603402b"
+    },
+    "apps/web/src/components/party-panel.test.tsx": {
+      "bytes": 5714,
+      "sha256": "226c962f8e72f4489f80751579fdcc22546f76dbb4c3f47fdf2b73cea055ae39"
+    },
+    "apps/web/src/components/party-panel.tsx": {
+      "bytes": 49575,
+      "sha256": "5253a5db47905d2fedfc76b11abea97fcd729a6e5d8f7f6998c24741f8bd72c6"
+    },
+    "apps/web/src/components/place-card.test.tsx": {
+      "bytes": 3802,
+      "sha256": "1a34a4558c89fb087e696eb4e31dba46fd860deb444912b1003d4dd46b6cc1ab"
+    },
+    "apps/web/src/components/place-card.tsx": {
+      "bytes": 7316,
+      "sha256": "46512ca5c61070799780516e303732ca3527ab2e00ff72d4615ee3d3b9af9d42"
+    },
+    "apps/web/src/lib/api.test.ts": {
+      "bytes": 8255,
+      "sha256": "81868d9b4b2125a4e80e2d443c8c0e9cf22e59a0e8caa654a6db97520f7d8744"
+    },
+    "apps/web/src/lib/api.ts": {
+      "bytes": 5096,
+      "sha256": "87c8ecd8e3c891cd5cd37a3f952245b8ebfb06bc2d9cc2c331bca5a43a65e550"
+    },
+    "apps/web/src/lib/contracts.test.ts": {
+      "bytes": 3998,
+      "sha256": "f69c7a12dc81fdc3b971205ea1f8c22d904025cdefc113a87297fa253255d525"
+    },
+    "apps/web/src/lib/contracts.ts": {
+      "bytes": 5864,
+      "sha256": "925da3808bbb408506fe95b17be77914aca331bde797dce87ff39d7ebb11ea7d"
+    },
+    "apps/web/src/lib/events-api.ts": {
+      "bytes": 1332,
+      "sha256": "0143200106d1f8f563843c58858e9c9627a6ed3d2b90e5f50aed8d33f32f7313"
+    },
+    "apps/web/src/lib/events-copy.ts": {
+      "bytes": 5354,
+      "sha256": "9a6db8fca2082e15382823e993da32e16c516cb8bd3191ab3e56edebb308ddb4"
+    },
+    "apps/web/src/lib/format.test.ts": {
+      "bytes": 944,
+      "sha256": "3df7688ae77bfc2cecb36fd5ea9a83b8cb330b1a590152c29839efc9672cf2e6"
+    },
+    "apps/web/src/lib/format.ts": {
+      "bytes": 1897,
+      "sha256": "3c061e86fe89628fa015f9ec3021da844bf69cd4d20eeee2e72f1eba63a2ff89"
+    },
+    "apps/web/src/lib/i18n.ts": {
+      "bytes": 30229,
+      "sha256": "e70bd49d5e54614c0200f332a6c9ceedb07c35031a94509fd695df0d78d00898"
+    },
+    "apps/web/src/lib/intent-copy.ts": {
+      "bytes": 4078,
+      "sha256": "a198d7dfb0ce22ce519c8b03fb1f301d4b45223ca569a8efb9f5368f247fcc2f"
+    },
+    "apps/web/src/lib/intent.test.ts": {
+      "bytes": 3277,
+      "sha256": "4a0c2a55acda399388d4998ffe8798d514af1c98ccdf8b41a5bf8595d6a2caa6"
+    },
+    "apps/web/src/lib/intent.ts": {
+      "bytes": 2869,
+      "sha256": "d7f3a64545d28def678fec0aa6da9fac6500aa379e212975f33e0fceb1cf1af3"
+    },
+    "apps/web/src/lib/map-copy.ts": {
+      "bytes": 7681,
+      "sha256": "905b877c612fa5f5de494698ebddace3b90ba7cb667b58092ab75b6ba2c928e2"
+    },
+    "apps/web/src/lib/map-motion.test.ts": {
+      "bytes": 5427,
+      "sha256": "3292a3b81fde473f27edfa9732f6780c56f764af72eb93d0ee0bf2e797bbe990"
+    },
+    "apps/web/src/lib/map-motion.ts": {
+      "bytes": 8490,
+      "sha256": "41af1b3f74145371073d60edf78ea3ece4d8093f064c17acb383ee61570d8bae"
+    },
+    "apps/web/src/lib/map-style.test.ts": {
+      "bytes": 3867,
+      "sha256": "ee229007c884bc21b77efb7ef60a440af774df8c998fa0f00386daaff359e010"
+    },
+    "apps/web/src/lib/map-style.ts": {
+      "bytes": 4443,
+      "sha256": "303de430a21e176ce38ec4c26b88a147d331ea478a69b20b4f36f029a4b1f216"
+    },
+    "apps/web/src/lib/map-traffic.test.ts": {
+      "bytes": 6556,
+      "sha256": "74ac3ea8ce007152252d25edf4af61378d6f2f670e00929be801bf336fff6a47"
+    },
+    "apps/web/src/lib/map-traffic.ts": {
+      "bytes": 12648,
+      "sha256": "987532d8ffd361c8a707ceb3fb699050af08187b0dba5dc74867beadc447a49d"
+    },
+    "apps/web/src/lib/shared-planner.tsx": {
+      "bytes": 1182,
+      "sha256": "4402b5e1b051fbdedda037fb13aafc6399ff6d04a8b04860c00c862ffd4e25bc"
+    },
+    "apps/web/src/lib/social-api.test.ts": {
+      "bytes": 7124,
+      "sha256": "f5a3c206972ea5cfb440507a1452d5d1dcd9974ad09a2554a4e5ddd59ac8be1e"
+    },
+    "apps/web/src/lib/social-api.ts": {
+      "bytes": 6762,
+      "sha256": "71fc001baa9c59a1f153b6511dac03b60460d2efa6a29313d012e19dff69b83b"
+    },
+    "apps/web/src/test/setup.ts": {
+      "bytes": 149,
+      "sha256": "ace51ddf220516380965ca2e146ee99b1024f32578c033689c32f834de4baab0"
+    },
+    "apps/web/tsconfig.json": {
+      "bytes": 618,
+      "sha256": "956aeb3fe5b2e716d09f6f770417a2dbed200a8566d169987f9c6e2f3f35b6b4"
+    },
+    "apps/web/vitest.config.ts": {
+      "bytes": 370,
+      "sha256": "5ebe66a9317fed0d15d4f952c7bdce230e1273240df0d0f51dd7b0ab7b361234"
+    },
+    "contracts.examples.json": {
+      "bytes": 69972,
+      "sha256": "9b1275c3c8cadd8978f62802a56d32c1e39d8e825f6f98d27f0ac26aa57b20ae"
+    },
+    "contracts.schema.json": {
+      "bytes": 55441,
+      "sha256": "2999f3436dcb1adb280398446fc9355e94f74bed87a16f6b59f9e20cd399a383"
+    },
+    "docs/ai/TRAINING.md": {
+      "bytes": 16650,
+      "sha256": "41e1828279351cbc1a3df549a26cc5d69c881f458e932bbf7b7aa7b6158ccde7"
+    },
+    "docs/ai/intent.md": {
+      "bytes": 10449,
+      "sha256": "8c5d97359bd912de0e06122cfb5c734cc1f8664da2d646740a4161eddecaac3a"
+    },
+    "docs/api/README.md": {
+      "bytes": 8948,
+      "sha256": "0c9df81bff6e7997e159349a324c6ad8e8db6ee585157a1536c458e541c572a6"
+    },
+    "docs/context/routing.md": {
+      "bytes": 9215,
+      "sha256": "84ef9e75ff42d0676368ab29f8753dfeac631ced9f64a06767c976214db59baf"
+    },
+    "docs/context/schedules.md": {
+      "bytes": 4211,
+      "sha256": "6ec5c05adedd0e1e453c51f6edcae1b8b72bf89991a49b38f0eb872764c4533c"
+    },
+    "docs/context/verification.md": {
+      "bytes": 5173,
+      "sha256": "83574f05aec7a41e88f1f579a377594877b3806c7a1ed05582c00653770c644e"
+    },
+    "docs/context/weather.md": {
+      "bytes": 4760,
+      "sha256": "1e3fda3982e4edabc2009d450fa4e06d5e3330a4d393815cb4a98b84b2d845c1"
+    },
+    "docs/operations/CONTEXT-INTEGRATION.md": {
+      "bytes": 2723,
+      "sha256": "685189251a8ed29cea614a98a67ac5170bbebf027f2978106d2b258e084831d1"
+    },
+    "docs/operations/FRONTEND-INTEGRATION.md": {
+      "bytes": 6323,
+      "sha256": "0bc2b2ab2c1618bae0a8036151fc9aefcae30eaa525d1bef3b522ca19ae1adef"
+    },
+    "docs/operations/LOCAL.md": {
+      "bytes": 6653,
+      "sha256": "112058ea08442b705c81d6fbc063ebc2adefb07bf5dea18f309dce62499ae0b0"
+    },
+    "docs/operations/PINS.md": {
+      "bytes": 2107,
+      "sha256": "2d2ced74ba7a8d4bf9c10094dcf7f9c9ac6b4fa158233aa5cc5993e38d6774a2"
+    },
+    "docs/operations/TESTING.md": {
+      "bytes": 10466,
+      "sha256": "c30508e84dc208af0c47ba80be24c93170de6ed9b8cf72e26b70faf2c42de3c6"
+    },
+    "docs/pitch/TEAM-03-DEFENSE.md": {
+      "bytes": 7861,
+      "sha256": "2c1003fb14abb3185cf3c389b34aa34cbd2fb46393bb280a7dd97091f0c12bfd"
+    },
+    "docs/requests/team-02-arrivals.md": {
+      "bytes": 2801,
+      "sha256": "d1023e3577ab9a613e3448109674d4b393609af6e850117603eecba0fed41f3d"
+    },
+    "docs/requests/team-02-integration.md": {
+      "bytes": 2029,
+      "sha256": "abffc0853560edd1b5d61d4dd68088c0697dc4a704838e6d10ae540dd56c443a"
+    },
+    "docs/requests/team-02-weather.md": {
+      "bytes": 6598,
+      "sha256": "a080fad90c0f5d0712f1bc366e5d6f98ff9b8a17085d3111014fd1382c114cda"
+    },
+    "docs/requests/team-03-frontend-integration.md": {
+      "bytes": 4890,
+      "sha256": "56617f585f4d47e71e078a9fdbb86816549f2bc17057dcab0d648b606e6426db"
+    },
+    "docs/ux/README.md": {
+      "bytes": 3974,
+      "sha256": "3a302ce7cbf7265992e902850dade135131a7088b6e2c3a5fe8a701e889bc1fb"
+    },
+    "docs/ux/TEAM-03-UX.md": {
+      "bytes": 6980,
+      "sha256": "1b97ee39f7dec131b6406c784215b57881c5e19c0cd8ebe720fe6bcd4ff5455b"
+    },
+    "docs/ux/TEAM-03-VERIFICATION.md": {
+      "bytes": 7672,
+      "sha256": "8dff5adc2b80adb7e9c992bf75ce3b181b67ae16e1b57ef157dfa32a41e3c78e"
+    },
+    "docs/ux/judging-demo.md": {
+      "bytes": 15806,
+      "sha256": "c338632d723b14a0e1b27250ec1c5aa7ee73fed85b26106a982ee9221ea323c4"
+    },
+    "docs/ux/maps.md": {
+      "bytes": 15950,
+      "sha256": "9dd162ddd21aeab54f8dbf6acb0d319fa2eae5981938b5f5f28032a4492ac223"
+    },
+    "handoff-assets/astana-ai-city.jpg": {
+      "bytes": 162791,
+      "sha256": "e7a3bc642bd9dc6589824fe88fdcf179e8c61b9ba4d3b81174a7e1ef3cd19d87"
+    },
+    "infra/Dockerfile": {
+      "bytes": 1514,
+      "sha256": "e2a5f8e3761e118cf601d8cb10f6cb69935b0f41a895ad701281d5ab0e706b2e"
+    },
+    "infra/Dockerfile.dockerignore": {
+      "bytes": 337,
+      "sha256": "4e44d05243df4ba5fbcec4e3b1c3ca885cc96341f91229411efb91ff4e286502"
+    },
+    "infra/compose.yaml": {
+      "bytes": 1536,
+      "sha256": "10c30a1cbe483e5e4ac90bf79b7cc7ad77ffee24a07cdbce5b8fcab00aba5bba"
+    },
+    "infra/secrets/.gitignore": {
+      "bytes": 14,
+      "sha256": "240a3e0d37d2e86b614063f5347eb02d4f99ca6c254de6b82871ff8d95532a7d"
+    },
+    "packages/ai_providers/README.md": {
+      "bytes": 5530,
+      "sha256": "6d74430c29344e0cc13f27000620e525e8b1cde336a39901f2b71f36f0f7f575"
+    },
+    "packages/ai_providers/pyproject.toml": {
+      "bytes": 547,
+      "sha256": "bd83e6197e72edbbe13b8b89be11bedea36f7648988b86808834274e23b75bbd"
+    },
+    "packages/ai_providers/src/astana_ai_providers/__init__.py": {
+      "bytes": 248,
+      "sha256": "2092de2c0ba6c9ce2c50b19469daa00cce68b7ee314d20ef18299622eaf05d7d"
+    },
+    "packages/ai_providers/src/astana_ai_providers/generators.py": {
+      "bytes": 19901,
+      "sha256": "c8cd5d66ee6e47789e2d2d8dbbe50cdb576ddbdecac7b0dc2c97ac804c078565"
+    },
+    "packages/ai_providers/src/astana_ai_providers/intents.py": {
+      "bytes": 25899,
+      "sha256": "38b083a12e13cfd50bea3a7559708feb57880756d1cea22821ce8bb7f30278e3"
+    },
+    "packages/ai_providers/tests/test_generators.py": {
+      "bytes": 13616,
+      "sha256": "2d44d2f08c996927cee07826857fbba990651ebf9692cbab56f90aaeca6a9c1e"
+    },
+    "packages/ai_providers/tests/test_intents.py": {
+      "bytes": 15773,
+      "sha256": "c54653100cc98a67c22ab458c709cea4100a752130a0548791e3b42953ca5095"
+    },
+    "packages/api_client/README.md": {
+      "bytes": 922,
+      "sha256": "bfad3d54133861e5d45cc43fc153cb478d417a56c0c9ac526da53503e5d49af8"
+    },
+    "packages/api_client/package.json": {
+      "bytes": 299,
+      "sha256": "19faccbca7dcf610a7b4d29b84a76762bc4dc39fd06f6bf5f4955cb5b2955b60"
+    },
+    "packages/api_client/src/generated.ts": {
+      "bytes": 9852,
+      "sha256": "26aabb2d5524b0e32bc8044a0c8b0c88939233584b07b2b23b6af633a71a42b8"
+    },
+    "packages/api_client/src/index.ts": {
+      "bytes": 106,
+      "sha256": "41adfa830c3759c33211d20e0b8a0200ce91ae69394da82c0f99d446cf9aad09"
+    },
+    "packages/city_context/README.md": {
+      "bytes": 6528,
+      "sha256": "1c8c028481f506c753fff604a0fa1cf3c5e0d0b4d338c9e4eb1d795ca2b0e67c"
+    },
+    "packages/city_context/pyproject.toml": {
+      "bytes": 587,
+      "sha256": "8f6b19f65b37fab9fa37cc95c50d0827014e062b5461a93cf9d689588d63577f"
+    },
+    "packages/city_context/src/astana_city_context/__init__.py": {
+      "bytes": 148,
+      "sha256": "efabcaf46f5893353baafa1e68480ec49bdd48db26aa91124fb993c5423b28d7"
+    },
+    "packages/city_context/src/astana_city_context/common.py": {
+      "bytes": 7563,
+      "sha256": "7599fe6cf60661bf10294b8afaed5d873cbc42535cde3ab050b0bce4ffdba5be"
+    },
+    "packages/city_context/src/astana_city_context/provider.py": {
+      "bytes": 8207,
+      "sha256": "dd7e76a727fd199f0c9219d29c8202e449f21a25bfb80da7a216a5dcc59c3fd0"
+    },
+    "packages/city_context/src/astana_city_context/routing.py": {
+      "bytes": 14986,
+      "sha256": "dd41c3d9845baae0fc8814fe715ac2fff0186c14eff028b49e015020cf93bc8b"
+    },
+    "packages/city_context/src/astana_city_context/schedules.py": {
+      "bytes": 11676,
+      "sha256": "cfd77a582b0bd53427c38216a47e6fbe09cb4d185567cf09e4b5ff348a2eda19"
+    },
+    "packages/city_context/src/astana_city_context/smoke.py": {
+      "bytes": 1873,
+      "sha256": "673778a9510c2f315f98bc454cef6ba0650a922bc1940160cbad9c5b730018b6"
+    },
+    "packages/city_context/src/astana_city_context/weather.py": {
+      "bytes": 11899,
+      "sha256": "7c64a3eb0c0da284b016a93bc58e6e08e50333146d1091ac6e4e98263d761206"
+    },
+    "packages/city_context/tests/test_foundation.py": {
+      "bytes": 11372,
+      "sha256": "19bbaba6e24e1dfb0590ecfedff4beee3c78f08cad15277bc051af72fd911e3c"
+    },
+    "packages/city_context/tests/test_http.py": {
+      "bytes": 9030,
+      "sha256": "3b622924f731d1f424d96ed553d076a1ee4bf1ebc372b1c1034c6476b83d9f83"
+    },
+    "packages/city_context/tests/test_provider.py": {
+      "bytes": 8331,
+      "sha256": "d6e3254329fa403a06babee8f5f6f13b38fc783beeece7d9580a9d09a60590a1"
+    },
+    "packages/city_context/tests/test_routing.py": {
+      "bytes": 17212,
+      "sha256": "9c809888ce2864b1b45667be6a9869dabff704b2bf592474049c60180d19b001"
+    },
+    "packages/city_context/tests/test_schedules.py": {
+      "bytes": 11166,
+      "sha256": "2c04bc1c00624b2711eaf21d58d56d9d677a19993ec7eb6bdbb73a37d3143b94"
+    },
+    "packages/city_context/tests/test_weather.py": {
+      "bytes": 8494,
+      "sha256": "bd445df33e4302d10f8dbd78cbaee091c6d7c3b20b68275ca67c1a3a9bd0a568"
+    },
+    "packages/contracts/README.md": {
+      "bytes": 1119,
+      "sha256": "35c0b800c97ed32c35afa73062be2b60b8a56ac2da648a2d73c0700982d04c20"
+    },
+    "packages/contracts/pyproject.toml": {
+      "bytes": 537,
+      "sha256": "17f9fb83ab40ccddf504d7addae3d5f9d42acb237c9981aafe496ebf4084de4f"
+    },
+    "packages/contracts/src/astana_contracts/__init__.py": {
+      "bytes": 524,
+      "sha256": "381be259fbba71ad1e14101d476ce103ce8f0bc97b16e4c7fcfc14a775100e31"
+    },
+    "packages/contracts/src/astana_contracts/cli.py": {
+      "bytes": 1930,
+      "sha256": "0e93753b66d04db47c340c5078be2d98beff6c73163c26645cc90bc55620820b"
+    },
+    "packages/contracts/src/astana_contracts/data/contracts.examples.json": {
+      "bytes": 69972,
+      "sha256": "9b1275c3c8cadd8978f62802a56d32c1e39d8e825f6f98d27f0ac26aa57b20ae"
+    },
+    "packages/contracts/src/astana_contracts/data/contracts.schema.json": {
+      "bytes": 55441,
+      "sha256": "2999f3436dcb1adb280398446fc9355e94f74bed87a16f6b59f9e20cd399a383"
+    },
+    "packages/contracts/src/astana_contracts/data/generated.json": {
+      "bytes": 253,
+      "sha256": "c47dbfe7136d80eceebc2f086afe9980ca1813404a351e47a1c727316f35f6da"
+    },
+    "packages/contracts/src/astana_contracts/errors.py": {
+      "bytes": 880,
+      "sha256": "6be4ca004fb19da3b1e927e100783c413dc911eebee432286b7b4aabb4262856"
+    },
+    "packages/contracts/src/astana_contracts/invariants.py": {
+      "bytes": 7181,
+      "sha256": "40058d96b3dff1eaf9bedb0462e92e28b063e81c384f56b45e075a8f89852fe3"
+    },
+    "packages/contracts/src/astana_contracts/ports.py": {
+      "bytes": 2013,
+      "sha256": "e0c30c9a788892a1e1e846f34bf0af138ccd4ae8c5f63d27b3dfb47aeab7c68c"
+    },
+    "packages/contracts/src/astana_contracts/py.typed": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "packages/contracts/src/astana_contracts/validation.py": {
+      "bytes": 4367,
+      "sha256": "7474d94169e69fab5a4da3f37906014cb798a0cda070d04c8bc276dda15f8ba9"
+    },
+    "packages/contracts/tests/test_contracts.py": {
+      "bytes": 6119,
+      "sha256": "7210626ca4b8f632c65138db5aaf24928b98e8661251fe40e7fd9edcbc0c34dc"
+    },
+    "packages/recommender/README.md": {
+      "bytes": 4602,
+      "sha256": "979bd3694a9fbffc6d5d4615102d4f8cd3e1de1a1e9e82bef6541c4aeb86e384"
+    },
+    "packages/recommender/pyproject.toml": {
+      "bytes": 527,
+      "sha256": "56a53ba7dc7c283ff9326df6b83138b88ba5ed0b0d7932e11f1f645a54135a4e"
+    },
+    "packages/recommender/src/astana_recommender/__init__.py": {
+      "bytes": 383,
+      "sha256": "4015cd6ea2a7c5c3b234b19a4a65e05e77785de2bfbbfd03a84cdfc0cd257d55"
+    },
+    "packages/recommender/src/astana_recommender/explanations.py": {
+      "bytes": 1165,
+      "sha256": "807bc2ad66cc97b68e14dc542e0b3b8572b70bfda87fd5ff465f1ab9c57c34b0"
+    },
+    "packages/recommender/src/astana_recommender/py.typed": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "packages/recommender/src/astana_recommender/service.py": {
+      "bytes": 22846,
+      "sha256": "e3c406cf961ce48ccd41b19544ce81555af384df563190ca5153a74cb795d732"
+    },
+    "packages/recommender/src/astana_recommender/text.py": {
+      "bytes": 10756,
+      "sha256": "8b063ceb763dda5a7e4141c77999d586e79e9e72b8d0c8ffb8f7301de33065c3"
+    },
+    "packages/recommender/tests/test_service.py": {
+      "bytes": 24581,
+      "sha256": "da3d1738a936a390fdfa0a8493640721cbf91849bfbd8916920f1e53d7547ba8"
+    },
+    "pyproject.toml": {
+      "bytes": 1033,
+      "sha256": "5a691850ad0a105dedab2afe02c29ed06590284220d21308c056f3e1111ede6d"
+    },
+    "requirements-contracts.txt": {
+      "bytes": 91,
+      "sha256": "83c446d91ce21c519bba77630d2bdb09dc73ece8f1cc2a3742b90121d0d7e38d"
+    },
+    "scripts/check.sh": {
+      "bytes": 811,
+      "sha256": "9fe4f49ca69da09f7a86c2d61e7508ef2b7352ff0c336cd0b2ca863c1357591f"
+    },
+    "scripts/dev.sh": {
+      "bytes": 483,
+      "sha256": "ef134b97b1449637d761056460471fa7e4efd1516158c56c139901115b977d2d"
+    },
+    "scripts/generate_contracts.py": {
+      "bytes": 6196,
+      "sha256": "4ed8e1fa0451368739898e05441e9b6573e3fab04337a7ba8eb990f3a42c1a32"
+    },
+    "scripts/smoke.py": {
+      "bytes": 17392,
+      "sha256": "381e572e0992a5554949313f7a7f9b34dab64378cd0c681f3d11f464778cb9a0"
+    },
+    "services/api/pyproject.toml": {
+      "bytes": 490,
+      "sha256": "d3a50097efbd45cd363ae13b6b01c34f89e29d4acc909bd65a8510918d4c8115"
+    },
+    "services/api/src/astana_api/__init__.py": {
+      "bytes": 101,
+      "sha256": "e4f0db6b36943ec2ed116f8eee372ae548d36f8babd164100d0cd4250acfe71f"
+    },
+    "services/api/src/astana_api/app.py": {
+      "bytes": 20014,
+      "sha256": "9704e7944af532b4b0ab8ced13c5af36809057305d40eec6165ea2baf91cd8ca"
+    },
+    "services/api/src/astana_api/composition.py": {
+      "bytes": 5517,
+      "sha256": "e2b895050f7229fac68797569c75b386de64a1af532ee5d85fac2a650591dabe"
+    },
+    "services/api/src/astana_api/demo_examples.py": {
+      "bytes": 2169,
+      "sha256": "d588b546300c26b3ed00ebd96e06f082e77251a382e7ab5732bda37115b7ff5c"
+    },
+    "services/api/src/astana_api/fixtures.py": {
+      "bytes": 5061,
+      "sha256": "cc7034e8a494add6dff126fb1a07679215e907dd0cec81488d19332fc773fc33"
+    },
+    "services/api/src/astana_api/sandbox.py": {
+      "bytes": 1377,
+      "sha256": "cb6443abad3b75b644259df59ccf6492e6061501052a1d758fd3702e499cf163"
+    },
+    "services/api/src/astana_api/settings.py": {
+      "bytes": 2617,
+      "sha256": "4e5c05933f7e691e2e458d04b5bced88ca6c59168c01eada343284e4e5fad5d7"
+    },
+    "services/api/src/astana_api/social.py": {
+      "bytes": 18015,
+      "sha256": "b1b7e85e6a39224c7de87479355be7c7b098df46c0c7919c784a2a85df6e6157"
+    },
+    "services/api/src/astana_api/static/sandbox.css": {
+      "bytes": 17771,
+      "sha256": "454f1b21c44c26d423ef9bb739f58bec1fe3c6eb6afd89f286d616808d52fdf3"
+    },
+    "services/api/src/astana_api/static/sandbox.html": {
+      "bytes": 12355,
+      "sha256": "ca18154928be4c5a06df4e430726312afbe2d4f2c048d2e87b9afbd4223daec3"
+    },
+    "services/api/src/astana_api/static/sandbox.js": {
+      "bytes": 42266,
+      "sha256": "e34f24fb61e74a03f3c10ec5e8662d8a1b3434e759db1709b0f35581d84217f5"
+    },
+    "services/api/src/astana_api/traffic.py": {
+      "bytes": 4533,
+      "sha256": "8fc3e68754b8b2ec86424eea9c5e65c4db899cdd2c933a0069f5de6086ef1e12"
+    },
+    "tests/e2e/eslint.config.mjs": {
+      "bytes": 231,
+      "sha256": "16e58da731beac396006281590e4f3c76e89b684b7780184c00fa4047fadd8d8"
+    },
+    "tests/e2e/frontend.spec.ts": {
+      "bytes": 37044,
+      "sha256": "100b82f31d7b10c031e9b6eeec8f0610b50e13a15a0bec5d276ccccbccf14db4"
+    },
+    "tests/e2e/generation_response.py": {
+      "bytes": 3140,
+      "sha256": "1064b730bcb37c967d92c7c0c4a082787a3df449213adbd761f46102cd9325b0"
+    },
+    "tests/e2e/live.spec.ts": {
+      "bytes": 1023,
+      "sha256": "0e1da5d7a7bc363c3d63ab991c8e95908e865367e4cdb065b8fe00fdcba04b72"
+    },
+    "tests/e2e/tsconfig.json": {
+      "bytes": 223,
+      "sha256": "f55fff974cbaa8aa206bedb193433aa3204ab702d09f130e141f477c5e7f5ff6"
+    },
+    "tests/integration/test_api.py": {
+      "bytes": 9459,
+      "sha256": "6f5d0e498bd16191f1767e9355af9ea8fe11a99aea364935a0410f8595426cd6"
+    },
+    "tests/integration/test_composition.py": {
+      "bytes": 9260,
+      "sha256": "74a9c4a3e296cc365e3196744617b0dc77a6a89833d7fe32da43ade12d73de57"
+    },
+    "tests/integration/test_new_api_boundaries.py": {
+      "bytes": 3540,
+      "sha256": "139d6f8702276773715da932a9d0a04dd808c757b95578f494a787a63d13de45"
+    },
+    "tests/integration/test_sandbox.py": {
+      "bytes": 4964,
+      "sha256": "9c5786c42b2b2d02b5aa89df11aafc507fc5ed0b5900d5f62cb0950e89cbc888"
+    },
+    "tests/integration/test_social.py": {
+      "bytes": 22329,
+      "sha256": "93372b09cd527a874e07ea8d94748df666432ffe66d67bd3ec33fd0d0d258e74"
+    },
+    "tests/integration/test_traffic.py": {
+      "bytes": 5883,
+      "sha256": "2bfe19d68432d7d8fe2cdce16664d69d8930e93577534c31a5971573a902bc94"
+    },
+    "uv.lock": {
+      "bytes": 85866,
+      "sha256": "18b1c08e1b6c8ff3dfd97e1ab3005ebeafb31317eb64e1ceef641c73fcbdc849"
+    },
+    "verify_contracts.py": {
+      "bytes": 182,
+      "sha256": "1772a942ac112a7eec4d71cbcb7f5e6dddd2b0df016e28a11571eab7eced87c7"
+    }
+  }
+}

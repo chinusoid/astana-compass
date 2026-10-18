@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import asyncio
 import json
 import math
+import os
 import uuid
 
 from fastapi import FastAPI, Request, Query
@@ -20,6 +21,8 @@ from .composition import build_services
 from .demo_examples import request_examples
 from .sandbox import sandbox_router
 from .settings import Settings
+from .social import SocialError, SocialStore, social_error_handler, social_router
+from .traffic import TrafficService
 
 
 MESSAGES = {
@@ -97,7 +100,7 @@ def utcnow():
     return datetime.now(timezone.utc).isoformat()
 
 
-def check_payload_bounds(value):
+def check_payload_bounds(value, max_string_length=8192):
     """Bound synchronous schema work before entering the provider concurrency gate."""
     pending, count = [(value, 0)], 0
     while pending:
@@ -107,8 +110,12 @@ def check_payload_bounds(value):
             raise APIError("invalid_request")
         if isinstance(item, float) and not math.isfinite(item):
             raise APIError("invalid_request")
-        if isinstance(item, str) and len(item) > 8192:
-            raise APIError("invalid_request")
+        if isinstance(item, str):
+            if len(item) > max_string_length:
+                raise APIError("invalid_request")
+            # JSON escapes can carry lone UTF-16 surrogates. Reject them before
+            # names/intent quotes are echoed through a UTF-8 JSON response.
+            item.encode("utf-8")
         if isinstance(item, dict):
             if len(item) > 64 or any(len(key) > 512 for key in item):
                 raise APIError("invalid_request")
@@ -130,7 +137,7 @@ async def read_payload(request, definition):
         raise APIError("invalid_request")
     try:
         payload = await request.json()
-        check_payload_bounds(payload)
+        check_payload_bounds(payload, 24000 if definition == "SocialActionRequest" else 8192)
         validate_payload(definition, payload)
     except (ValueError, UnicodeError, RecursionError, ContractValidationError):
         raise APIError("invalid_request") from None
@@ -167,6 +174,8 @@ def create_app(settings=None, services=None):
     @asynccontextmanager
     async def lifespan(app):
         async with AsyncExitStack() as stack:
+            app.state.traffic = TrafficService(os.getenv("TOMTOM_API_KEY", ""))
+            stack.push_async_callback(app.state.traffic.aclose)
             app.state.services = services
             if app.state.services is None:
                 try:
@@ -185,6 +194,7 @@ def create_app(settings=None, services=None):
     app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["GET", "POST"],
                        allow_headers=["Content-Type"], expose_headers=["X-Request-ID", "X-Astana-Data-Mode"], allow_credentials=False)
     app.include_router(sandbox_router())
+    app.add_exception_handler(SocialError, social_error_handler)
 
     @app.exception_handler(APIError)
     async def api_error(request, exc):
@@ -202,14 +212,17 @@ def create_app(settings=None, services=None):
     async def unexpected_error(request, exc):
         return error_response(getattr(request.state, "request_id", str(uuid.uuid4())), "internal_error")
 
-    async def call(request, operation):
-        if app.state.services is None:
-            raise APIError("provider_unavailable")
+    async def acquire_gate():
         try:
             async with asyncio.timeout(0.1):
                 await app.state.gate.acquire()
         except TimeoutError:
             raise APIError("rate_limited") from None
+
+    async def call(request, operation):
+        if app.state.services is None:
+            raise APIError("provider_unavailable")
+        await acquire_gate()
         try:
             async with asyncio.timeout(settings.request_timeout_seconds):
                 return await operation(app.state.services)
@@ -223,6 +236,9 @@ def create_app(settings=None, services=None):
             raise APIError("provider_unavailable") from None
         finally:
             app.state.gate.release()
+
+    app.state.social = SocialStore()
+    app.include_router(social_router(app.state.social, read_payload, call, checked, settings))
 
     def health(ok):
         return {"status": "ok" if ok else "unavailable", "service": "astana-api", "version": "0.1.0", "checked_at": utcnow()}
@@ -288,6 +304,25 @@ def create_app(settings=None, services=None):
         result["request_id"] = request.state.request_id
         return checked("RecommendationResponse", result, settings)
 
+    @app.post("/v1/intent")
+    async def intent(request: Request):
+        payload = await read_payload(request, "IntentRequest")
+        result = await call(request, lambda services: services.intent.analyze(payload["query"], payload["locale"]))
+        return checked("IntentResponse", result, settings)
+
+    @app.post("/v1/traffic")
+    async def traffic(request: Request):
+        payload = await read_payload(request, "TrafficRequest")
+        await acquire_gate()
+        try:
+            async with asyncio.timeout(min(30, settings.request_timeout_seconds)):
+                result = await app.state.traffic.sample(payload["points"])
+        except TimeoutError:
+            result = TrafficService.response("unavailable")
+        finally:
+            app.state.gate.release()
+        return checked("TrafficResponse", result, settings)
+
     @app.post("/v1/itineraries")
     async def itineraries(request: Request):
         payload = await read_payload(request, "ItineraryRequest")
@@ -322,6 +357,12 @@ def create_app(settings=None, services=None):
             "/v1/places": ("get", None, "PlaceListResponse", "200"),
             "/v1/places/{place_id}": ("get", None, "Place", "200"),
             "/v1/recommendations": ("post", "RecommendationRequest", "RecommendationResponse", "200"),
+            "/v1/intent": ("post", "IntentRequest", "IntentResponse", "200"),
+            "/v1/traffic": ("post", "TrafficRequest", "TrafficResponse", "200"),
+            "/v1/social/session": ("post", "SocialSessionRequest", "SocialSessionResponse", "200"),
+            "/v1/social/state": ("get", None, "SocialState", "200"),
+            "/v1/social/events": ("get", None, "CommunityEvents", "200"),
+            "/v1/social/action": ("post", "SocialActionRequest", "SocialActionResponse", "200"),
             "/v1/itineraries": ("post", "ItineraryRequest", "ItineraryResponse", "200"),
             "/v1/feedback": ("post", "FeedbackRequest", "FeedbackResponse", "201"),
             "/v1/data-status": ("get", None, "DataStatusResponse", "200"),
@@ -331,10 +372,21 @@ def create_app(settings=None, services=None):
             operation["responses"][status] = {"description": "Success", "content": {"application/json": {"schema": {"$ref": f"#/components/schemas/{output_type}"}}}}
             for code in [422, 429, 500, 503]:
                 operation["responses"][str(code)] = {"description": "Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
+            if path.startswith("/v1/social/"):
+                # Social domain errors intentionally contain only a safe code;
+                # middleware/validation errors use the common request envelope.
+                social_error = {"type": "object", "additionalProperties": False,
+                                "properties": {"error": {"type": "object", "additionalProperties": False,
+                                "properties": {"code": {"type": "string"}}, "required": ["code"]}}, "required": ["error"]}
+                for code in [401, 403, 404, 409, 422, 429, 500, 503]:
+                    operation["responses"][str(code)] = {"description": "Error", "content": {"application/json": {"schema": {"anyOf": [social_error, {"$ref": "#/components/schemas/ErrorResponse"}]}}}}
+                if path not in {"/v1/social/session", "/v1/social/events"}:
+                    operation["security"] = [{"GuestBearer": []}]
             if input_type:
-                operation["requestBody"] = {"required": True, "content": {"application/json": {"schema": {"$ref": f"#/components/schemas/{input_type}"}, "examples": examples[input_type]}}}
+                operation["requestBody"] = {"required": True, "content": {"application/json": {"schema": {"$ref": f"#/components/schemas/{input_type}"}, "examples": examples.get(input_type, {})}}}
         schema["paths"]["/v1/health/ready"]["get"]["responses"]["503"] = {"description": "Unavailable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthResponse"}}}}
         schema["paths"]["/v1/places/{place_id}"]["get"]["responses"]["404"] = {"description": "Not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
+        schema["components"].setdefault("securitySchemes", {})["GuestBearer"] = {"type": "http", "scheme": "bearer", "description": "Temporary guest session token. The web proxy keeps it in an HttpOnly cookie."}
         app.openapi_schema = schema
         return schema
 
