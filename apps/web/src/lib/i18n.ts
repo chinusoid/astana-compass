@@ -260,9 +260,9 @@ const messages = {
   details: ["Факты и источники", "Фактілер мен дереккөздер", "Facts & sources"],
   why: ["Почему подходит", "Неліктен сәйкес келеді", "Why this fits"],
   suggestion: [
-    "Идея занятия · предложение ИИ",
-    "Не істеуге болады · ЖИ ұсынысы",
-    "Something to try · AI suggestion",
+    "Идея занятия · предложение",
+    "Не істеуге болады · ұсыныс",
+    "Something to try · suggestion",
   ],
   visit: ["Посещение ≈", "Баруға ≈", "Visit ≈"],
   travel: ["Дорога", "Жол", "Travel"],
