@@ -1,0 +1,214 @@
+[
+  {
+    "id": "ru-coffee",
+    "locale": "ru",
+    "query": "Выпить кофе",
+    "relevant": [
+      "synthetic:Northstar"
+    ]
+  },
+  {
+    "id": "en-coffee",
+    "locale": "en",
+    "query": "Coffee near me",
+    "relevant": [
+      "synthetic:Northstar"
+    ]
+  },
+  {
+    "id": "kk-cafe",
+    "locale": "kk",
+    "query": "Жақын кафе керек",
+    "relevant": [
+      "synthetic:Northstar"
+    ]
+  },
+  {
+    "id": "ru-sockets",
+    "locale": "ru",
+    "query": "Хочу зарядить ноутбук",
+    "relevant": [
+      "synthetic:Northstar"
+    ]
+  },
+  {
+    "id": "en-sockets",
+    "locale": "en",
+    "query": "Charging for my laptop",
+    "relevant": [
+      "synthetic:Northstar"
+    ]
+  },
+  {
+    "id": "kk-quiet",
+    "locale": "kk",
+    "query": "Тыныш орын",
+    "relevant": [
+      "synthetic:Lantern"
+    ]
+  },
+  {
+    "id": "ru-library",
+    "locale": "ru",
+    "query": "Библиотека рядом",
+    "relevant": [
+      "synthetic:Lantern"
+    ]
+  },
+  {
+    "id": "kk-library",
+    "locale": "kk",
+    "query": "Кітапхана керек",
+    "relevant": [
+      "synthetic:Lantern"
+    ]
+  },
+  {
+    "id": "en-history",
+    "locale": "en",
+    "query": "History archaeology",
+    "relevant": [
+      "synthetic:Chronicle"
+    ]
+  },
+  {
+    "id": "kk-history",
+    "locale": "kk",
+    "query": "Тарих мұражайы",
+    "relevant": [
+      "synthetic:Chronicle"
+    ]
+  },
+  {
+    "id": "ru-museum",
+    "locale": "ru",
+    "query": "Не кафе, а музей",
+    "relevant": [
+      "synthetic:Chronicle"
+    ]
+  },
+  {
+    "id": "en-art",
+    "locale": "en",
+    "query": "Art exhibition",
+    "relevant": [
+      "synthetic:Prism"
+    ]
+  },
+  {
+    "id": "ru-gallery",
+    "locale": "ru",
+    "query": "Галерея",
+    "relevant": [
+      "synthetic:Prism"
+    ]
+  },
+  {
+    "id": "kk-walk",
+    "locale": "kk",
+    "query": "Серуен",
+    "relevant": [
+      "synthetic:Birch",
+      "synthetic:Pond"
+    ]
+  },
+  {
+    "id": "ru-park",
+    "locale": "ru",
+    "query": "Прогулка по парку",
+    "relevant": [
+      "synthetic:Birch",
+      "synthetic:Pond"
+    ]
+  },
+  {
+    "id": "en-play",
+    "locale": "en",
+    "query": "Playground for kids",
+    "relevant": [
+      "synthetic:Rocket"
+    ]
+  },
+  {
+    "id": "ru-view",
+    "locale": "ru",
+    "query": "Смотровая площадка",
+    "relevant": [
+      "synthetic:Horizon"
+    ]
+  },
+  {
+    "id": "en-meal",
+    "locale": "en",
+    "query": "Dinner nearby",
+    "relevant": [
+      "synthetic:Saffron"
+    ]
+  },
+  {
+    "id": "kk-food",
+    "locale": "kk",
+    "query": "Тамақ ішетін орын",
+    "relevant": [
+      "synthetic:Saffron"
+    ]
+  },
+  {
+    "id": "en-cinema",
+    "locale": "en",
+    "query": "A cinema for movies",
+    "relevant": [
+      "synthetic:Orbit"
+    ]
+  },
+  {
+    "id": "ru-garden",
+    "locale": "ru",
+    "query": "Ботанический сад",
+    "relevant": [
+      "synthetic:Pond"
+    ]
+  },
+  {
+    "id": "ru-source-name",
+    "locale": "ru",
+    "query": "Северная звезда",
+    "relevant": [
+      "synthetic:Northstar"
+    ]
+  },
+  {
+    "id": "en-unsupported-synonym",
+    "locale": "en",
+    "query": "Somewhere to study",
+    "relevant": [
+      "synthetic:Lantern"
+    ]
+  },
+  {
+    "id": "kk-unsupported-synonym",
+    "locale": "kk",
+    "query": "Дәмді ас",
+    "relevant": [
+      "synthetic:Saffron"
+    ]
+  },
+  {
+    "id": "ru-no-match",
+    "locale": "ru",
+    "query": "Планетарий",
+    "relevant": []
+  },
+  {
+    "id": "en-no-match",
+    "locale": "en",
+    "query": "Aquarium",
+    "relevant": []
+  },
+  {
+    "id": "kk-no-match",
+    "locale": "kk",
+    "query": "Аквариум",
+    "relevant": []
+  }
+]

@@ -1,0 +1,414 @@
+[
+  {
+    "id": "synthetic:Northstar",
+    "name": "SYNTHETIC Northstar",
+    "location": {
+      "lat": 51.101,
+      "lon": 71.4
+    },
+    "categories": [
+      "cafe"
+    ],
+    "description": "Synthetic test scene only. Coffee and tea.",
+    "facts": [
+      {
+        "key": "indoor",
+        "status": "known",
+        "value": true,
+        "evidence_ids": [
+          "synthetic:evidence:Northstar"
+        ]
+      },
+      {
+        "key": "has_power_outlets",
+        "status": "known",
+        "value": true,
+        "evidence_ids": [
+          "synthetic:evidence:Northstar"
+        ]
+      },
+      {
+        "key": "name:ru",
+        "status": "known",
+        "value": "Северная звезда",
+        "evidence_ids": [
+          "synthetic:evidence:Northstar"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "synthetic:evidence:Northstar",
+        "source_name": "Independent synthetic retrieval evaluation",
+        "source_type": "synthetic",
+        "source_url": "https://example.invalid/quality/Northstar",
+        "source_record_id": "synthetic:record:Northstar",
+        "retrieved_at": "2026-10-19T00:00:00+05:00",
+        "is_synthetic": true
+      }
+    ],
+    "is_synthetic": true
+  },
+  {
+    "id": "synthetic:Lantern",
+    "name": "SYNTHETIC Lantern",
+    "location": {
+      "lat": 51.102,
+      "lon": 71.4
+    },
+    "categories": [
+      "library"
+    ],
+    "description": "Synthetic test scene only. Reading room and books.",
+    "facts": [
+      {
+        "key": "indoor",
+        "status": "known",
+        "value": true,
+        "evidence_ids": [
+          "synthetic:evidence:Lantern"
+        ]
+      },
+      {
+        "key": "quiet",
+        "status": "known",
+        "value": true,
+        "evidence_ids": [
+          "synthetic:evidence:Lantern"
+        ]
+      },
+      {
+        "key": "has_wifi",
+        "status": "known",
+        "value": true,
+        "evidence_ids": [
+          "synthetic:evidence:Lantern"
+        ]
+      },
+      {
+        "key": "name:kk",
+        "status": "known",
+        "value": "Шырақ кітапханасы",
+        "evidence_ids": [
+          "synthetic:evidence:Lantern"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "synthetic:evidence:Lantern",
+        "source_name": "Independent synthetic retrieval evaluation",
+        "source_type": "synthetic",
+        "source_url": "https://example.invalid/quality/Lantern",
+        "source_record_id": "synthetic:record:Lantern",
+        "retrieved_at": "2026-10-19T00:00:00+05:00",
+        "is_synthetic": true
+      }
+    ],
+    "is_synthetic": true
+  },
+  {
+    "id": "synthetic:Chronicle",
+    "name": "SYNTHETIC Chronicle",
+    "location": {
+      "lat": 51.103,
+      "lon": 71.4
+    },
+    "categories": [
+      "museum"
+    ],
+    "description": "Synthetic test scene only. History and archaeology.",
+    "facts": [
+      {
+        "key": "indoor",
+        "status": "known",
+        "value": true,
+        "evidence_ids": [
+          "synthetic:evidence:Chronicle"
+        ]
+      },
+      {
+        "key": "name:kk",
+        "status": "known",
+        "value": "Тарих мұражайы",
+        "evidence_ids": [
+          "synthetic:evidence:Chronicle"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "synthetic:evidence:Chronicle",
+        "source_name": "Independent synthetic retrieval evaluation",
+        "source_type": "synthetic",
+        "source_url": "https://example.invalid/quality/Chronicle",
+        "source_record_id": "synthetic:record:Chronicle",
+        "retrieved_at": "2026-10-19T00:00:00+05:00",
+        "is_synthetic": true
+      }
+    ],
+    "is_synthetic": true
+  },
+  {
+    "id": "synthetic:Birch",
+    "name": "SYNTHETIC Birch",
+    "location": {
+      "lat": 51.104,
+      "lon": 71.4
+    },
+    "categories": [
+      "park"
+    ],
+    "description": "Synthetic test scene only. Green trees and paths.",
+    "facts": [
+      {
+        "key": "indoor",
+        "status": "known",
+        "value": false,
+        "evidence_ids": [
+          "synthetic:evidence:Birch"
+        ]
+      },
+      {
+        "key": "free_entry",
+        "status": "known",
+        "value": true,
+        "evidence_ids": [
+          "synthetic:evidence:Birch"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "synthetic:evidence:Birch",
+        "source_name": "Independent synthetic retrieval evaluation",
+        "source_type": "synthetic",
+        "source_url": "https://example.invalid/quality/Birch",
+        "source_record_id": "synthetic:record:Birch",
+        "retrieved_at": "2026-10-19T00:00:00+05:00",
+        "is_synthetic": true
+      }
+    ],
+    "is_synthetic": true
+  },
+  {
+    "id": "synthetic:Prism",
+    "name": "SYNTHETIC Prism",
+    "location": {
+      "lat": 51.105,
+      "lon": 71.4
+    },
+    "categories": [
+      "gallery"
+    ],
+    "description": "Synthetic test scene only. Contemporary paintings.",
+    "facts": [
+      {
+        "key": "indoor",
+        "status": "known",
+        "value": true,
+        "evidence_ids": [
+          "synthetic:evidence:Prism"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "synthetic:evidence:Prism",
+        "source_name": "Independent synthetic retrieval evaluation",
+        "source_type": "synthetic",
+        "source_url": "https://example.invalid/quality/Prism",
+        "source_record_id": "synthetic:record:Prism",
+        "retrieved_at": "2026-10-19T00:00:00+05:00",
+        "is_synthetic": true
+      }
+    ],
+    "is_synthetic": true
+  },
+  {
+    "id": "synthetic:Rocket",
+    "name": "SYNTHETIC Rocket",
+    "location": {
+      "lat": 51.106,
+      "lon": 71.4
+    },
+    "categories": [
+      "playground"
+    ],
+    "description": "Synthetic test scene only. Outdoor climbing frame.",
+    "facts": [
+      {
+        "key": "indoor",
+        "status": "known",
+        "value": false,
+        "evidence_ids": [
+          "synthetic:evidence:Rocket"
+        ]
+      },
+      {
+        "key": "child_friendly",
+        "status": "known",
+        "value": true,
+        "evidence_ids": [
+          "synthetic:evidence:Rocket"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "synthetic:evidence:Rocket",
+        "source_name": "Independent synthetic retrieval evaluation",
+        "source_type": "synthetic",
+        "source_url": "https://example.invalid/quality/Rocket",
+        "source_record_id": "synthetic:record:Rocket",
+        "retrieved_at": "2026-10-19T00:00:00+05:00",
+        "is_synthetic": true
+      }
+    ],
+    "is_synthetic": true
+  },
+  {
+    "id": "synthetic:Horizon",
+    "name": "SYNTHETIC Horizon",
+    "location": {
+      "lat": 51.107,
+      "lon": 71.4
+    },
+    "categories": [
+      "viewpoint"
+    ],
+    "description": "Synthetic test scene only. City panorama.",
+    "facts": [
+      {
+        "key": "indoor",
+        "status": "known",
+        "value": false,
+        "evidence_ids": [
+          "synthetic:evidence:Horizon"
+        ]
+      },
+      {
+        "key": "free_entry",
+        "status": "known",
+        "value": true,
+        "evidence_ids": [
+          "synthetic:evidence:Horizon"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "synthetic:evidence:Horizon",
+        "source_name": "Independent synthetic retrieval evaluation",
+        "source_type": "synthetic",
+        "source_url": "https://example.invalid/quality/Horizon",
+        "source_record_id": "synthetic:record:Horizon",
+        "retrieved_at": "2026-10-19T00:00:00+05:00",
+        "is_synthetic": true
+      }
+    ],
+    "is_synthetic": true
+  },
+  {
+    "id": "synthetic:Saffron",
+    "name": "SYNTHETIC Saffron",
+    "location": {
+      "lat": 51.108,
+      "lon": 71.4
+    },
+    "categories": [
+      "restaurant"
+    ],
+    "description": "Synthetic test scene only. Meals and regional cuisine.",
+    "facts": [
+      {
+        "key": "indoor",
+        "status": "known",
+        "value": true,
+        "evidence_ids": [
+          "synthetic:evidence:Saffron"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "synthetic:evidence:Saffron",
+        "source_name": "Independent synthetic retrieval evaluation",
+        "source_type": "synthetic",
+        "source_url": "https://example.invalid/quality/Saffron",
+        "source_record_id": "synthetic:record:Saffron",
+        "retrieved_at": "2026-10-19T00:00:00+05:00",
+        "is_synthetic": true
+      }
+    ],
+    "is_synthetic": true
+  },
+  {
+    "id": "synthetic:Orbit",
+    "name": "SYNTHETIC Orbit",
+    "location": {
+      "lat": 51.109,
+      "lon": 71.4
+    },
+    "categories": [
+      "cinema"
+    ],
+    "description": "Synthetic test scene only. Film screenings.",
+    "facts": [
+      {
+        "key": "indoor",
+        "status": "known",
+        "value": true,
+        "evidence_ids": [
+          "synthetic:evidence:Orbit"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "synthetic:evidence:Orbit",
+        "source_name": "Independent synthetic retrieval evaluation",
+        "source_type": "synthetic",
+        "source_url": "https://example.invalid/quality/Orbit",
+        "source_record_id": "synthetic:record:Orbit",
+        "retrieved_at": "2026-10-19T00:00:00+05:00",
+        "is_synthetic": true
+      }
+    ],
+    "is_synthetic": true
+  },
+  {
+    "id": "synthetic:Pond",
+    "name": "SYNTHETIC Pond",
+    "location": {
+      "lat": 51.11,
+      "lon": 71.4
+    },
+    "categories": [
+      "garden"
+    ],
+    "description": "Synthetic test scene only. Botanical collection.",
+    "facts": [
+      {
+        "key": "indoor",
+        "status": "known",
+        "value": false,
+        "evidence_ids": [
+          "synthetic:evidence:Pond"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "synthetic:evidence:Pond",
+        "source_name": "Independent synthetic retrieval evaluation",
+        "source_type": "synthetic",
+        "source_url": "https://example.invalid/quality/Pond",
+        "source_record_id": "synthetic:record:Pond",
+        "retrieved_at": "2026-10-19T00:00:00+05:00",
+        "is_synthetic": true
+      }
+    ],
+    "is_synthetic": true
+  }
+]
