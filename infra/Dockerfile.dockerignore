@@ -17,6 +17,7 @@ infra/secrets
 **/.pytest_cache
 **/.ruff_cache
 **/.mypy_cache
+**/.test-tmp*
 **/.next
 **/dist
 **/coverage
@@ -26,5 +27,8 @@ infra/secrets
 **/*.db
 data/raw
 data/cache
+# Real snapshots are runtime inputs, never baked into this API image.
+data/samples
+data/manifests
 work
 outputs

@@ -186,6 +186,14 @@ jobs:
 
           asyncio.run(check())
           PY
+      - name: Installed live adapters with an explicit snapshot and no network
+        shell: bash
+        run: |
+          docker run --rm --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --mount "type=bind,source=${GITHUB_WORKSPACE}/data/samples/astana-osm.json,target=/data/astana-osm.json,readonly" \
+            --mount "type=bind,source=${GITHUB_WORKSPACE}/infra/check_image.py,target=/opt/check_image.py,readonly" \
+            astana-compass:local python /opt/check_image.py --installed --snapshot /data/astana-osm.json
       - name: Packaged sandbox assets
         run: |
           curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8000/sandbox
