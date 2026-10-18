@@ -41,6 +41,12 @@ PATTERNS = {
 }
 CLAUSE = re.compile(r"[,;.!?\n]|\b(?:но|but|instead|однако|а|бірақ)\b", re.I)
 NEG_BEFORE = re.compile(r"(?<!\w)(?:не|без|not|no|without|avoid|don['’]?t|doesn['’]?t)(?!\w)", re.I)
+# Scope a prefix to its following phrase. Arbitrary earlier nouns/distance
+# phrases must not negate a later goal: "no stairs museum", "без сахара кофе".
+NEG_BRIDGE = re.compile(
+    r"\s*(?:(?:нуж\w{0,8}|хочу|хотим|надо|мне|нам|с|очень|тих\w{0,8}|спокойн\w{0,8}|"
+    r"need|want|like|a|an|the|any|to|for|very|quiet|peaceful|indoor|outdoor)\s+){0,6}", re.I,
+)
 NEG_AFTER = re.compile(
     r"^\s*(?:(?:мне|нам|is|are)\s+)?(?:не\s+(?:нуж\w{0,12}|важ\w{0,12}|обязател\w{0,12}|хочу)|"
     r"(?:not|(?:isn|aren)['’]t)\s+(?:needed|required|important)|optional|doesn['’]t\s+matter|"
@@ -68,7 +74,8 @@ def negated(clause: str, start: int, end: int) -> bool:
         return True
     if re.fullmatch(r"без\s+шума|not\s+noisy|no\s+(?:entry\s+)?fee", clause[start:end], re.I):
         return False
-    return NEG_BEFORE.search(clause[:start]) is not None
+    prefixes = list(NEG_BEFORE.finditer(clause[:start]))
+    return bool(prefixes and NEG_BRIDGE.fullmatch(clause[prefixes[-1].end():start]))
 
 
 @dataclass(frozen=True)

@@ -85,6 +85,27 @@ def test_negated_category_never_becomes_positive_match(query, locale):
     assert ids(result) == ["synthetic:Museum"]
 
 
+@pytest.mark.parametrize("query,locale,category", [
+    ("Не дальше 10 минут хочу кафе", "ru", "cafe"),
+    ("No stairs museum", "en", "museum"),
+    ("Без сахара кофе", "ru", "cafe"),
+    ("Not far from here a cafe", "en", "cafe"),
+    ("Без лестниц хочу тихое кафе", "ru", "cafe"),
+])
+def test_negation_of_another_phrase_does_not_exclude_the_requested_category(query, locale, category):
+    result = search([place("Target", category), place("Unrelated", "cinema")], query, locale)
+    assert ids(result) == ["synthetic:Target"]
+
+
+@pytest.mark.parametrize("query", [
+    "Не хочу тихое кафе, хочу музей",
+    "I don't want a quiet cafe but a museum",
+    "I do not need any cafe but a museum",
+])
+def test_local_category_negation_allows_common_need_words_and_modifiers(query):
+    assert ids(search([place("Cafe"), place("Museum", "museum")], query)) == ["synthetic:Museum"]
+
+
 @pytest.mark.parametrize("query", ["coffee, a socket isn't needed", "кофе, розетка не нужна", "кафе, розетка керек емес"])
 def test_negated_feature_never_becomes_matched_fact(query):
     result = search([place("Cafe", facts={"has_power_outlets": True})], query)
