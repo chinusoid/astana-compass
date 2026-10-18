@@ -167,6 +167,27 @@ test("real API: unknown required is excluded without weakening it", async ({
   ).toHaveValue("required");
 });
 
+test("presets preserve existing must-haves in the form and HTTP request", async ({ page }) => {
+  await fill(page);
+  const indoor = page.getByRole("combobox", { name: "В помещении", exact: true });
+  const children = page.getByRole("combobox", { name: "Подходит детям", exact: true });
+  await indoor.selectOption("required");
+  await children.selectOption("required");
+  await page.locator(".preset-row").getByRole("button", { name: "В помещении", exact: true }).click();
+  await page.locator(".preset-row").getByRole("button", { name: "С детьми", exact: true }).click();
+  await expect(indoor).toHaveValue("required");
+  await expect(children).toHaveValue("required");
+  const sent = page.waitForRequest(
+    (request) => request.url().endsWith("/recommendations") && request.method() === "POST",
+  );
+  await page.locator(".find-button").click();
+  const request = (await sent).postDataJSON() as RecommendationRequest;
+  expect(request.constraints).toEqual(expect.arrayContaining([
+    { key: "indoor", value: true, strength: "required" },
+    { key: "child_friendly", value: true, strength: "required" },
+  ]));
+});
+
 test("real API: no-match keeps every stop; explicit reorder clears the previous route", async ({
   page,
 }) => {
