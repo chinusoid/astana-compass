@@ -38,7 +38,7 @@ Install Node.js 24.19.0 with npm for the shared TypeScript check, then run:
 bash scripts/check.sh
 ```
 
-The helper installs the complete locked Python workspace, including `ai_providers`, and runs pytest, all canonical contract fixtures, generated-artifact synchronization, Ruff `E9,F` checks and the shared TypeScript compiler. The compiler is pinned separately in `.github/typescript/package-lock.json`; it does not modify the application or root JavaScript lockfiles. `npm ci --ignore-scripts` installs only that isolated compiler environment.
+The helper installs the complete locked Python workspace, including `ai_providers` and `city_context`, and runs pytest, all canonical contract fixtures, generated-artifact synchronization, Ruff `E9,F` checks and the shared TypeScript compiler. The compiler is pinned separately in `.github/typescript/package-lock.json`; it does not modify the application or root JavaScript lockfiles. `npm ci --ignore-scripts` installs only that isolated compiler environment.
 
 GitHub Actions runs these checks on pull requests and pushes to `main`, testing Python 3.12 and 3.14. A separate job builds the locked container and waits for readiness. The workflow has read-only repository permissions, uses no deployment credentials and never uses `pull_request_target`.
 
@@ -74,7 +74,7 @@ The image supplies pgvector. Application schema migrations and real adapter conn
 
 ## Configure real adapters and optional LLMs
 
-After real modules are merged, registered in the workspace and locked, start with:
+The context module is installed and locked. Real data/search modules must still be merged and configured before live readiness can succeed. Once those modules are available, start with:
 
 ```sh
 export ASTANA_MODE=live
@@ -85,6 +85,8 @@ bash scripts/dev.sh
 ```
 
 Live factories must match these `module:function` boundaries or be explicitly configured. Missing live adapters fail startup; the API must not silently substitute synthetic data. Each provider adapter documents its required server-side environment separately. The helper reads the process environment and does not automatically load `.env`.
+
+Context uses `ROUTING_PROVIDER=openrouteservice` and backend `ROUTING_API_KEY` (or `ORS_API_KEY`). Without a key, `ASTANA_ROUTE_ALLOW_APPROXIMATE=true` permits explicitly approximate null-geometry estimates; set it to `false` to require routing. `ASTANA_CONTEXT_TIMEOUT_SECONDS=6` and `ASTANA_CONTEXT_RETRIES=1` bound provider I/O. Weather is internal and disabled by default (`ASTANA_WEATHER_ENABLED=false`); enabling it requires reviewing the provider terms. See [context configuration](../../packages/city_context/README.md). Fixture mode continues using its synthetic adapters.
 
 The default `LLM_PROVIDER=none` uses deterministic explanations. Optional provider configuration uses `LLM_PROVIDER=openai` or `nvidia`, an explicitly selected `LLM_MODEL`, and the server-only `OPENAI_API_KEY` or `NVIDIA_API_KEY` (`LLM_API_KEY` is the shared fallback). Provider keys are never Docker build arguments or frontend configuration. They are supplied to the server process at runtime. Do not put them in `NEXT_PUBLIC_*` variables or commit a populated environment file.
 

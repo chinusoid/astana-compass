@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "astana-city-context"
+version = "0.1.0"
+description = "Evidence-backed schedules, pedestrian routing and internal weather for Astana Compass"
+requires-python = ">=3.12,<3.15"
+dependencies = ["astana-contracts>=0.1.0,<0.2", "httpx>=0.28,<1", "tzdata>=2025.2"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/astana_city_context"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/pyproject.toml", "/README.md"]
