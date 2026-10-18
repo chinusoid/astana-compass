@@ -1,4 +1,4 @@
-name: Foundation checks
+name: Project checks
 
 on:
   pull_request:
@@ -67,6 +67,96 @@ jobs:
       - name: Browser sandbox JavaScript syntax
         run: node --check services/api/src/astana_api/static/sandbox.js
 
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      UV_PYTHON: "3.12"
+      ASTANA_MODE: fixture
+      LLM_PROVIDER: none
+      ASTANA_WEATHER_ENABLED: "false"
+      ASTANA_API_URL: http://127.0.0.1:8000
+      ASTANA_ALLOW_FIXTURES: "true"
+      ASTANA_MAP_PROVIDER: none
+      ASTANA_E2E_PYTHON: ${{ github.workspace }}/.venv/bin/python
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.19.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.1"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            **/pyproject.toml
+      - name: Install pinned pnpm from the official registry
+        run: |
+          npm install --global pnpm@11.25.0 --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org
+          test "$(pnpm --version)" = "11.25.0"
+      - name: Install the complete locked Python workspace
+        run: uv sync --locked --all-packages
+      - name: Install the independent frontend lockfile
+        working-directory: apps/web
+        run: pnpm install --frozen-lockfile
+      - name: Frontend and browser-test type check
+        working-directory: apps/web
+        run: pnpm typecheck
+      - name: Frontend and browser-test lint
+        working-directory: apps/web
+        run: pnpm lint
+      - name: Frontend unit tests
+        working-directory: apps/web
+        run: pnpm test
+      - name: Production frontend build
+        working-directory: apps/web
+        run: pnpm build
+      - name: Install Chromium matching the locked Playwright version
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Browser E2E against the fixture API
+        shell: bash
+        run: |
+          api_log="$RUNNER_TEMP/frontend-api.log"
+          .venv/bin/python -m uvicorn astana_api.app:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log >"$api_log" 2>&1 &
+          api_pid=$!
+          cleanup() {
+            result=$?
+            trap - EXIT
+            kill "$api_pid" 2>/dev/null || true
+            wait "$api_pid" 2>/dev/null || true
+            if [ "$result" -ne 0 ]; then
+              tail -n 100 "$api_log"
+            fi
+            exit "$result"
+          }
+          trap cleanup EXIT
+          ready=false
+          for ((attempt = 0; attempt < 30; attempt++)); do
+            if ! kill -0 "$api_pid" 2>/dev/null; then
+              echo "Fixture API exited before becoming ready."
+              exit 1
+            fi
+            if curl --fail --silent --max-time 2 --output /dev/null http://127.0.0.1:8000/v1/health/ready; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            echo "Fixture API readiness timed out."
+            exit 1
+          fi
+          .venv/bin/python scripts/smoke.py --base-url http://127.0.0.1:8000
+          cd apps/web
+          pnpm test:e2e
+
   container:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -82,6 +172,20 @@ jobs:
         run: curl --fail --silent --show-error http://127.0.0.1:8000/v1/health/ready
       - name: Fixture HTTP scenarios against the installed image
         run: python3 scripts/smoke.py --base-url http://127.0.0.1:8000
+      - name: Installed context factory without credentials or external calls
+        run: |
+          docker compose -f infra/compose.yaml exec -T api python - <<'PY'
+          import asyncio
+          from astana_city_context import create_context
+
+          async def check():
+              context = await create_context(config={"mode": "live", "timezone": "Asia/Almaty"})
+              assert callable(context.enrich_places)
+              assert callable(context.estimate_route)
+              await context.aclose()
+
+          asyncio.run(check())
+          PY
       - name: Packaged sandbox assets
         run: |
           curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8000/sandbox
