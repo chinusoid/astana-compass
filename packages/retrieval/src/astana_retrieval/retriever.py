@@ -16,9 +16,9 @@ DYNAMIC_KEYS = frozenset({"open_at_requested_time", "weather_suitable"})
 STRATEGY = f"snapshot-bm25-{LEXICON_VERSION}"
 COPY = {
     "lexical": (
-        "Локальный лексический поиск BM25 и словарь RU/KK/EN; семантические embeddings не подключены. Оценка не является вероятностью.",
-        "Жергілікті BM25 мәтіндік іздеу және RU/KK/EN сөздігі; семантикалық embeddings қосылмаған. Баға ықтималдық емес.",
-        "Local BM25 lexical search with a RU/KK/EN lexicon; semantic embeddings are not configured. Scores are not probabilities.",
+        "Поиск по названиям, категориям и словам из описаний. Сложные пожелания могут потребовать уточнения.",
+        "Іздеу атаулар, санаттар және сипаттама сөздері бойынша жүреді. Күрделі қалауларды нақтылау қажет болуы мүмкін.",
+        "Search uses names, categories and description words. Complex requests may need clarification.",
     ),
     "pool": (
         "Проверено ограниченное число ближайших мест; релевантные места за пределами этой выборки могли не попасть в поиск.",
@@ -34,6 +34,11 @@ COPY = {
         "Неизвестные и динамические обязательные условия переданы на окончательную проверку; попадание в кандидаты не подтверждает их выполнение.",
         "Белгісіз және өзгермелі міндетті шарттар соңғы тексеруге жіберілді; кандидат болуы шарттың орындалғанын растамайды.",
         "Unknown and dynamic required conditions are deferred for final checks; candidate inclusion does not establish satisfaction.",
+    ),
+    "anchor": (
+        "Поиск идёт вокруг выбранной точки на карте. Близость к упомянутому ориентиру пока не проверена.",
+        "Мәтіндегі бағдар картада анықталмады; іздеу таңдалған нүктенің айналасында жүреді, бағдарға жақындығы тексерілмеді.",
+        "Search uses your selected map point; proximity to the place you mentioned has not been checked.",
     ),
 }
 
@@ -90,6 +95,8 @@ class LexicalRetriever:
         query = understand(request["query"])
         locale = request["locale"]
         warnings = [_text("lexical", locale)]
+        if query.has_unresolved_anchor:
+            warnings.append(_text("anchor", locale))
         async with asyncio.timeout(self.timeout_seconds):
             source = await self.repository.nearby(
                 origin=deepcopy(request["origin"]), radius_meters=request["radius_meters"], limit=self.pool_limit,

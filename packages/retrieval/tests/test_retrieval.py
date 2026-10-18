@@ -106,6 +106,32 @@ def test_local_category_negation_allows_common_need_words_and_modifiers(query):
     assert ids(search([place("Cafe"), place("Museum", "museum")], query)) == ["synthetic:Museum"]
 
 
+@pytest.mark.parametrize("query,locale", [
+    ("walk to a cafe", "en"), ("Хочу прогуляться до кафе", "ru"),
+    ("Кафеге жаяу барғым келеді", "kk"),
+])
+def test_walking_is_not_a_park_goal_when_an_explicit_destination_exists(query, locale):
+    result = search([place("Cafe"), place("Park", "park")], query, locale)
+    assert ids(result) == ["synthetic:Cafe"]
+
+
+@pytest.mark.parametrize("query,locale", [
+    ("coffee near a museum", "en"), ("Кафе у музея", "ru"),
+    ("Near the museum I want a coffee", "en"), ("Мұражай жанында кафе", "kk"),
+    ("Саябақтың жанындағы кафе", "kk"),
+])
+def test_location_anchor_category_does_not_replace_the_requested_destination(query, locale):
+    result = search([place("Cafe"), place("Museum", "museum"), place("Park", "park")], query, locale)
+    assert ids(result) == ["synthetic:Cafe"]
+    assert len(result["warnings"]) >= 2
+
+
+def test_walk_near_a_cafe_keeps_the_walking_goal_and_marks_anchor_unresolved():
+    result = search([place("Cafe"), place("Park", "park")], "walk near a cafe")
+    assert ids(result) == ["synthetic:Park"]
+    assert any("has not been checked" in warning for warning in result["warnings"])
+
+
 @pytest.mark.parametrize("query", ["coffee, a socket isn't needed", "кофе, розетка не нужна", "кафе, розетка керек емес"])
 def test_negated_feature_never_becomes_matched_fact(query):
     result = search([place("Cafe", facts={"has_power_outlets": True})], query)

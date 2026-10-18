@@ -8,10 +8,10 @@ import unicodedata
 
 LEXICON_VERSION = "ru-kk-en-1"
 CATEGORIES = {
-    "cafe": r"кафе|кофе\w{0,12}|coffee|caf[eé]s?|cappuccino|капучино|латте",
+    "cafe": r"кафе(?:ге|де|ден|ні|нің|лер(?:ге|де|ден|і|ін)?)?|кофе\w{0,12}|coffee|caf[eé]s?|cappuccino|капучино|латте",
     "restaurant": r"рестора\w{0,12}|поесть|обед\w{0,12}|ужин\w{0,12}|еда|restaurants?|dining|lunch|dinner|eat|тамақ\w{0,12}|мейрамхана\w{0,12}",
     "museum": r"музе\w{0,12}|museums?|мұражай\w{0,12}",
-    "park": r"парк\w{0,12}|сквер\w{0,12}|погулять|прогул\w{0,12}|parks?|walk\w{0,8}|саябақ\w{0,12}|серуен\w{0,12}",
+    "park": r"парк\w{0,12}|сквер\w{0,12}|parks?|саябақ\w{0,12}",
     "garden": r"сад|сада|саду|ботаническ\w{0,12}|gardens?|botanical|бақ|баққа|ботаникалық",
     "playground": r"детск\w{0,12}\s+площад\w{0,12}|playgrounds?|ойын\s+алаң\w{0,12}",
     "library": r"библиотек\w{0,12}|librar(?:y|ies)|кітапхана\w{0,12}",
@@ -40,6 +40,12 @@ PATTERNS = {
     for key, pattern in {**CATEGORIES, **FEATURES}.items()
 }
 CLAUSE = re.compile(r"[,;.!?\n]|\b(?:но|but|instead|однако|а|бірақ)\b", re.I)
+WALK = re.compile(r"(?<!\w)(?:погулять|прогул\w{0,12}|walk\w{0,8}|серуен\w{0,12})(?!\w)", re.I)
+ANCHOR_BEFORE = re.compile(
+    r"(?<!\w)(?:near|by|beside|around|next\s+to|close\s+to|у|возле|около|от|рядом\s+с|недалеко\s+от)"
+    r"\s+(?:(?:a|an|the)\s+)?$", re.I,
+)
+ANCHOR_AFTER = re.compile(r"^\s+(?:жанында(?:ғы)?|маңында(?:ғы)?|қасында(?:ғы)?)(?!\w)", re.I)
 NEG_BEFORE = re.compile(r"(?<!\w)(?:не|без|not|no|without|avoid|don['’]?t|doesn['’]?t)(?!\w)", re.I)
 # Scope a prefix to its following phrase. Arbitrary earlier nouns/distance
 # phrases must not negate a later goal: "no stairs museum", "без сахара кофе".
@@ -84,18 +90,27 @@ class Query:
     categories: frozenset[str]
     excluded_categories: frozenset[str]
     features: frozenset[str]
+    has_unresolved_anchor: bool
 
 
 def understand(text: str) -> Query:
     terms, positive, negative, features, negative_features = set(), set(), set(), set(), set()
+    walk_requested, has_anchor = False, False
     for clause in CLAUSE.split(normalize(text)):
         covered: set[int] = set()
+        for match in WALK.finditer(clause):
+            covered.update(range(match.start(), match.end()))
+            walk_requested |= not negated(clause, match.start(), match.end())
         for key, pattern in PATTERNS.items():
             for match in pattern.finditer(clause):
                 covered.update(range(match.start(), match.end()))
                 is_negative = negated(clause, match.start(), match.end())
                 if key in CATEGORIES:
-                    (negative if is_negative else positive).add(key)
+                    is_anchor = ANCHOR_BEFORE.search(clause[:match.start()]) or ANCHOR_AFTER.search(clause[match.end():])
+                    if is_anchor:
+                        has_anchor = True
+                    else:
+                        (negative if is_negative else positive).add(key)
                 else:
                     (negative_features if is_negative else features).add(key)
         for match in WORDS.finditer(clause):
@@ -107,11 +122,15 @@ def understand(text: str) -> Query:
                 terms.add(token)
     positive -= negative
     features -= negative_features
+    # A walk is an activity, not a competing park destination when the user
+    # explicitly asks to walk to a cafe/museum. Spatial anchors are not goals.
+    if walk_requested and not positive and "park" not in negative:
+        positive.add("park")
     terms.update("category:" + key for key in positive)
     terms.update("feature:" + key for key in features)
     return Query(
         frozenset(terms), frozenset().union(*(CATEGORY_GROUPS[k] for k in positive)),
-        frozenset().union(*(CATEGORY_GROUPS[k] for k in negative)), frozenset(features),
+        frozenset().union(*(CATEGORY_GROUPS[k] for k in negative)), frozenset(features), has_anchor,
     )
 
 
