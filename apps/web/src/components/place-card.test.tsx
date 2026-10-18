@@ -29,11 +29,59 @@ for (const locale of locales) {
     );
     expect(screen.getByText(t(locale, "suggestion"))).toBeVisible();
     expect(screen.getByText(seed.recommendations[0].why)).toBeVisible();
+    expect(
+      screen.queryByRole("link", { name: "ODbL 1.0" }),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: t(locale, "add") }));
     expect(onAdd).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: t(locale, "details") }));
     expect(onDetails).toHaveBeenCalledOnce();
   });
+}
+
+for (const locale of locales) {
+  for (const recommended of [false, true]) {
+    it(`credits OSM outside disclosures in ${locale} ${recommended ? "recommendations" : "catalog"}`, () => {
+      const place = structuredClone(seed.places[0]);
+      place.id = "osm:node/1";
+      place.is_synthetic = false;
+      place.evidence = place.evidence.map((entry) => ({
+        ...entry,
+        source_type: "osm",
+        source_name: "OpenStreetMap contributors",
+        source_url: "https://www.openstreetmap.org/node/1",
+        is_synthetic: false,
+      }));
+      render(
+        <PlaceCard
+          place={place}
+          recommendation={recommended ? seed.recommendations[0] : undefined}
+          locale={locale}
+          selected={false}
+          full={false}
+          active={false}
+          saved={false}
+          onSelect={vi.fn()}
+          onSave={vi.fn()}
+          onAdd={vi.fn()}
+          onDetails={vi.fn()}
+        />,
+      );
+      const license = screen.getByRole("link", { name: "ODbL 1.0" });
+      expect(license).toBeVisible();
+      expect(license).toHaveAttribute(
+        "href",
+        "https://opendatacommons.org/licenses/odbl/1-0/",
+      );
+      expect(license.closest("details")).toBeNull();
+      expect(
+        screen.getByRole("link", { name: /©.*OpenStreetMap/ }),
+      ).toHaveAttribute("href", "https://www.openstreetmap.org/copyright");
+      expect(
+        screen.getByTestId("place-card").querySelector(".badges"),
+      ).not.toHaveTextContent(t(locale, "synthetic"));
+    });
+  }
 }
 it("shows unknown and conflicting facts without inventing boolean values", () => {
   const place = structuredClone(seed.places[0]);

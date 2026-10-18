@@ -48,6 +48,7 @@ import {
 } from "./details";
 import PlaceCard from "./place-card";
 import IntentReview from "./intent-review";
+import OsmAttribution, { isOsmSourceUrl } from "./osm-attribution";
 import { applyIntentConstraints } from "@/lib/intent";
 
 const CityMap = dynamic(() => import("./city-map"), { ssr: false });
@@ -1407,6 +1408,9 @@ export default function CompassApp({
                         {dateTime(data.checked_at, locale)}
                       </p>
                       <p className="field-hint">{t(locale, "freshness")}</p>
+                      {data.sources.some((source) =>
+                        isOsmSourceUrl(source.source_url),
+                      ) && <OsmAttribution locale={locale} />}
                       {!data.sources.length && <p>{t(locale, "noSources")}</p>}
                       {data.sources.map((source, index) => (
                         <article

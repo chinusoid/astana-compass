@@ -43,7 +43,9 @@ pwsh -NoProfile -File .\scripts\dev.ps1 -Mode fixture -LlmProvider none -ApiPort
 
 Автоматический сбор данных выполняется отдельной командой data-модуля, перед запуском API. Веб-запрос пользователя не должен запускать импорт. Нужен существующий валидный snapshot, созданный импортёром и содержащий source/provenance; произвольный JSON или synthetic fixtures не заменяют реальный набор.
 
-После интеграции data-модуля в workspace команда для ограниченного импорта:
+В комплект входит готовый snapshot из **300 реальных OSM POI**, импортированных 19 октября 2026 в 03:30:43 Asia/Almaty. Источник — © OpenStreetMap contributors, [ODbL 1.0](../../data/samples/README.md). Это выборка из 628 объектов ответа Overpass, не полный охват города; время загрузки не является проверкой каждого факта. [Покрытие и пробелы](../data/README.md): лишь 86 мест имеют расписание, одно — описание, indoor/тишина/розетки не подтверждены.
+
+Команда для отдельного обновления ограниченного snapshot:
 
 ```powershell
 uv run --locked --no-env-file python -m astana_city_data.importer --output data/samples/astana-osm.json --cache data/samples/astana-overpass-cache.json --manifest data/manifests/astana-osm.json --limit 300
@@ -58,7 +60,9 @@ $env:ASTANA_POI_PATH = (Resolve-Path -LiteralPath '.\data\samples\astana-osm.jso
 pwsh -NoProfile -File .\scripts\dev.ps1 -Mode live -LlmProvider none
 ```
 
-В live-режиме подключаются `astana_city_data:create_repository`, `astana_retrieval:create_retriever` и `astana_city_context:create_context` через существующую composition root. При отсутствии модуля, snapshot или готовности API запуск завершается с ошибкой; скрытого перехода к трём synthetic POI нет. Если модуль данных ещё не интегрирован в вашу ветку, сначала интегрируйте согласованную работу Team 01, а для проверки интерфейса используйте явный fixture-режим.
+В live-режиме подключаются установленные `astana_city_data:create_repository`, `astana_retrieval:create_retriever` и `astana_city_context:create_context` через существующую composition root. При отсутствии или повреждении snapshot либо неготовности API запуск завершается с ошибкой; скрытого перехода к трём synthetic POI нет. После изменения snapshot API нужно перезапустить: repository загружает его один раз. По умолчанию данные старше семи дней показываются как `stale`; это не попытка автоматически обновить источник.
+
+Retriever использует BM25 и ограниченный словарь RU/KK/EN по ближайшей выборке; semantic embeddings, vector DB и собственное обучение отсутствуют. Он сохраняет provenance и не объявляет unknown required выполненным. Лексическое совпадение категории не подтверждает удобства конкретного места. [Ранжирование и настройки](../../packages/retrieval/README.md), [отдельные synthetic-eval и smoke реального snapshot](../retrieval/QUALITY.md).
 
 После запуска проверьте `/api/v1/data-status` и `/api/v1/places` через frontend или соответствующие `/v1/...` на API: должен быть live-режим, непустой каталог и реальные источники. Дата загрузки не доказывает актуальность каждого факта. Режим `live` сам по себе не подтверждает качество рекомендаций, доступность мест, работающую hosted-модель или маршрутизацию.
 

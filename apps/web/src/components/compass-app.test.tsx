@@ -27,6 +27,7 @@ vi.mock("next/dynamic", () => ({
   default: () =>
     function MapStub(props: {
       enabled: boolean;
+      provider: string;
       picking: boolean;
       selectedIds: string[];
       origin: { lat: number; lon: number } | null;
@@ -37,6 +38,7 @@ vi.mock("next/dynamic", () => ({
         <div
           data-testid="map"
           data-enabled={props.enabled}
+          data-provider={props.provider}
           data-picking={props.picking}
           data-selected={props.selectedIds.join(",")}
           data-origin={JSON.stringify(props.origin)}
@@ -68,6 +70,44 @@ afterEach(() => {
       Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
     else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
   });
+});
+
+it("credits the live OSM catalogue on the data page when the map is disabled", async () => {
+  navigation.pathname = "/about";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      Response.json(
+        url.includes("/data-status")
+          ? {
+              total_places: 300,
+              checked_at: "2026-10-19T03:30:43+05:00",
+              sources: [
+                {
+                  source_name: "OpenStreetMap contributors (offline snapshot)",
+                  source_url: "https://www.openstreetmap.org/copyright",
+                  status: "ready",
+                  place_count: 300,
+                  last_success_at: "2026-10-19T03:30:43+05:00",
+                  warnings: [],
+                },
+              ],
+            }
+          : { places: [], next_cursor: null },
+        { headers: { "x-astana-data-mode": "live" } },
+      ),
+    ),
+  );
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures={false}
+      mapProvider="none"
+    />,
+  );
+  expect(await screen.findByRole("link", { name: "ODbL 1.0" })).toBeVisible();
+  expect(screen.getByTestId("map")).toHaveAttribute("data-provider", "none");
+  expect(screen.queryByText(t("ru", "fixtureBanner"))).not.toBeInTheDocument();
 });
 
 for (const [key, preset] of [

@@ -1,6 +1,6 @@
 # Local development and checks
 
-The foundation runs a local HTTP API. Its default mode is `fixture`: synthetic places and approximate synthetic routes, clearly marked in responses. The optional database profile prepares a PostgreSQL/pgvector service for future real adapters; the fixture API has no database dependency.
+The API defaults to `fixture`: synthetic places and approximate synthetic routes, clearly marked in responses. Explicit live mode uses the bundled 300-place OSM snapshot and local multilingual lexical retrieval. Neither mode requires PostgreSQL; the optional database profile prepares a future PostgreSQL/pgvector backend. For PowerShell launch/check commands, see [Windows instructions](WINDOWS.md).
 
 ## Start the API
 
@@ -38,7 +38,7 @@ Install Node.js 24.19.0 with npm for the shared TypeScript check, then run:
 bash scripts/check.sh
 ```
 
-The helper installs the complete locked Python workspace, including `ai_providers` and `city_context`, and runs pytest, all canonical contract fixtures, generated-artifact synchronization, Ruff `E9,F` checks and the shared TypeScript compiler. The compiler is pinned separately in `.github/typescript/package-lock.json`; it does not modify the application or root JavaScript lockfiles. `npm ci --ignore-scripts` installs only that isolated compiler environment.
+The helper installs the complete locked Python workspace, including `city_data`, `retrieval`, `ai_providers` and `city_context`, and runs pytest, all canonical contract fixtures, generated-artifact synchronization, Ruff `E9,F` checks and the shared TypeScript compiler. The compiler is pinned separately in `.github/typescript/package-lock.json`; it does not modify the application or root JavaScript lockfiles. `npm ci --ignore-scripts` installs only that isolated compiler environment. The Windows `scripts/check.ps1` also runs frontend types, lint, unit tests and production build, with pinned `pnpm dlx npm@11.6.2` fallback if npm is unavailable.
 
 GitHub Actions runs these checks on pull requests and pushes to `main`, testing Python 3.12 and 3.14. A separate job builds the locked container and waits for readiness. The workflow has read-only repository permissions, uses no deployment credentials and never uses `pull_request_target`.
 
@@ -70,14 +70,15 @@ docker compose -f infra/compose.yaml exec postgres psql -U astana -d astana -c '
 
 Do not regenerate the file after initializing an existing database volume without deliberately rotating the database password too. PostgreSQL initializes its password only for a new data directory. The profile uses database/user `astana`, a Compose file secret, and a persistent named volume. Its port is bound to `127.0.0.1:5432`. `docker compose down` retains the volume.
 
-The image supplies pgvector. Application schema migrations and real adapter connection wiring arrive through their owning modules; starting this profile alone does not enable live city data.
+The image supplies pgvector. Application schema migrations and PostgreSQL repository/index wiring remain future work. The current live repository reads an immutable JSON snapshot and the retriever uses BM25 plus a RU/KK/EN lexicon; starting this profile alone neither changes that backend nor enables embeddings.
 
 ## Configure real adapters and optional LLMs
 
-The context module is installed and locked. Real data/search modules must still be merged and configured before live readiness can succeed. Once those modules are available, start with:
+Data, retrieval and context modules are installed and locked. The repository needs an explicit snapshot path; the committed OSM sample contains 300 real records with source attribution and a reproducible import manifest. From the repository root:
 
 ```sh
 export ASTANA_MODE=live
+export ASTANA_POI_PATH="$PWD/data/samples/astana-osm.json"
 export ASTANA_REPOSITORY_FACTORY=astana_city_data:create_repository
 export ASTANA_RETRIEVER_FACTORY=astana_retrieval:create_retriever
 export ASTANA_CONTEXT_FACTORY=astana_city_context:create_context
@@ -85,6 +86,10 @@ bash scripts/dev.sh
 ```
 
 Live factories must match these `module:function` boundaries or be explicitly configured. Missing live adapters fail startup; the API must not silently substitute synthetic data. Each provider adapter documents its required server-side environment separately. The helper reads the process environment and does not automatically load `.env`.
+
+The sample was downloaded on 2026-10-18 at 22:30:43 UTC. It is a bounded named-category selection, not complete city coverage. Only one place has a source description and 86 have opening hours; unknown amenities remain unknown. [Import/provenance and coverage](../data/README.md), [OSM data license](../../data/samples/README.md), [update command](../../packages/city_data/README.md). Import runs separately from API requests; restart the API to load a replaced snapshot. The freshness warning is based on import/OSM replica time and does not certify facts on the ground.
+
+Live retrieval is local BM25 with a small RU/KK/EN lexicon and a bounded nearest-place pool. No semantic embeddings or paid inference are used by that retriever. [Synthetic evaluation and real snapshot smoke](../retrieval/QUALITY.md) are distinct; neither establishes complete coverage or independent end-to-end recommendation quality.
 
 Context uses `ROUTING_PROVIDER=openrouteservice` and backend `ROUTING_API_KEY` (or `ORS_API_KEY`). Without a key, `ASTANA_ROUTE_ALLOW_APPROXIMATE=true` permits explicitly approximate null-geometry estimates; set it to `false` to require routing. `ASTANA_CONTEXT_TIMEOUT_SECONDS=6` and `ASTANA_CONTEXT_RETRIES=1` bound provider I/O. Weather is internal and disabled by default (`ASTANA_WEATHER_ENABLED=false`); enabling it requires reviewing the provider terms. See [context configuration](../../packages/city_context/README.md). Fixture mode continues using its synthetic adapters.
 

@@ -12,6 +12,7 @@ import type { Place, Recommendation } from "@astana/api-client";
 import { duration } from "@/lib/format";
 import { t, label, type Locale } from "@/lib/i18n";
 import { Sources, RouteNotes, Warnings } from "./details";
+import OsmAttribution from "./osm-attribution";
 
 const cardCopy = {
   ru: {
@@ -194,6 +195,10 @@ export default function PlaceCard({
           <p className="catalog-description">{place.description}</p>
         )
       )}
+      {!place.is_synthetic &&
+        place.evidence.some(
+          (e) => e.source_type === "osm" && !e.is_synthetic,
+        ) && <OsmAttribution locale={locale} />}
       {place.facts.some((f) => f.status !== "known") && (
         <p className="small muted unknown-note">
           {t(locale, "unknown")}:{" "}
