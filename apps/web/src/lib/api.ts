@@ -33,6 +33,21 @@ export class ApiError extends Error {
 }
 export type DataMode = "fixture" | "live" | "unknown";
 
+function hasSyntheticMarker(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasSyntheticMarker);
+  if (value === null || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return (
+    record.is_synthetic === true ||
+    record.source_type === "synthetic" ||
+    ["id", "source_record_id"].some(
+      (key) =>
+        typeof record[key] === "string" && record[key].startsWith("synthetic:"),
+    ) ||
+    Object.values(record).some(hasSyntheticMarker)
+  );
+}
+
 // Private frontend transport. All public wire types come from @astana/api-client;
 // runtime shapes come directly from the canonical schema, never a second DTO.
 export function createApi(
@@ -89,11 +104,7 @@ export function createApi(
         ? [payload as Place]
         : ((payload as { places?: Place[] }).places ?? []);
     if (!places.every(placeIntegrity)) throw new ApiError("invalid_response");
-    if (
-      places.some(
-        (p) => p.is_synthetic || p.evidence.some((e) => e.is_synthetic),
-      )
-    ) {
+    if (hasSyntheticMarker(payload)) {
       onMode("fixture");
       if (!allowFixtures || mode === "live")
         throw new ApiError("fixture_disabled");
