@@ -30,7 +30,7 @@ import type {
 } from "@astana/api-client";
 import { ApiError, asApiError, createApi, type DataMode } from "@/lib/api";
 import { astanaInstant, dateTime, duration, safeUrl } from "@/lib/format";
-import { constraintKeys, locales, t, type Locale } from "@/lib/i18n";
+import { constraintKeys, label, locales, t, type Locale } from "@/lib/i18n";
 import { valid } from "@/lib/contracts";
 import {
   Dialog,
@@ -609,7 +609,9 @@ export default function CompassApp({
                               constraints: {
                                 ...form.constraints,
                                 [i === 1 ? "indoor" : "child_friendly"]:
-                                  "preferred",
+                                  form.constraints[
+                                    i === 1 ? "indoor" : "child_friendly"
+                                  ] || "preferred",
                               },
                             }
                           : {}),
@@ -875,6 +877,13 @@ export default function CompassApp({
                     </>
                   ) : (
                     <>
+                      <p className="result-status" role="status">
+                        <ShieldCheck size={17} />
+                        {t(
+                          locale,
+                          itinerary.status === "partial" ? "partial" : "matched",
+                        )}
+                      </p>
                       <div className="journey-total">
                         <span>{t(locale, "total")}</span>
                         <strong>
@@ -890,25 +899,48 @@ export default function CompassApp({
                         )}
                       </p>
                       <ol className="itinerary-visits">
-                        {itinerary.stops.map((stop) => (
-                          <li key={stop.place_id}>
-                            <b>
-                              {
-                                itinerary.places.find(
-                                  (p) => p.id === stop.place_id,
-                                )?.name
-                              }
-                            </b>
-                            <span>
-                              {t(locale, "visit")}{" "}
-                              {duration(stop.visit_duration_seconds, locale)}
-                            </span>
-                            <p>
-                              <small>{t(locale, "suggestion")}</small>
-                              {stop.suggested_activity}
-                            </p>
-                          </li>
-                        ))}
+                        {itinerary.stops.map((stop) => {
+                          const place = itinerary.places.find(
+                            (p) => p.id === stop.place_id,
+                          );
+                          const compromises = stop.constraint_evaluations.filter(
+                            (evaluation) =>
+                              evaluation.strength === "preferred" &&
+                              evaluation.outcome !== "satisfied",
+                          );
+                          return (
+                            <li key={stop.place_id}>
+                              <b>{place?.name}</b>
+                              <span>
+                                {t(locale, "visit")}{" "}
+                                {duration(stop.visit_duration_seconds, locale)}
+                              </span>
+                              <p>
+                                <small>{t(locale, "suggestion")}</small>
+                                {stop.suggested_activity}
+                              </p>
+                              {compromises.map((evaluation) => (
+                                <div className="evaluation" key={evaluation.key}>
+                                  <strong>{label(locale, evaluation.key)}</strong>
+                                  <span>
+                                    {t(locale, evaluation.strength)} ·{" "}
+                                    {t(locale, evaluation.outcome)}
+                                  </span>
+                                  <p>{evaluation.explanation}</p>
+                                </div>
+                              ))}
+                              {compromises.length > 0 && (
+                                <button
+                                  type="button"
+                                  className="text-button"
+                                  onClick={() => void showDetails(stop.place_id)}
+                                >
+                                  {t(locale, "details")}
+                                </button>
+                              )}
+                            </li>
+                          );
+                        })}
                       </ol>
                       {itinerary.route && (
                         <>
