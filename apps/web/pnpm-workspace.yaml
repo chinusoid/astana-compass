@@ -1,0 +1,4 @@
+allowBuilds:
+  unrs-resolver: false
+minimumReleaseAgeExclude:
+  - maplibre-gl@6.15.0
