@@ -15,6 +15,8 @@ export async function generationFault(
           process.platform === "win32" ? "Scripts/python.exe" : "bin/python",
         ),
       [
+        "-X",
+        "utf8",
         path.resolve(process.cwd(), "../../tests/e2e/generation_response.py"),
         failure,
       ],
@@ -26,6 +28,8 @@ export async function generationFault(
       child.kill();
       reject(new Error("Synthetic generator replay timed out"));
     }, 15000);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
       output += chunk;
     });
