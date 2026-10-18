@@ -82,6 +82,20 @@ jobs:
         run: curl --fail --silent --show-error http://127.0.0.1:8000/v1/health/ready
       - name: Fixture HTTP scenarios against the installed image
         run: python3 scripts/smoke.py --base-url http://127.0.0.1:8000
+      - name: Installed context factory without credentials or external calls
+        run: |
+          docker compose -f infra/compose.yaml exec -T api python - <<'PY'
+          import asyncio
+          from astana_city_context import create_context
+
+          async def check():
+              context = await create_context(config={"mode": "live", "timezone": "Asia/Almaty"})
+              assert callable(context.enrich_places)
+              assert callable(context.estimate_route)
+              await context.aclose()
+
+          asyncio.run(check())
+          PY
       - name: Packaged sandbox assets
         run: |
           curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8000/sandbox

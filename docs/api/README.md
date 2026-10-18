@@ -22,7 +22,13 @@ create_retriever(*, repository: PlaceRepository, config: dict) -> Retriever
 create_context(*, config: dict) -> ContextProvider
 ```
 
-Default imports are `astana_city_data`, `astana_retrieval`, `astana_city_context`. `config` currently contains `mode='live'` and `timezone='Asia/Almaty'`. Adapters read their own documented server-side env. Implement `aclose()` for async resource cleanup (or synchronous `close()`). Factories must release partial resources if initialization fails before returning. The API closes successfully created resources at shutdown. Ports are defined in `astana_contracts`; root schemas remain canonical. Teams propose their workspace member/dependency changes for coordinator integration.
+Default imports are `astana_city_data`, `astana_retrieval`, `astana_city_context`. `config` currently contains `mode='live'` and `timezone='Asia/Almaty'`. Adapters read their own documented server-side env. Implement `aclose()` for async resource cleanup (or synchronous `close()`). Factories must release partial resources if initialization fails before returning. The API closes successfully created resources at shutdown. Ports are defined in `astana_contracts`; root schemas remain canonical. The context package is registered in the workspace and API runtime dependencies. Data/search packages still require integration.
+
+## Context configuration
+
+`astana_city_context:create_context` is installed in the workspace and container. It derives opening status for the supplied `start_at` in Asia/Almaty, preserves source facts, and estimates complete ordered walking trips including the requested return. Opening status does not yet establish opening at a later arrival or throughout a visit. Unsupported schedules stay unknown.
+
+Configure the server-only `ROUTING_API_KEY` (or `ORS_API_KEY`) for ORS. Missing or invalid routing responses can produce a clearly marked approximate route with null geometry; `ASTANA_ROUTE_ALLOW_APPROXIMATE=false` rejects that fallback. Weather remains internal, disabled by default and absent from the public v0.1 schema. See [module settings and limits](../../packages/city_context/README.md). These adapters do not make live mode ready without real data and retrieval.
 
 ## AI configuration
 
@@ -37,6 +43,6 @@ Set `LLM_PROVIDER=openai` and `LLM_MODEL` plus `OPENAI_API_KEY`, or `LLM_PROVIDE
 - `X-Astana-Data-Mode`, `X-Request-ID`, `Cache-Control: no-store`; disable HTTP access logs because list URL queries can carry private text.
 - Anonymous feedback is an explicitly submitted, bounded **in-memory** queue. It is lost on restart. No durable analytics/export or automatic training from feedback is implemented.
 - The app has no per-user rate limit or public edge protection; shared concurrency limits are local per worker. Configure ingress quotas/body/time limits before a public deployment.
-- Actual route availability, real POI ingestion, weather, embeddings, natural-language constraint extraction, frontend and persistent feedback belong to subsequent integrations. No endpoint silently infers hard constraints from prose.
+- Real POI ingestion, embeddings, natural-language constraint extraction, frontend and persistent feedback still need integration. Hosted routing/weather availability requires separate credentialed validation; offline tests do not establish it. No endpoint silently infers hard constraints from prose.
 
 Run `uv run pytest tests/integration` for API tests; full workspace checks are in `scripts/check.sh`.
