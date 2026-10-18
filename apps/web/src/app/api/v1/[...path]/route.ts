@@ -32,7 +32,7 @@ async function proxy(
   const postAllowed =
     request.method === "POST" &&
     path.length === 1 &&
-    ["recommendations", "itineraries", "feedback"].includes(path[0]);
+    ["recommendations", "itineraries", "feedback", "intent", "traffic"].includes(path[0]);
   if (!getAllowed && !postAllowed) return failure(404);
   try {
     const origin = new URL(

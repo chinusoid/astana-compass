@@ -1530,6 +1530,980 @@
         "warnings",
         "degraded_services"
       ]
+    },
+    "SocialProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "SocialSessionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "SocialMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/SocialProfile"
+        },
+        "available_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 14400
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Constraint"
+          },
+          "maxItems": 20
+        }
+      },
+      "required": [
+        "profile",
+        "available_seconds",
+        "constraints"
+      ]
+    },
+    "PartyState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "owner_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SocialMember"
+          },
+          "maxItems": 5
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "recommendations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecommendationResponse"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "itinerary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItineraryResponse"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SocialMessage"
+          },
+          "maxItems": 50
+        },
+        "locations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SharedLocation"
+          },
+          "maxItems": 5
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "owner_id",
+        "members",
+        "revision",
+        "recommendations",
+        "itinerary",
+        "messages",
+        "locations"
+      ]
+    },
+    "SocialState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/SocialProfile"
+        },
+        "friend_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "friends": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SocialProfile"
+          },
+          "maxItems": 50
+        },
+        "friend_requests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SocialProfile"
+          },
+          "maxItems": 50
+        },
+        "party_invites": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "owner": {
+                "$ref": "#/$defs/SocialProfile"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "owner"
+            ]
+          },
+          "maxItems": 20
+        },
+        "parties": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PartyState"
+          },
+          "maxItems": 20
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "profile",
+        "friend_code",
+        "friends",
+        "friend_requests",
+        "party_invites",
+        "parties",
+        "expires_at"
+      ]
+    },
+    "SocialActionRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "friend_request"
+            },
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "action",
+            "code"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "friend_accept"
+            },
+            "profile_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "action",
+            "profile_id"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "friend_remove"
+            },
+            "profile_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "action",
+            "profile_id"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "party_create"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            }
+          },
+          "required": [
+            "action",
+            "name"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "party_invite"
+            },
+            "party_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "profile_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "action",
+            "party_id",
+            "profile_id"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "party_join"
+            },
+            "party_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "action",
+            "party_id"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "party_leave"
+            },
+            "party_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "action",
+            "party_id"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "preferences"
+            },
+            "party_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "available_seconds": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 14400
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Constraint"
+              },
+              "maxItems": 20
+            }
+          },
+          "required": [
+            "action",
+            "party_id",
+            "available_seconds",
+            "constraints"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "recommend"
+            },
+            "party_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "request": {
+              "$ref": "#/$defs/RecommendationRequest"
+            }
+          },
+          "required": [
+            "action",
+            "party_id",
+            "revision",
+            "request"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "itinerary"
+            },
+            "party_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "request": {
+              "$ref": "#/$defs/ItineraryRequest"
+            }
+          },
+          "required": [
+            "action",
+            "party_id",
+            "revision",
+            "request"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "logout"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "message"
+            },
+            "party_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "photo": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 24000,
+                  "pattern": "^data:image/jpeg;base64,[A-Za-z0-9+/]+={0,2}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "action",
+            "party_id",
+            "text",
+            "photo"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "location"
+            },
+            "party_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "coordinates": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Location"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "action",
+            "party_id",
+            "coordinates"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "event_create"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "location": {
+              "$ref": "#/$defs/Location"
+            },
+            "starts_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "ends_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "action",
+            "title",
+            "description",
+            "location",
+            "starts_at",
+            "ends_at"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "event_delete"
+            },
+            "event_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "action",
+            "event_id"
+          ]
+        }
+      ]
+    },
+    "SocialMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "author": {
+          "$ref": "#/$defs/SocialProfile"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "photo": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 24000,
+              "pattern": "^data:image/jpeg;base64,[A-Za-z0-9+/]+={0,2}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "author",
+        "text",
+        "photo",
+        "created_at"
+      ]
+    },
+    "SharedLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/SocialProfile"
+        },
+        "coordinates": {
+          "$ref": "#/$defs/Location"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "profile",
+        "coordinates",
+        "expires_at"
+      ]
+    },
+    "CommunityEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "starts_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ends_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "author": {
+          "$ref": "#/$defs/SocialProfile"
+        },
+        "is_verified": {
+          "const": false
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "description",
+        "location",
+        "starts_at",
+        "ends_at",
+        "author",
+        "is_verified",
+        "created_at"
+      ]
+    },
+    "CommunityEvents": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CommunityEvent"
+          },
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "events"
+      ]
+    },
+    "IntentRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "locale": {
+          "enum": [
+            "ru",
+            "kk",
+            "en"
+          ]
+        }
+      },
+      "required": [
+        "query",
+        "locale"
+      ]
+    },
+    "IntentConstraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "constraint": {
+          "$ref": "#/$defs/Constraint"
+        },
+        "source_quote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      },
+      "required": [
+        "constraint",
+        "source_quote"
+      ]
+    },
+    "IntentResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "enum": [
+            "openai",
+            "nvidia",
+            "rules"
+          ]
+        },
+        "locale": {
+          "enum": [
+            "ru",
+            "kk",
+            "en"
+          ]
+        },
+        "available_seconds": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 14400
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "time_evidence": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "anchor_text": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "categories": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "cafe",
+              "museum",
+              "park",
+              "playground",
+              "viewpoint",
+              "art",
+              "nightlife",
+              "event"
+            ]
+          },
+          "maxItems": 8
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IntentConstraint"
+          },
+          "maxItems": 12
+        },
+        "clarification_questions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "maxItems": 5
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "maxItems": 8
+        }
+      },
+      "required": [
+        "provider",
+        "locale",
+        "available_seconds",
+        "time_evidence",
+        "anchor_text",
+        "categories",
+        "constraints",
+        "clarification_questions",
+        "warnings"
+      ]
+    },
+    "TrafficRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "points": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Location"
+          },
+          "minItems": 1,
+          "maxItems": 6
+        }
+      },
+      "required": [
+        "points"
+      ]
+    },
+    "TrafficSegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "geometry": {
+          "$ref": "#/$defs/RouteGeometry"
+        },
+        "current_speed_kmh": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 300
+        },
+        "free_flow_speed_kmh": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 300
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "road_closed": {
+          "type": "boolean"
+        },
+        "fetched_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "geometry",
+        "current_speed_kmh",
+        "free_flow_speed_kmh",
+        "confidence",
+        "road_closed",
+        "fetched_at"
+      ]
+    },
+    "TrafficResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "live",
+            "partial",
+            "not_configured",
+            "unavailable"
+          ]
+        },
+        "provider": {
+          "const": "TomTom"
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TrafficSegment"
+          },
+          "maxItems": 6
+        },
+        "attribution": {
+          "const": "© TomTom"
+        }
+      },
+      "required": [
+        "status",
+        "provider",
+        "segments",
+        "attribution"
+      ]
+    },
+    "SocialSessionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "token": {
+          "type": "string",
+          "minLength": 40,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]{40,64}$"
+        },
+        "state": {
+          "$ref": "#/$defs/SocialState"
+        }
+      },
+      "required": [
+        "token",
+        "state"
+      ]
+    },
+    "SocialActionResponse": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SocialState"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "signed_out": {
+              "const": true
+            }
+          },
+          "required": [
+            "signed_out"
+          ]
+        }
+      ]
     }
   }
 }

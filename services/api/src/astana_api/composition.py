@@ -13,6 +13,7 @@ from .fixtures import FixtureRepository, FixtureRetriever, FixtureContext
 class Services:
     repository: object
     recommender: object
+    intent: object | None = None
 
 
 def resolve(path):
@@ -112,6 +113,11 @@ async def build_services(settings, stack):
             validate_port(generator, ExplanationGenerator)
         recommender = DefaultRecommendationService(repository, retriever, context, generator=generator)
         validate_port(recommender, RecommendationService)
-        services = Services(repository=repository, recommender=recommender)
+        from astana_ai_providers.intents import create_intent_analyzer
+        intent = await own(owned, create_intent_analyzer(
+            provider=settings.llm_provider if settings.llm_provider != "none" else "rules",
+            model=settings.llm_model or None, api_key=settings.llm_api_key or None,
+        ))
+        services = Services(repository=repository, recommender=recommender, intent=intent)
         stack.push_async_callback(owned.pop_all().aclose)
         return services

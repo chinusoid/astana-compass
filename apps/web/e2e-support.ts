@@ -9,7 +9,11 @@ export async function generationFault(
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const child = spawn(
-      process.env.ASTANA_E2E_PYTHON ?? path.resolve("../../.venv/bin/python"),
+      process.env.ASTANA_E2E_PYTHON ??
+        path.resolve(
+          "../../.venv",
+          process.platform === "win32" ? "Scripts/python.exe" : "bin/python",
+        ),
       [
         path.resolve(process.cwd(), "../../tests/e2e/generation_response.py"),
         failure,

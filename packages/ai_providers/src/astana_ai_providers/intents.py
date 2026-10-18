@@ -47,7 +47,7 @@ _NEG_BEFORE = re.compile(
     r"(?<!\w)(?:не|без|not|no|without|don't|dont|doesn't|doesnt|avoid|не\s+нуж\w{0,20})(?!\w)", re.I
 )
 _NEG_AFTER = re.compile(
-    r"^\s*(?:(?:мне|нам|is|are)\s+)?(?:не\s+(?:нуж\w{0,20}|важ\w{0,20}|обязател\w{0,20}|хочу)|(?:is\s+)?(?:not\s+(?:needed|required|important)|optional)|doesn.t\s+matter|керек\s+емес|маңызды\s+емес)",
+    r"^\s*(?:(?:мне|нам|is|are)\s+)?(?:не\s+(?:нуж\w{0,20}|важ\w{0,20}|обязател\w{0,20}|хочу)|(?:is\s+)?(?:not\s+(?:needed|required|important)|optional)|(?:isn|aren)['’]t\s+(?:needed|required|important)|doesn.t\s+matter|керек\s+емес|маңызды\s+емес)",
     re.I,
 )
 _FLIGHT = re.compile(
@@ -61,7 +61,8 @@ _TOURIST = re.compile(r"турист\w{0,20}|tourist\w{0,20}|visiting\s+Astana|�
 _NUMBER = r"(?:\d{1,4}(?:[.,]\d{1,2})?|one|two|three|four|half|один|одна|одну|два|две|три|четыре|бір|екі|үш|төрт)"
 _UNIT = r"(?:минут\w{0,20}|мин\.?|minutes?|mins?|сағат\w{0,20}|час\w{0,20}|hours?|hrs?|hr|h|мину[тт]\w{0,20})"
 _TIME = re.compile(
-    rf"(?<!\w)(?P<first>{_NUMBER})(?:\s*(?:[-–—]|до|to)\s*(?P<last>{_NUMBER}))?\s*(?P<unit>{_UNIT})(?!\w)", re.I
+    # Do not reinterpret the tail of an unsupported decimal as a whole number.
+    rf"(?<![\w.,])(?P<first>{_NUMBER})(?:\s*(?:[-–—]|до|to)\s*(?P<last>{_NUMBER}))?\s*(?P<unit>{_UNIT})(?!\w)", re.I
 )
 _NUM_WORDS = {
     "one": 1,
@@ -226,7 +227,9 @@ def _time(query: str) -> tuple[int | None, str | None, bool, bool]:
         # A negated duration or an upper/lower bound alone is not an available
         # budget. Compound times (1 h 30 min) are handled conservatively below.
         prefix = query[max(0, match.start() - 30) : match.start()]
-        if re.search(r"(?:не|not|less\s+than|more\s+than|меньше|больше|кем|артық|[-−–—])\s*$", prefix, re.I):
+        if re.search(
+            r"(?:(?<!\w)(?:не|not|less\s+than|more\s+than|меньше|больше|кем|артық)|[-−–—])\s*$", prefix, re.I
+        ):
             return None, None, False, True
         if not 60 <= seconds <= 14400 or first > last:
             return None, None, False, True
@@ -300,7 +303,7 @@ _INSTRUCTIONS = (
     "facts, opening hours, safety guarantees, live events, or invented names. "
     "available_seconds is the complete available outing duration; choose lower end of "
     "ranges. Time until a flight is NOT available outing time: return null for both "
-    "time fields and ask flight_time. anchor_text must be a short exact location excerpt. "
+    "time fields and ask flight_question. anchor_text must be a short exact location excerpt. "
     "All constraints will be rendered as preferred proposals for user confirmation. "
     "clarifications may only use the supplied codes."
 )
