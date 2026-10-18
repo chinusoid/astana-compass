@@ -3,22 +3,23 @@ name = "astana-compass"
 version = "0.1.0"
 description = "Astana Compass integration workspace"
 requires-python = ">=3.12,<3.15"
-dependencies = ["astana-api", "astana-contracts", "astana-recommender", "astana-ai-providers"]
+dependencies = ["astana-api", "astana-contracts", "astana-recommender", "astana-ai-providers", "astana-city-context"]
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "httpx>=0.28,<1", "build>=1.2,<2", "ruff>=0.11,<1"]
 
 [tool.uv.workspace]
-members = ["packages/contracts", "packages/recommender", "packages/ai_providers", "services/api"]
+members = ["packages/contracts", "packages/recommender", "packages/ai_providers", "packages/city_context", "services/api"]
 
 [tool.uv.sources]
 astana-contracts = { workspace = true }
 astana-recommender = { workspace = true }
 astana-api = { workspace = true }
 astana-ai-providers = { workspace = true }
+astana-city-context = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["packages/contracts/tests", "packages/recommender/tests", "packages/ai_providers/tests", "tests/integration"]
+testpaths = ["packages/contracts/tests", "packages/recommender/tests", "packages/ai_providers/tests", "packages/city_context/tests", "tests/integration"]
 addopts = "-q --import-mode=importlib"
 
 [tool.ruff]
