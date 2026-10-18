@@ -10,13 +10,25 @@ import {
 } from "../../apps/web/e2e-support";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import type {
+  IntentResponse,
+  SocialState,
+  SocialActionRequest,
+} from "../../packages/api_client/src/generated";
 
 const results = (page: Page) => page.locator(".results");
 const cards = (page: Page) => results(page).getByTestId("place-card");
 async function fill(page: Page) {
+  if (!new URL(page.url()).pathname.startsWith("/walk")) {
+    await page.getByRole("navigation").locator('a[href="/walk"]').click();
+  }
+  const advanced = page.locator("details.advanced-origin");
+  if ((await advanced.getAttribute("open")) === null)
+    await advanced.locator("summary").click();
   await page.locator('textarea[name="query"]').fill("Прогулка без спешки");
   await page.locator('input[name="latitude"]').fill("51.090");
   await page.locator('input[name="longitude"]').fill("71.420");
+  await advanced.getByRole("button").click();
   await page.locator('input[name="start"]').fill("2026-10-19T12:00");
   await page.locator('input[name="minutes"]').fill("90");
 }
@@ -37,7 +49,7 @@ async function screenshot(page: Page, name: string) {
   });
 }
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/walk");
 });
 
 test("real foundation API: manual start, sources, exact seconds, return itinerary, feedback, favorites", async ({
@@ -58,11 +70,7 @@ test("real foundation API: manual start, sources, exact seconds, return itinerar
       .getByText("Объяснение составлено по данным каталога", { exact: true })
       .first(),
   ).toBeVisible();
-  await cards(page)
-    .first()
-    .getByText("Почему подходит", { exact: true })
-    .click();
-  await expect(cards(page).first().locator(".why p").first()).toBeVisible();
+  await expect(cards(page).first().locator(".why-summary p")).toBeVisible();
   const detailsButton = cards(page)
     .first()
     .getByRole("button", { name: "Факты и источники" });
@@ -108,9 +116,6 @@ test("real foundation API: manual start, sources, exact seconds, return itinerar
       .locator(".itinerary-result")
       .getByText("С возвращением к старту", { exact: true }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Открыть карту", exact: true })
-    .click();
   await expect(page.locator(".maplibregl-canvas")).toBeVisible();
   await expect(page.locator(".map-callout.bottom")).toHaveCount(0);
   await expect(page.getByTestId("map-panel")).toHaveAttribute(
@@ -129,14 +134,14 @@ test("real foundation API: manual start, sources, exact seconds, return itinerar
   );
   expect(stored).not.toContain("51.09");
   expect(stored).not.toContain("Прогулка без спешки");
-  await page.getByRole("button", { name: /Избранное/ }).click();
+  await page.getByRole("link", { name: "Избранное", exact: true }).click();
   await page.getByRole("button", { name: "Удалить всё избранное" }).click();
   expect(
     await page.evaluate(() =>
       localStorage.getItem("astana-compass:favorites:v1"),
     ),
   ).toBeNull();
-  await page.keyboard.press("Escape");
+  await page.getByRole("navigation").locator('a[href="/walk"]').click();
   const feedback = page.waitForRequest((r) => r.url().endsWith("/feedback"));
   await page.getByRole("button", { name: "Да, полезно" }).click();
   expect((await feedback).postDataJSON()).toEqual({
@@ -167,25 +172,42 @@ test("real API: unknown required is excluded without weakening it", async ({
   ).toHaveValue("required");
 });
 
-test("presets preserve existing must-haves in the form and HTTP request", async ({ page }) => {
+test("presets preserve existing must-haves in the form and HTTP request", async ({
+  page,
+}) => {
   await fill(page);
-  const indoor = page.getByRole("combobox", { name: "В помещении", exact: true });
-  const children = page.getByRole("combobox", { name: "Подходит детям", exact: true });
+  const indoor = page.getByRole("combobox", {
+    name: "В помещении",
+    exact: true,
+  });
+  const children = page.getByRole("combobox", {
+    name: "Подходит детям",
+    exact: true,
+  });
   await indoor.selectOption("required");
   await children.selectOption("required");
-  await page.locator(".preset-row").getByRole("button", { name: "В помещении", exact: true }).click();
-  await page.locator(".preset-row").getByRole("button", { name: "С детьми", exact: true }).click();
+  await page
+    .locator(".preset-row")
+    .getByRole("button", { name: "В помещении", exact: true })
+    .click();
+  await page
+    .locator(".preset-row")
+    .getByRole("button", { name: "С детьми", exact: true })
+    .click();
   await expect(indoor).toHaveValue("required");
   await expect(children).toHaveValue("required");
   const sent = page.waitForRequest(
-    (request) => request.url().endsWith("/recommendations") && request.method() === "POST",
+    (request) =>
+      request.url().endsWith("/recommendations") && request.method() === "POST",
   );
   await page.locator(".find-button").click();
   const request = (await sent).postDataJSON() as RecommendationRequest;
-  expect(request.constraints).toEqual(expect.arrayContaining([
-    { key: "indoor", value: true, strength: "required" },
-    { key: "child_friendly", value: true, strength: "required" },
-  ]));
+  expect(request.constraints).toEqual(
+    expect.arrayContaining([
+      { key: "indoor", value: true, strength: "required" },
+      { key: "child_friendly", value: true, strength: "required" },
+    ]),
+  );
 });
 
 test("real API: no-match keeps every stop; explicit reorder clears the previous route", async ({
@@ -399,9 +421,6 @@ test("synthetic routed response draws a line, and editing removes it", async ({
     await route.fulfill({ response: actual, json: payload });
   });
   await page.getByRole("button", { name: "Рассчитать весь маршрут" }).click();
-  await page
-    .getByRole("button", { name: "Открыть карту", exact: true })
-    .click();
   await expect(page.getByTestId("map-panel")).toHaveAttribute(
     "data-route-geometry",
     "routed",
@@ -519,19 +538,18 @@ for (const [locale, name] of [
   }
 }
 
-test("keyboard, data status, empty catalog and map point selection", async ({
+test("keyboard, separate data page, empty catalog and map point selection", async ({
   page,
 }) => {
+  await page.goto("/");
   await page.keyboard.press("Tab");
   await expect(
     page.getByRole("link", { name: "Перейти к планированию" }),
   ).toBeFocused();
-  await page.getByRole("button", { name: "О данных", exact: true }).click();
+  await page.getByRole("link", { name: "О проекте", exact: true }).click();
+  await expect(page).toHaveURL(/\/about$/);
   await expect(page.locator(".data-total strong")).toHaveText("3");
-  await page.keyboard.press("Escape");
-  await expect(
-    page.getByRole("button", { name: "О данных", exact: true }),
-  ).toBeFocused();
+  await page.getByRole("link", { name: "Карта", exact: true }).click();
   await page
     .getByRole("textbox", { name: "Поиск по названию" })
     .fill("no-such-synthetic-place");
@@ -542,14 +560,451 @@ test("keyboard, data status, empty catalog and map point selection", async ({
   await expect(
     page.locator(".catalog").getByText("Здесь пока нет мест"),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Выбрать на карте", exact: true })
-    .click();
   const canvas = page.locator(".maplibregl-canvas");
   await expect(canvas).toBeVisible();
   await canvas.click({ position: { x: 120, y: 140 } });
   await expect(page.locator('input[name="latitude"]')).not.toHaveValue("");
   await expect(
-    page.getByRole("button", { name: "Выбрать на карте", exact: true }),
+    page.getByRole("button", { name: "Изменить точку", exact: true }),
   ).toHaveAttribute("aria-pressed", "false");
+});
+
+test("navigation preserves the private plan in memory and offers direct URLs", async ({
+  page,
+}) => {
+  await fill(page);
+  await search(page);
+  await cards(page)
+    .first()
+    .getByRole("button", { name: "В мой план", exact: true })
+    .click();
+  const coordinates = await page.locator('input[name="latitude"]').inputValue();
+  await page.getByRole("link", { name: "Избранное", exact: true }).click();
+  await expect(page).toHaveURL(/\/saved$/);
+  await page.goBack();
+  await expect(page.locator('textarea[name="query"]')).toHaveValue(
+    "Прогулка без спешки",
+  );
+  await expect(page.locator('input[name="latitude"]')).toHaveValue(coordinates);
+  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(1);
+  expect(page.url()).not.toContain("51.");
+  for (const route of ["/saved", "/about", "/party", "/events"]) {
+    const response = await page.goto(route);
+    expect(response?.status()).toBe(200);
+    await expect(page.locator("main h1")).toBeVisible();
+  }
+});
+
+async function interpret(page: Page): Promise<IntentResponse> {
+  const received = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/intent") &&
+      response.request().method() === "POST",
+  );
+  await page
+    .getByRole("button", { name: "Разобрать запрос с ИИ", exact: true })
+    .click();
+  const response = await received;
+  expect(response.status()).toBe(200);
+  expect(Object.keys(response.request().postDataJSON()).sort()).toEqual([
+    "locale",
+    "query",
+  ]);
+  const result = (await response.json()) as IntentResponse;
+  // CI explicitly runs without provider keys; this is the real rules fallback.
+  expect(result.provider).toBe("rules");
+  await expect(
+    page
+      .locator(".intent-suggestions")
+      .getByText("Разбор по правилам", { exact: true }),
+  ).toBeVisible();
+  return result;
+}
+
+test("real intent API: review before apply, keep must-haves and never geocode a textual landmark", async ({
+  page,
+}) => {
+  await fill(page);
+  const query =
+    "У меня 30 минут рядом с Байтереком. Хочу в помещении, нужны розетки.";
+  await page.locator('textarea[name="query"]').fill(query);
+  const indoor = page.getByRole("combobox", {
+    name: "В помещении",
+    exact: true,
+  });
+  const outlets = page.getByRole("combobox", {
+    name: "Есть розетки",
+    exact: true,
+  });
+  await indoor.selectOption("required");
+  const lat = await page.locator('input[name="latitude"]').inputValue();
+  const lon = await page.locator('input[name="longitude"]').inputValue();
+  const proposed = await interpret(page);
+  expect(proposed.available_seconds).toBe(1800);
+  expect(proposed.constraints.map((item) => item.constraint.key)).toEqual(
+    expect.arrayContaining(["indoor", "has_power_outlets"]),
+  );
+  expect(proposed.anchor_text).not.toBeNull();
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("90");
+  await expect(outlets).toHaveValue("");
+  const time = page
+    .locator(".intent-review")
+    .getByRole("checkbox", { name: /Применить время/ });
+  await expect(time).not.toBeChecked();
+  await time.check();
+  await page
+    .getByRole("button", { name: "Применить выбранное", exact: true })
+    .click();
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("30");
+  await expect(indoor).toHaveValue("required");
+  await expect(outlets).toHaveValue("preferred");
+  await expect(page.locator('input[name="latitude"]')).toHaveValue(lat);
+  await expect(page.locator('input[name="longitude"]')).toHaveValue(lon);
+  const sent = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/recommendations") && request.method() === "POST",
+  );
+  await page.locator(".find-button").click();
+  const request = (await sent).postDataJSON() as RecommendationRequest;
+  expect(request.available_seconds).toBe(1800);
+  expect(request.constraints).toEqual(
+    expect.arrayContaining([
+      { key: "indoor", value: true, strength: "required" },
+      { key: "has_power_outlets", value: true, strength: "preferred" },
+    ]),
+  );
+  expect(request.origin).toEqual({ lat: Number(lat), lon: Number(lon) });
+  await expect(cards(page)).toHaveCount(2);
+  await expect(cards(page).first().locator(".why-summary p")).toBeVisible();
+});
+
+test("real intent API: flight deadline asks for walking time rather than spending the whole airport buffer", async ({
+  page,
+}) => {
+  await fill(page);
+  await page
+    .locator('textarea[name="query"]')
+    .fill("До вылета 2 часа, хочу немного прогуляться");
+  const proposed = await interpret(page);
+  expect(proposed.available_seconds).toBeNull();
+  expect(proposed.time_evidence).toBeNull();
+  expect(
+    proposed.clarification_questions.some((question) =>
+      question.includes("аэропорт"),
+    ),
+  ).toBe(true);
+  await expect(
+    page
+      .locator(".intent-suggestions")
+      .getByText(/Сколько минут остаётся именно на прогулку/),
+  ).toBeVisible();
+  await expect(
+    page
+      .locator(".intent-review")
+      .getByRole("checkbox", { name: /Применить время/ }),
+  ).toHaveCount(0);
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("90");
+  await expect(cards(page)).toHaveCount(0);
+});
+
+async function createGuest(page: Page, name: string) {
+  const received = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/social/session") &&
+      response.request().method() === "POST",
+  );
+  await page
+    .getByRole("textbox", { name: "Как вас зовут?", exact: true })
+    .fill(name);
+  await page
+    .getByRole("button", { name: "Создать гостевой профиль", exact: true })
+    .click();
+  const response = await received;
+  expect(response.status()).toBe(200);
+  const state = (await response.json()) as SocialState;
+  expect(state.profile.name).toBe(name);
+  expect(state).not.toHaveProperty("token");
+  await expect(
+    page.getByRole("textbox", { name: "Ваш код для друзей", exact: true }),
+  ).toHaveValue(state.friend_code);
+  const cookie = (await page.context().cookies()).find(
+    (item) => item.name === "astana_guest",
+  );
+  expect(cookie?.httpOnly).toBe(true);
+  expect(cookie?.sameSite).toBe("Strict");
+  expect(await page.evaluate(() => document.cookie)).not.toContain(
+    "astana_guest=",
+  );
+  return state;
+}
+
+async function openPartySection(page: Page, name: string) {
+  const section = page
+    .locator("details.party-section")
+    .filter({ has: page.locator("summary", { hasText: name }) });
+  if ((await section.getAttribute("open")) === null)
+    await section.locator("summary").click();
+  return section;
+}
+
+async function socialAction(
+  page: Page,
+  action: SocialActionRequest["action"],
+  trigger: () => Promise<unknown>,
+) {
+  const received = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/social/action") &&
+      response.request().method() === "POST" &&
+      response.request().postDataJSON().action === action,
+  );
+  await trigger();
+  const response = await received;
+  expect(response.status()).toBe(200);
+  return {
+    state: (await response.json()) as SocialState,
+    request: response.request().postDataJSON() as SocialActionRequest,
+  };
+}
+
+async function deleteGuest(page: Page) {
+  // Test teardown uses the context's HttpOnly cookie; it never reads or stores the bearer token.
+  await page.request
+    .post("/api/v1/social/action", {
+      headers: { Origin: new URL(page.url()).origin },
+      data: { action: "logout" },
+    })
+    .catch(() => {});
+}
+
+test("real social API across two browser contexts: consent, three ordered stops, shared route and chat", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(60000);
+  const other = await browser.newContext({
+    baseURL: new URL(page.url()).origin,
+    viewport: { width: 1440, height: 1000 },
+    timezoneId: "America/New_York",
+  });
+  const friend = await other.newPage();
+  try {
+    await fill(page);
+    await page.getByRole("navigation").locator('a[href="/party"]').click();
+    const owner = await createGuest(page, "E2E Aida");
+    await friend.goto("/party");
+    const guest = await createGuest(friend, "E2E Daniyar");
+    await page.bringToFront();
+    const friends = await openPartySection(page, "Друзья и приглашения");
+    await friends
+      .getByRole("textbox", { name: "Код друга", exact: true })
+      .fill(guest.friend_code);
+    const pending = await socialAction(page, "friend_request", () =>
+      friends
+        .getByRole("button", { name: "Отправить запрос", exact: true })
+        .click(),
+    );
+    expect(pending.state.friends).toEqual([]);
+    await friend.bringToFront();
+    const incoming = friend
+      .locator(".party-people li")
+      .filter({ hasText: owner.profile.name });
+    await expect(
+      incoming.getByRole("button", { name: "Принять", exact: true }),
+    ).toBeVisible({ timeout: 10000 });
+    const accepted = await socialAction(friend, "friend_accept", () =>
+      incoming.getByRole("button", { name: "Принять", exact: true }).click(),
+    );
+    expect(accepted.state.friends).toEqual([owner.profile]);
+    await page.bringToFront();
+    await expect(
+      friends
+        .locator(".party-people li")
+        .filter({ hasText: guest.profile.name }),
+    ).toBeVisible({ timeout: 10000 });
+    const groupName = "E2E three-stop walk";
+    await page
+      .getByRole("textbox", { name: "Название компании", exact: true })
+      .fill(groupName);
+    const created = await socialAction(page, "party_create", () =>
+      page
+        .getByRole("button", { name: "Создать компанию", exact: true })
+        .click(),
+    );
+    const partyId = created.state.parties[0].id;
+    await page
+      .getByRole("combobox", { name: "Пригласить друга", exact: true })
+      .selectOption(guest.profile.id);
+    await socialAction(page, "party_invite", () =>
+      page
+        .getByRole("button", { name: "Пригласить друга", exact: true })
+        .click(),
+    );
+    await friend.bringToFront();
+    const invitation = friend
+      .locator(".party-people li")
+      .filter({ hasText: groupName });
+    await expect(
+      invitation.getByRole("button", { name: "Принять", exact: true }),
+    ).toBeVisible({ timeout: 10000 });
+    await socialAction(friend, "party_join", () =>
+      invitation.getByRole("button", { name: "Принять", exact: true }).click(),
+    );
+    await expect(friend.locator(".party-members li")).toHaveCount(2);
+    await page.bringToFront();
+    await expect(page.locator(".party-members li")).toHaveCount(2, {
+      timeout: 10000,
+    });
+    const recommended = await socialAction(page, "recommend", () =>
+      page
+        .getByRole("button", { name: "Найти варианты для всех", exact: true })
+        .click(),
+    );
+    const response = recommended.state.parties.find(
+      (item) => item.id === partyId,
+    )!.recommendations!;
+    expect(response.recommendations).toHaveLength(3);
+    const groupCards = page.locator(".party-results .place-card");
+    await expect(groupCards).toHaveCount(3);
+    const order = [2, 0, 1];
+    const names: string[] = [];
+    for (const index of order) {
+      names.push(
+        (await groupCards.nth(index).getByRole("heading").textContent())!,
+      );
+      await groupCards
+        .nth(index)
+        .getByRole("button", { name: "Добавить в общий план", exact: true })
+        .click();
+    }
+    const built = await socialAction(page, "itinerary", () =>
+      page
+        .getByRole("button", { name: "Построить общий маршрут", exact: true })
+        .click(),
+    );
+    expect(built.request.action).toBe("itinerary");
+    if (built.request.action !== "itinerary")
+      throw new Error("Expected itinerary request");
+    const orderedIds = order.map(
+      (index) => response.recommendations[index].place_id,
+    );
+    expect(built.request.request.place_ids).toEqual(orderedIds);
+    const shared = built.state.parties.find(
+      (item) => item.id === partyId,
+    )!.itinerary!;
+    expect(shared.stops.map((stop) => stop.place_id)).toEqual(orderedIds);
+    await expect(
+      page.locator(".party-plan .itinerary-visits li strong"),
+    ).toHaveText(names);
+    await expect(page.locator(".map-marker.selected")).toHaveCount(3);
+    await friend.bringToFront();
+    await expect(
+      friend.locator(".party-plan .itinerary-visits li strong"),
+    ).toHaveText(names, { timeout: 10000 });
+    await expect(friend.locator(".map-marker.selected")).toHaveCount(3);
+    await expect(friend.getByTestId("map-panel")).toHaveAttribute(
+      "data-route-geometry",
+      "none",
+    );
+    await expect(friend.locator(".shared-location-marker")).toHaveCount(0);
+    const chat = friend.locator(".party-chat");
+    await chat
+      .getByRole("textbox", { name: "Сообщение", exact: true })
+      .fill("Встречаемся у выбранного старта");
+    const message = await socialAction(friend, "message", () =>
+      chat.getByRole("button", { name: "Отправить", exact: true }).click(),
+    );
+    expect(message.state.parties[0].itinerary).toEqual(shared);
+    await page.bringToFront();
+    await expect(
+      page
+        .locator(".chat-messages")
+        .getByText("Встречаемся у выбранного старта", { exact: true }),
+    ).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.locator(".party-plan .itinerary-visits li strong"),
+    ).toHaveText(names);
+    await expect(page.locator(".shared-location-marker")).toHaveCount(0);
+  } finally {
+    await deleteGuest(page);
+    if (friend.url().startsWith("http")) await deleteGuest(friend);
+    await other.close();
+  }
+});
+
+function astanaInput(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Almaty",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const value = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+  return `${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}`;
+}
+
+test("real community API: publish an unverified map event and remove its marker", async ({
+  page,
+}) => {
+  await page.getByRole("navigation").locator('a[href="/party"]').click();
+  const guest = await createGuest(page, "E2E event author");
+  try {
+    await page.getByRole("navigation").locator('a[href="/events"]').click();
+    await expect(page).toHaveURL(/\/events$/);
+    await expect(page.getByTestId("map-confirm-origin")).toBeVisible();
+    await page.getByTestId("map-confirm-origin").click();
+    const point = {
+      lat: Number(await page.locator('input[name="latitude"]').inputValue()),
+      lon: Number(await page.locator('input[name="longitude"]').inputValue()),
+    };
+    const title = `E2E community sketch walk ${Date.now()}`;
+    await page
+      .getByRole("textbox", { name: "Название события", exact: true })
+      .fill(title);
+    await page
+      .getByRole("textbox", { name: "Описание", exact: true })
+      .fill("Synthetic CI announcement; not a real gathering.");
+    await page
+      .locator('input[name="event-start"]')
+      .fill(astanaInput(new Date(Date.now() + 3600000)));
+    await page
+      .locator('input[name="event-end"]')
+      .fill(astanaInput(new Date(Date.now() + 7200000)));
+    const posted = await socialAction(page, "event_create", () =>
+      page
+        .getByRole("button", { name: "Опубликовать событие", exact: true })
+        .click(),
+    );
+    expect(posted.request.action).toBe("event_create");
+    if (posted.request.action !== "event_create")
+      throw new Error("Expected event request");
+    expect(posted.request.location).toEqual(point);
+    const event = page
+      .locator(".community-event")
+      .filter({ has: page.getByRole("heading", { name: title, exact: true }) });
+    await expect(event).toBeVisible();
+    await expect(
+      event.getByText("Не проверено · объявление участника", { exact: true }),
+    ).toBeVisible();
+    await expect(event).toContainText(guest.profile.name);
+    const marker = page.getByRole("button", {
+      name: `Событие сообщества · не проверено: ${title}`,
+      exact: true,
+    });
+    await expect(marker).toBeVisible();
+    await socialAction(page, "event_delete", () =>
+      event
+        .getByRole("button", { name: "Удалить моё событие", exact: true })
+        .click(),
+    );
+    await expect(event).toHaveCount(0);
+    await expect(marker).toHaveCount(0);
+  } finally {
+    await deleteGuest(page);
+  }
 });
