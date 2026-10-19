@@ -69,7 +69,7 @@ JSON equality, неизвестные/противоречивые/dynamic requi
 ## Локальная multilingual модель
 
 Выполнен отдельный CPU-эксперимент с pinned `intfloat/multilingual-e5-small`,
-официальным FP32 ONNX, query/passsage prefixes, mask-aware mean pooling и L2
+официальным FP32 ONNX, query/passage prefixes, mask-aware mean pooling и L2
 normalization. Скрипты, точные зависимости, SHA модели и результаты:
 [evals/local-semantic](../../evals/local-semantic/README.md).
 

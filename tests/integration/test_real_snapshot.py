@@ -47,7 +47,8 @@ def test_live_snapshot_is_ready_and_attributes_its_real_catalogue(offline_live):
     assert offline_live.get("/v1/health/ready").status_code == 200
     status = offline_live.get("/v1/data-status").json()
     validate_payload("DataStatusResponse", status)
-    assert status["total_places"] == 300
+    assert status["total_places"] == 628
+    assert len(status["sources"]) == 2
     assert status["sources"][0]["status"] in {"ready", "stale"}
     assert status["sources"][0]["source_url"] == "https://www.openstreetmap.org/copyright"
     assert "ODbL" in " ".join(status["sources"][0]["warnings"])
@@ -59,7 +60,52 @@ def test_live_snapshot_is_ready_and_attributes_its_real_catalogue(offline_live):
         assert not place["is_synthetic"]
         assert place["id"].startswith("osm:")
         assert "museum" in place["categories"]
-        assert all(evidence["source_type"] == "osm" for evidence in place["evidence"])
+        assert any(evidence["source_type"] == "osm" for evidence in place["evidence"])
+        assert all(evidence["source_type"] in {"osm", "provider"} for evidence in place["evidence"])
+
+
+def test_real_wikidata_description_has_separate_pinned_provenance(offline_live):
+    response = offline_live.get("/v1/places/osm:node/4894937300")
+    assert response.status_code == 200
+    place = response.json()
+    description = next(fact for fact in place["facts"] if fact["key"] == "wikidata:description:ru")
+    assert description["status"] == "known" and place["description"] == description["value"]
+    evidence = [item for item in place["evidence"] if item["id"] in description["evidence_ids"]]
+    assert len(evidence) == 1
+    assert evidence[0]["source_type"] == "provider"
+    assert "CC0" in evidence[0]["source_name"]
+    assert "oldid=" in evidence[0]["source_url"]
+    assert any(item["source_type"] == "osm" for item in place["evidence"])
+
+
+def test_confirmed_real_wifi_and_toilets_satisfy_required_conditions(offline_live):
+    place = offline_live.get("/v1/places/osm:way/1395465867").json()
+    payload = request("Estet Coffee", constraints=[
+        {"key": "has_wifi", "value": True, "strength": "required"},
+        {"key": "toilets", "value": True, "strength": "required"},
+    ])
+    payload["origin"] = place["location"]
+    response = offline_live.post("/v1/recommendations", json=payload)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert [item["place_id"] for item in result["recommendations"]] == [place["id"]]
+    checks = {item["key"]: item for item in result["recommendations"][0]["constraint_evaluations"]}
+    assert checks["has_wifi"]["outcome"] == checks["toilets"]["outcome"] == "satisfied"
+
+
+def test_unspecified_real_internet_never_satisfies_required_wifi(offline_live):
+    place = offline_live.get("/v1/places/osm:node/11783576043").json()
+    facts = {fact["key"]: fact for fact in place["facts"]}
+    assert facts["osm:internet_access"]["value"] == "yes"
+    assert facts["has_wifi"]["status"] == "unknown"
+    payload = request("Drinkit", constraints=[
+        {"key": "has_wifi", "value": True, "strength": "required"},
+    ])
+    payload["origin"] = place["location"]
+    response = offline_live.post("/v1/recommendations", json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "no_match"
+    assert response.json()["recommendations"] == []
 
 
 @pytest.mark.parametrize(("query", "locale", "categories"), [

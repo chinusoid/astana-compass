@@ -49,7 +49,7 @@ $env:PYTHONPATH = (Join-Path (Get-Location) 'packages/retrieval/src')
 .venv/Scripts/python.exe packages/retrieval/evaluate.py
 ```
 
-Последняя команда явно работает с независимым синтетическим корпусом и ручными judgments. Она не измеряет качество реальных заведений. Подробнее: [качество и ограничения](../../docs/retrieval/QUALITY.md), [PostgreSQL/pgvector roadmap](../../docs/retrieval/POSTGRES-ROADMAP.md).
+Последняя команда явно работает с отдельным синтетическим корпусом и ручными judgments. Она не измеряет качество реальных заведений. Подробнее: [качество и ограничения](../../docs/retrieval/QUALITY.md), [PostgreSQL/pgvector roadmap](../../docs/retrieval/POSTGRES-ROADMAP.md).
 
 ## Названия, опечатки и реальные данные
 

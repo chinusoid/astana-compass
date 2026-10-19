@@ -157,6 +157,10 @@ jobs:
           cd apps/web
           pnpm test:e2e
 
+      - name: Browser E2E against the real, locally loaded catalog
+        working-directory: apps/web
+        run: pnpm test:live:local
+
   container:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

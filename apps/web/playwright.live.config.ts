@@ -7,6 +7,11 @@ export function createLiveConfig(
   // Inherited by test workers so the external-target skip also accepts this harness.
   if (local) process.env.ASTANA_LIVE_LOCAL = "true";
   const root = path.resolve(import.meta.dirname, "../..");
+  const python = path.join(
+    root,
+    ".venv",
+    process.platform === "win32" ? "Scripts/python.exe" : "bin/python",
+  );
   return defineConfig({
     testDir: "../../tests/e2e",
     testMatch: "live.spec.ts",
@@ -24,12 +29,13 @@ export function createLiveConfig(
       trace: "retain-on-failure",
       launchOptions: {
         executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+        args: ["--enable-unsafe-swiftshader"],
       },
     },
     webServer: local
       ? [
           {
-            command: `${process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python"} -m uvicorn astana_api.app:create_app --factory --host 127.0.0.1 --port 18082 --no-access-log`,
+            command: `"${python}" -m uvicorn astana_api.app:create_app --factory --host 127.0.0.1 --port 18082 --no-access-log`,
             cwd: root,
             url: "http://127.0.0.1:18082/v1/health/ready",
             reuseExistingServer: false,

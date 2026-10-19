@@ -1,6 +1,7 @@
 import {
   test,
   expect,
+  AxeBuilder,
   type Page,
   type RecommendationResponse,
 } from "../../apps/web/e2e-support";
@@ -91,6 +92,10 @@ for (const locale of locales) {
       .filter({ has: page.locator("strong", { hasText: /^Wi-Fi$/ }) });
     await expect(wifi.locator(".fact-status")).toHaveText(t(locale, "known"));
     await expect(wifi.locator("p").first()).toHaveText(t(locale, "yes"));
+    const audit = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+      .analyze();
+    expect(audit.violations).toEqual([]);
     await expect(
       dialog.locator(".fact-heading strong").filter({ hasText: /^osm:/ }),
     ).toHaveCount(0);
@@ -240,6 +245,12 @@ test("real Wi-Fi requirement is honored and unknown outlets produce an explained
   await expect(
     page.locator(".results > .warnings, .results .warnings").first(),
   ).toHaveAttribute("open", "");
+  await page
+    .getByText(t("ru", "noMatchHint"), { exact: true })
+    .scrollIntoViewIfNeeded();
+  await expect(
+    page.getByText(t("ru", "noMatchHint"), { exact: true }),
+  ).toBeInViewport();
   await page.screenshot({
     path: testInfo.outputPath("real-no-match-mobile.png"),
     fullPage: true,

@@ -31,7 +31,7 @@ async def check(snapshot):
         os.environ.pop(name, None)
     os.environ["ASTANA_WEATHER_ENABLED"] = "false"
     os.environ["ASTANA_ROUTE_ALLOW_APPROXIMATE"] = "true"
-    os.environ["ASTANA_RETRIEVAL_POOL_LIMIT"] = "500"
+    os.environ["ASTANA_RETRIEVAL_POOL_LIMIT"] = "1000"
 
     # Missing and invalid configuration must not silently select bundled data.
     for path in (None, "/definitely-missing/astana-snapshot.json"):
@@ -62,6 +62,13 @@ async def check(snapshot):
             validate_payload("PlaceListResponse", catalogue)
             assert catalogue["places"]
             assert all(not place["is_synthetic"] and place["id"].startswith("osm:") for place in catalogue["places"])
+            detail = (await client.get("/v1/places/osm:way/1395465867")).json()
+            facts = {fact["key"]: fact for fact in detail["facts"]}
+            assert facts["has_wifi"]["status"] == "known" and facts["has_wifi"]["value"] is True
+            assert facts["toilets"]["status"] == "known" and facts["toilets"]["value"] is True
+            museum = (await client.get("/v1/places/osm:node/4894937300")).json()
+            assert any(item["source_type"] == "provider" and "oldid=" in item["source_url"]
+                       for item in museum["evidence"])
             request = {"query": "museum", "locale": "en", "origin": {"lat": 51.128, "lon": 71.43},
                        "start_at": datetime.now(timezone.utc).isoformat(), "timezone": "Asia/Almaty",
                        "available_seconds": 10800, "transport": "walking", "return_to_origin": False,
