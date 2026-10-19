@@ -124,8 +124,7 @@ export function recommendationIntegrity(
       routeSafe(r.route, request) &&
       evaluationsSafe(place, r.constraint_evaluations, request) &&
       r.total_duration_seconds ===
-        r.visit_duration_seconds + r.route.duration_seconds &&
-      r.total_duration_seconds <= request.available_seconds
+        r.visit_duration_seconds + r.route.duration_seconds
     );
   });
 }
@@ -171,10 +170,7 @@ export function itineraryIntegrity(
     return false;
   return (
     response.total_duration_seconds ===
-      response.route.duration_seconds +
-        response.stops.reduce(
-          (sum, stop) => sum + stop.visit_duration_seconds,
-          0,
-        ) && response.total_duration_seconds <= request.available_seconds
+    response.route.duration_seconds +
+      response.stops.reduce((sum, stop) => sum + stop.visit_duration_seconds, 0)
   );
 }

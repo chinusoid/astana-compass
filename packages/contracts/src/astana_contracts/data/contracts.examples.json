@@ -933,12 +933,12 @@
       "failure_stage": "invariant"
     },
     {
-      "name": "over_time_budget",
+      "name": "flexible_time_budget",
       "definition": "RecommendationResponse",
-      "valid": false,
+      "valid": true,
       "instance": {
         "request_id": "synthetic:req:one",
-        "status": "matched",
+        "status": "partial",
         "request": {
           "query": "Синтетическая проверка: помещение на час",
           "locale": "ru",
@@ -1054,11 +1054,11 @@
         ],
         "clarification_questions": [],
         "warnings": [
-          "Synthetic data only."
+          "Synthetic data only.",
+          "Полная длительность превышает выбранное время; вариант сохранён."
         ],
         "generated_at": "2026-10-18T12:00:00+05:00"
-      },
-      "failure_stage": "invariant"
+      }
     },
     {
       "name": "required_constraint_unknown",

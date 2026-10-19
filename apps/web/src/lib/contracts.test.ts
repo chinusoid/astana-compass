@@ -36,11 +36,30 @@ describe("canonical boundaries", () => {
         false,
       ));
   }
-  it("checks canonical recommendation references and budgets", () => {
+  it("checks canonical recommendation references and complete durations", () => {
     const response = recommendation();
     expect(recommendationIntegrity(response, response.request)).toBe(true);
     response.recommendations[0].total_duration_seconds++;
     expect(recommendationIntegrity(response, response.request)).toBe(false);
+  });
+  it("accepts 200 and 300 minute trips against a 100 minute target without truncating time", () => {
+    const response = recommendation();
+    response.request.available_seconds = 6000;
+    response.recommendations[0].route.duration_seconds = 10800;
+    response.recommendations[0].visit_duration_seconds = 1200;
+    response.recommendations[0].total_duration_seconds = 12000;
+    expect(recommendationIntegrity(response, response.request)).toBe(true);
+    const plan = itinerary();
+    plan.request.available_seconds = 6000;
+    const visits = plan.stops.reduce(
+      (sum, stop) => sum + stop.visit_duration_seconds,
+      0,
+    );
+    plan.route!.duration_seconds = 18000 - visits;
+    plan.total_duration_seconds = 18000;
+    expect(itineraryIntegrity(plan, plan.request)).toBe(true);
+    plan.total_duration_seconds = 6000;
+    expect(itineraryIntegrity(plan, plan.request)).toBe(false);
   });
   it("does not accept required unknown even with a satisfied evaluation", () => {
     const response = recommendation();

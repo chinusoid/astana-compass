@@ -122,7 +122,16 @@ const messages = {
   relaxed: ["Без спешки", "Асықпай", "Take it slow"],
   indoors: ["В помещении", "Ғимарат ішінде", "Stay indoors"],
   family: ["С детьми", "Балалармен", "With children"],
-  timeBudget: ["Свободное время, мин", "Бос уақыт, мин", "Time available, min"],
+  timeBudget: [
+    "Желаемая длительность, мин",
+    "Қалаған ұзақтық, мин",
+    "Target duration, min",
+  ],
+  timeBudgetHint: [
+    "Время — ориентир. Покажем и более долгие варианты с полной длительностью и превышением.",
+    "Уақыт — бағдар. Ұзағырақ нұсқалардың толық уақытын және айырмасын да көрсетеміз.",
+    "Time is a target. Longer options show their full duration and how much extra time they need.",
+  ],
   startTime: [
     "Начало · время Астаны",
     "Басталуы · Астана уақыты",
@@ -233,9 +242,9 @@ const messages = {
     "No verified match this time",
   ],
   noMatchHint: [
-    "В каталоге может не хватать сведений о нужных условиях, либо места не укладываются в прогулку. Это не означает, что таких мест в городе нет. Проверьте пояснения ниже; время и условия можно изменить самостоятельно. Обязательные требования сохранены.",
-    "Каталогта қажетті талаптар туралы мәлімет жетіспеуі немесе орындар серуенге сыймауы мүмкін. Бұл қалада ондай орын жоқ дегенді білдірмейді. Төмендегі түсіндірмелерді қараңыз; уақыт пен талаптарды өзіңіз өзгерте аласыз. Міндетті талаптар сақталды.",
-    "The catalog may lack evidence for your conditions, or places may not fit this walk. This does not mean such places do not exist in the city. Check the notes below; you can change the time or conditions yourself. Your must-haves have been preserved.",
+    "В каталоге может не хватать подходящих мест или подтверждений обязательных условий; расчёт дороги тоже может быть недоступен. Проверьте пояснения ниже. Превышение выбранного времени само по себе не исключает варианты.",
+    "Каталогта сәйкес орындар немесе міндетті шарттардың дәлелдері жетіспеуі мүмкін; жолды есептеу де қолжетімсіз болуы мүмкін. Төмендегі түсіндірмелерді қараңыз. Таңдалған уақыттан асу нұсқаларды өздігінен алып тастамайды.",
+    "The catalog may lack matching places or evidence for must-haves; routing may also be unavailable. Check the notes below. Exceeding your duration target alone does not exclude options.",
   ],
   clarify: [
     "Нужно небольшое уточнение",

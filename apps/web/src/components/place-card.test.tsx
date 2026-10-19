@@ -100,8 +100,12 @@ it("shows unknown and conflicting facts without inventing boolean values", () =>
     },
   ];
   render(<PlaceFacts place={place} locale="ru" />);
-  expect(screen.getByText(t("ru", "unknown"))).toBeVisible();
+  expect(screen.getByText(t("ru", "unknown"))).not.toBeVisible();
   expect(screen.getByText(t("ru", "conflicting"))).toBeVisible();
+  fireEvent.click(
+    screen.getByTestId("unknown-place-facts").querySelector("summary")!,
+  );
+  expect(screen.getByText(t("ru", "unknown"))).toBeVisible();
   expect(screen.queryByText("Нет", { exact: true })).not.toBeInTheDocument();
 });
 

@@ -61,8 +61,13 @@ def test_openapi_examples_validate_and_execute():
                 result = client.post(path, json=payload)
                 expected = 422 if name == "unsupported_transport" else 201 if path.endswith("feedback") else 200
                 assert result.status_code == expected, (name, result.text)
-                if name in {"unknown_required", "short_budget"}:
+                if name == "unknown_required":
                     assert result.json()["status"] == "no_match"
+                elif name == "short_budget":
+                    assert result.json()["status"] == "partial"
+                    assert result.json()["recommendations"]
+                    assert all(item["total_duration_seconds"] > payload["available_seconds"]
+                               for item in result.json()["recommendations"])
                 elif name == "indoor":
                     assert len(result.json()["recommendations"]) == 2
                 elif name == "two_stops":

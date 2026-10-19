@@ -116,8 +116,6 @@ def validate_invariants(definition: str, instance: dict[str, Any]) -> None:
             check_route(item["route"], request)
             if item["total_duration_seconds"] != item["visit_duration_seconds"] + item["route"]["duration_seconds"]:
                 raise ValueError("recommendation total must include visit and all travel")
-            if item["total_duration_seconds"] > request["available_seconds"]:
-                raise ValueError("recommendation exceeds time budget")
     if key == "stops" and items:
         if [item["place_id"] for item in items] != request["place_ids"]:
             raise ValueError("itinerary must preserve all selected place IDs in requested order")
@@ -125,6 +123,4 @@ def validate_invariants(definition: str, instance: dict[str, Any]) -> None:
         expected = instance["route"]["duration_seconds"] + sum(s["visit_duration_seconds"] for s in items)
         if instance["total_duration_seconds"] != expected:
             raise ValueError("itinerary total must include every visit and complete route")
-        if expected > request["available_seconds"]:
-            raise ValueError("itinerary exceeds time budget")
 

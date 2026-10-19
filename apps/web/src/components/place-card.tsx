@@ -14,6 +14,7 @@ import { t, label, type Locale } from "@/lib/i18n";
 import { Sources, RouteNotes, Warnings } from "./details";
 import OsmAttribution from "./osm-attribution";
 import PlaceOverview from "./place-overview";
+import TimeBudgetNote from "./time-budget-note";
 import { factLabel, placeText } from "@/lib/place-presentation";
 
 const cardCopy = {
@@ -52,6 +53,7 @@ const cardCopy = {
 type Props = {
   place: Place;
   recommendation?: Recommendation;
+  budgetSeconds?: number;
   locale: Locale;
   active: boolean;
   selected: boolean;
@@ -65,6 +67,7 @@ type Props = {
 export default function PlaceCard({
   place,
   recommendation: item,
+  budgetSeconds,
   locale,
   active,
   selected,
@@ -144,6 +147,11 @@ export default function PlaceCard({
               <b>{duration(item.visit_duration_seconds, locale)}</b>
             </div>
           </div>
+          <TimeBudgetNote
+            totalSeconds={item.total_duration_seconds}
+            budgetSeconds={budgetSeconds}
+            locale={locale}
+          />
           <p className="walk-distance">
             <Footprints size={15} aria-hidden="true" />
             {copy.distance}: {distance}{" "}

@@ -18,7 +18,7 @@ def request_examples():
         "RecommendationRequest": {
             "indoor": example("Помещение на час", "Fixture mode: two synthetic indoor candidates. Coordinates are test data, not the user's location."),
             "unknown_required": example("Неизвестная доступность", "Fixture mode: no_match; unknown required wheelchair access cannot be assumed.", constraints=[{"key": "wheelchair_accessible", "value": True, "strength": "required"}]),
-            "short_budget": example("Мало времени", "Fixture mode: no_match; a one-minute budget cannot fit a visit.", available_seconds=60),
+            "short_budget": example("Больше выбранного времени", "Fixture mode: partial; longer visits remain visible with an explicit time-overrun warning.", available_seconds=60),
             "unsupported_transport": example("Велосипед: ожидается 422", "The HTTP API currently implements walking only.", transport="cycling"),
         },
         "ItineraryRequest": {

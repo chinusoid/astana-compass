@@ -12,8 +12,8 @@ The installable `astana-contracts` package contains generated copies, runtime va
 | GET `/v1/health/ready` | none | `HealthResponse` | Essential local dependencies ready; 503 if unavailable. |
 | GET `/v1/places` | bbox, query, categories, cursor | `PlaceListResponse` | `bbox=west,south,east,north`; comma-separated categories. |
 | GET `/v1/places/{id}` | URL-encoded canonical ID | `Place` | Preserve source-based IDs; 404 if absent. |
-| POST `/v1/recommendations` | `RecommendationRequest` | `RecommendationResponse` | Alternatives: each option fits the budget separately. |
-| POST `/v1/itineraries` | `ItineraryRequest` | `ItineraryResponse` | Explicit selected `place_ids`; one ordered trip fits the budget. |
+| POST `/v1/recommendations` | `RecommendationRequest` | `RecommendationResponse` | Alternatives: full durations and explicit warnings when the target is exceeded. |
+| POST `/v1/itineraries` | `ItineraryRequest` | `ItineraryResponse` | Explicit selected `place_ids`; one ordered trip with its complete duration. |
 | POST `/v1/feedback` | `FeedbackRequest` | `FeedbackResponse` | Anonymous product feedback; never require location. |
 | GET `/v1/data-status` | none | `DataStatusResponse` | Source freshness and ingestion status. |
 
@@ -25,8 +25,8 @@ Errors use `ErrorResponse`: `invalid_request` (422), `unsupported_transport` (42
 - `walking` must work initially. Accept `cycling`/`driving` as recognized request values but return `unsupported_transport` until implemented. Never silently route as walking.
 - `origin` uses named latitude/longitude. GeoJSON geometry uses `[longitude, latitude]`. A routed `LineString` is allowed only for an actual route calculation. Approximate estimates always have `geometry: null` and nonempty assumptions. Never draw a straight line as a pedestrian route.
 - `return_to_origin` covers the complete return trip. A recommendation route covers origin → its place → origin when requested. An itinerary route covers origin → all ordered stops → origin when requested. Travel duration must include every leg. Visit duration is explicitly an estimate.
-- `ItineraryRequest.place_ids` is a required ordered list of 1–3 selected IDs. Preserve that order and every selected stop; never silently drop or replace a selected place. If the whole trip cannot meet required constraints or fit the budget, return `no_match` with an explanation. The list length cannot exceed `limit`.
-- A recommendation's total is travel + visit. An itinerary's total is complete travel + the sum of every visit. Totals cannot exceed the available budget. Recommendation alternatives are not summed into one itinerary.
+- `ItineraryRequest.place_ids` is a required ordered list of 1–3 selected IDs. Preserve that order and every selected stop; never silently drop or replace a selected place. If the whole trip cannot meet required constraints, return `no_match` with an explanation. Exceeding `available_seconds` alone never removes a stop or rejects the trip. The list length cannot exceed `limit`.
+- A recommendation's total is travel + visit. An itinerary's total is complete travel + the sum of every visit. `available_seconds` is a duration target: longer trips are allowed, marked `partial`, and carry a localized warning with full duration and extra time. Recommendation alternatives are not summed into one itinerary.
 - `known` facts require a nonnull value and supporting evidence. `unknown` facts have null value and no evidence claim. `conflicting` facts have null value and at least two evidence IDs. Unknown/conflicting does not mean false. Source freshness is not a truth guarantee.
 - Evidence records retain actual source identity, URL, record ID and retrieval time. An LLM is not a source for a place fact. Synthetic evidence and places must be explicitly marked and use `synthetic:` IDs; do not put synthetic data into the live dataset.
 - Every place fact/evaluation references evidence in that place. Every recommendation/stop/hit resolves to a returned place. Duplicate IDs, duplicate fact keys and duplicate constraint keys are invalid. Responses contain only their referenced places.
@@ -81,7 +81,7 @@ class RecommendationService(Protocol):  # packages/recommender
     # ItineraryRequest -> ItineraryResponse
 ```
 
-A backend exception crossing ports must be normalized by the API adapter to `ErrorResponse`; callers must not consume arbitrary provider response dictionaries. The recommender rechecks required constraints and budget **after** context enrichment and routing. Retrieval is candidate selection, not the final policy decision. Source data that cannot satisfy a required dynamic predicate yet must remain unknown; context-aware orchestration can enrich a bounded pool before final exclusion.
+A backend exception crossing ports must be normalized by the API adapter to `ErrorResponse`; callers must not consume arbitrary provider response dictionaries. The recommender rechecks required constraints and complete durations **after** context enrichment and routing. Retrieval is candidate selection, not the final policy decision. Source data that cannot satisfy a required dynamic predicate yet must remain unknown; context-aware orchestration can enrich a bounded pool before final exclusion.
 
 The current context wire contract is `ContextResult {places, warnings, degraded_services}`. Weather is a planned explicit contract extension, not an opaque unvalidated payload; do not expose a weather field until its units, provider timestamps, provenance and freshness policy are jointly defined.
 

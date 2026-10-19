@@ -152,11 +152,14 @@ export function PlaceFacts({
   locale: Locale;
 }) {
   const mainFacts = place.facts
-    .filter(primaryFact)
+    .filter((fact) => primaryFact(fact) && fact.status !== "unknown")
     .sort(
       (a, b) => Number(b.status === "known") - Number(a.status === "known"),
     );
   const otherFacts = place.facts.filter((fact) => !primaryFact(fact));
+  const unknownFacts = place.facts.filter(
+    (fact) => primaryFact(fact) && fact.status === "unknown",
+  );
   const factRecord = (fact: PlaceFact) => {
     const value = factValue(locale, fact);
     const website =
@@ -210,6 +213,22 @@ export function PlaceFacts({
       <h3>{placeText(locale, "amenities")}</h3>
       <p className="field-hint">{placeText(locale, "sourceClaim")}</p>
       <div className="fact-list">{mainFacts.map(factRecord)}</div>
+      {unknownFacts.length > 0 && (
+        <details
+          className="other-source-facts"
+          data-testid="unknown-place-facts"
+        >
+          <summary>
+            {placeText(locale, "unknownConditions")} · {unknownFacts.length}
+          </summary>
+          <p className="small muted">
+            {unknownFacts
+              .map((fact) => factLabel(locale, fact.key))
+              .join(" · ")}
+          </p>
+          {unknownFacts.map(factRecord)}
+        </details>
+      )}
       {otherFacts.length > 0 && (
         <details className="other-source-facts">
           <summary>

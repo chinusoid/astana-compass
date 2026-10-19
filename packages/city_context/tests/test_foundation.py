@@ -189,15 +189,18 @@ def test_model_shortcut_text_cannot_drop_or_reorder_selected_stops(return_flag):
     asyncio.run(run())
 
 
-def test_full_route_over_budget_returns_no_match_without_shortened_plan():
+def test_full_route_over_target_preserves_all_stops_and_return():
     async def run():
         repo, router, context, service, request = setup()
         request.update(place_ids=[p["id"] for p in repo.places], return_to_origin=True, available_seconds=4000)
         try:
             result = await service.build_itinerary(request)
             assert len(router.calls[0]["destinations"]) == 3
-            assert result["status"] == "no_match" and result["stops"] == [] and result["places"] == []
-            assert result["route"] is None
+            assert result["status"] == "partial"
+            assert [stop["place_id"] for stop in result["stops"]] == request["place_ids"]
+            assert result["route"]["includes_return"] is True
+            assert result["total_duration_seconds"] == 3 * 1200 + 4 * 120
+            assert result["total_duration_seconds"] > request["available_seconds"]
         finally:
             await context.aclose()
     asyncio.run(run())

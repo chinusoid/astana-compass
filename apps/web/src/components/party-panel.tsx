@@ -31,6 +31,7 @@ import { useSharedPlanner } from "@/lib/shared-planner";
 import { dateTime, duration } from "@/lib/format";
 import { label, t, type Locale } from "@/lib/i18n";
 import { Sources, Warnings } from "./details";
+import TimeBudgetNote from "./time-budget-note";
 
 const copy = {
   intro: [
@@ -116,9 +117,9 @@ const copy = {
   optional: ["Не учитывать", "Ескермеу", "Not specified"],
   saveNeeds: ["Сохранить мои условия", "Шарттарымды сақтау", "Save my needs"],
   groupHint: [
-    "Берём самый короткий бюджет участников и все обязательные условия. Изменение условий сбрасывает прежний расчёт.",
-    "Қатысушылардың ең қысқа уақытын және барлық міндетті шарттарын ескереміз. Шарттар өзгерсе, бұрынғы есеп жойылады.",
-    "Uses the shortest member time budget and every required condition. Changing needs clears the previous calculation.",
+    "Самое короткое время участников — ориентир; превышение показываем отдельно. Все обязательные условия сохраняются. Изменение условий сбрасывает прежний расчёт.",
+    "Қатысушылардың ең қысқа уақыты — бағдар; артық уақыт бөлек көрсетіледі. Барлық міндетті шарттар сақталады. Шарттар өзгерсе, бұрынғы есеп жойылады.",
+    "The shortest member duration is a target; extra time is shown explicitly. All required conditions still apply. Changing needs clears the previous calculation.",
   ],
   planSetup: [
     "Сначала задайте старт, пожелание и время в разделе «Прогулка».",
@@ -952,6 +953,13 @@ function PartyRoom({
                         {t(locale, "visit")}{" "}
                         {duration(item.visit_duration_seconds, locale)}
                       </p>
+                      <TimeBudgetNote
+                        totalSeconds={item.total_duration_seconds}
+                        budgetSeconds={
+                          party.recommendations!.request.available_seconds
+                        }
+                        locale={locale}
+                      />
                       <span
                         className={`badge ${item.route.method === "approximate" ? "amber" : "green"}`}
                       >
@@ -1029,6 +1037,11 @@ function PartyRoom({
                 </strong>
                 <span>{t(locale, "total")}</span>
               </div>
+              <TimeBudgetNote
+                totalSeconds={party.itinerary.total_duration_seconds}
+                budgetSeconds={party.itinerary.request.available_seconds}
+                locale={locale}
+              />
               <ol className="itinerary-visits">
                 {party.itinerary.stops.map((stop) => (
                   <li key={stop.place_id}>
