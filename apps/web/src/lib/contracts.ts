@@ -1,5 +1,4 @@
-import Ajv2020 from "ajv/dist/2020";
-import addFormats from "ajv-formats";
+import validators from "./generated/validators.cjs";
 import type {
   ConstraintEvaluation,
   ItineraryRequest,
@@ -9,18 +8,11 @@ import type {
   RecommendationResponse,
   RouteEstimate,
 } from "@astana/api-client";
-import schema from "../../../../contracts.schema.json";
-
-const ajv = new Ajv2020({
-  strict: false,
-  allErrors: false,
-  validateFormats: true,
-});
-addFormats(ajv);
-ajv.addSchema(schema, "canonical");
-export type Definition = keyof typeof schema.$defs;
+export type Definition = keyof typeof validators;
 export function valid(name: Definition, data: unknown): boolean {
-  const validate = ajv.getSchema(`canonical#/$defs/${name}`);
+  const validate = Object.hasOwn(validators, name)
+    ? validators[name]
+    : undefined;
   return Boolean(validate?.(data));
 }
 export function routeGeometry(route: RouteEstimate | null | undefined) {
