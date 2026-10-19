@@ -27,11 +27,16 @@ ENV PATH=/opt/venv/bin:$PATH \
     ASTANA_RETRIEVAL_POOL_LIMIT=1000 \
     LLM_PROVIDER=none
 RUN groupadd --gid 10001 astana && useradd --uid 10001 --gid 10001 --no-create-home astana
+RUN mkdir -p /app/data && chmod 0755 /app /app/data
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder --chmod=0444 /snapshot/astana-osm.json /app/data/astana-osm.json
+# Keep parent directories traversable regardless of COPY implementation.
+RUN chmod 0755 /app /app/data && chmod 0444 /app/data/astana-osm.json
 # No ARG or build-time expansion of provider credentials. Runtime env only.
 USER 10001:10001
+# Verify final-stage access as the exact runtime UID, with no provider calls.
+RUN python -c "import asyncio,hashlib,os,stat; from pathlib import Path; from astana_city_data.repository import SnapshotRepository; p=Path('/app/data/astana-osm.json'); assert os.getuid() == 10001 and os.getgid() == 10001; assert all(stat.S_IMODE(Path(d).stat().st_mode) == 0o755 for d in ('/app','/app/data')); assert stat.S_IMODE(p.stat().st_mode) == 0o444; assert hashlib.sha256(p.read_bytes()).hexdigest() == 'bc919999881d216cf7692d2c7e3b0289fc388ce227c94a8fd00f0966bd2030df'; assert asyncio.run(SnapshotRepository(p).data_status())['total_places'] == 628"
 EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD ["python", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT','10000') + '/v1/health/ready', timeout=3).close()"]
