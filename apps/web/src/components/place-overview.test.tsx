@@ -151,3 +151,31 @@ it("preserves the original description when no translation exists", () => {
   expect(screen.getByText(place.description)).toBeVisible();
   expect(screen.getByText(placeText("ru", "sourceText"))).toBeVisible();
 });
+
+it("shows an official description with only its supporting source", () => {
+  const place = structuredClone(actual);
+  const source = {
+    ...place.evidence[0],
+    id: "test:official",
+    source_type: "official" as const,
+    source_name: "Официальный сайт сада",
+    source_url: "https://www.astanabotsad.kz/ru/o-nas",
+  };
+  place.evidence.push(source);
+  place.facts.push({
+    key: "official:description:ru",
+    status: "known",
+    value: "Описание сада по официальному источнику",
+    evidence_ids: [source.id],
+  });
+  render(<PlaceOverview place={place} locale="ru" detailed />);
+  expect(
+    screen.getByText("Описание сада по официальному источнику"),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("link", { name: source.source_name }),
+  ).toHaveAttribute("href", source.source_url);
+  expect(sourceDescription(place, "ru")?.evidence.map((e) => e.id)).toEqual([
+    source.id,
+  ]);
+});
