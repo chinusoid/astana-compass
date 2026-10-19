@@ -220,6 +220,7 @@ jobs:
       ASTANA_MAP_PROVIDER: none
       # Build a deployable worker without depending on a running backend.
       ASTANA_API_URL: https://backend.example.invalid
+      SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -238,13 +239,46 @@ jobs:
       - name: Build the Cloudflare Worker and static assets
         working-directory: apps/web
         run: pnpm build:cloudflare
-      - name: Verify bundled map workers and package without publishing
+      - name: Verify map assets and prepare a portable Worker without publishing
         working-directory: apps/web
         run: |
           test -s .open-next/worker.js
           test -s .open-next/assets/maplibre/maplibre-gl-worker.mjs
-          test -s .open-next/assets/maplibre/maplibre-gl-shared.mjs
-          pnpm exec wrangler deploy --dry-run --outdir "$RUNNER_TEMP/cloudflare-dry-run"
+          # MapLibre 6.15.0 ships an empty shared module. Compare exact copies
+          # with the locked package rather than requiring that file to be nonempty.
+          for asset in maplibre-gl-worker.mjs maplibre-gl-shared.mjs; do
+            cmp "node_modules/maplibre-gl/dist/$asset" ".open-next/assets/maplibre/$asset"
+          done
+          release_dir="$RUNNER_TEMP/cloudflare-release"
+          mkdir -p "$release_dir"
+          # Dereference pnpm links so the download needs no Linux checkout.
+          cp --recursive --dereference .open-next "$release_dir/.open-next"
+          cp wrangler.jsonc "$release_dir/wrangler.jsonc"
+          node - "$release_dir" <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const destination = process.argv[2];
+          const metadata = {
+            source_revision: process.env.SOURCE_REVISION,
+            checkout_revision: process.env.GITHUB_SHA,
+            run_url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            wrangler_version: "4.151.1",
+          };
+          fs.writeFileSync(path.join(destination, "build-info.json"), JSON.stringify(metadata, null, 2) + "\n");
+          fs.writeFileSync(path.join(destination, "DEPLOY.txt"), [
+            "Prebuilt Astana Compass Cloudflare Worker. No API keys or account credentials are included.",
+            "Extract the entire artifact, including .open-next, into a short local path.",
+            "From this directory, with an authorized Cloudflare account:",
+            "npx --yes wrangler@4.151.1 deploy --config wrangler.jsonc --keep-vars",
+            "Use --config explicitly to deploy this bundle without rebuilding Next.js/OpenNext.",
+            "Configure ASTANA_API_URL and other runtime settings in Cloudflare. OpenAI keys belong only on the Python backend.",
+            "build-info.json identifies the reviewed source revision and the CI checkout that produced this bundle.",
+            "",
+          ].join("\n"));
+          NODE
+          # Resolve every import outside the source checkout, before uploading.
+          pnpm exec wrangler deploy --config "$release_dir/wrangler.jsonc" \
+            --dry-run --outdir "$RUNNER_TEMP/cloudflare-dry-run"
       - name: Serve the built Worker in workerd and check HTTP behavior
         working-directory: apps/web
         timeout-minutes: 4
@@ -254,6 +288,7 @@ jobs:
           # Only the GitHub runner starts this local runtime; no Cloudflare login.
           # The upstream points at a closed local port, never a real API/provider.
           setsid node node_modules/wrangler/bin/wrangler.js dev --local \
+            --config "$RUNNER_TEMP/cloudflare-release/wrangler.jsonc" \
             --ip 127.0.0.1 --port 8787 --inspector-port 9231 \
             --var ASTANA_API_URL:http://127.0.0.1:9 \
             --var ASTANA_ALLOW_FIXTURES:false --var ASTANA_MAP_PROVIDER:none \
@@ -309,6 +344,14 @@ jobs:
           assert.equal(typeof payload.request_id, "string");
           console.log("Cloudflare workerd passed: SSR page, public icon and safe 503 without a backend.");
           NODE
+      - name: Upload the verified portable Cloudflare Worker
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: astana-cloudflare-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/cloudflare-release/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
   render-container:
     runs-on: ubuntu-24.04
