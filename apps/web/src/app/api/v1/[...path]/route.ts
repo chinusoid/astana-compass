@@ -39,6 +39,7 @@ async function proxy(
       "intent",
       "traffic",
       "map-features",
+      "place-directory",
     ].includes(path[0]);
   if (!getAllowed && !postAllowed) return failure(404);
   try {

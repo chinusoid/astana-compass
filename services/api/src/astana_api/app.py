@@ -25,6 +25,7 @@ from .settings import Settings
 from .social import SocialError, SocialStore, social_error_handler, social_router
 from .traffic import TrafficService
 from .tomtom_places import create_map_service
+from .twogis_places import TwoGisPlacesService
 from astana_city_context.common import ProviderError
 
 
@@ -187,6 +188,8 @@ def create_app(settings=None, services=None):
             progress.enter("map")
             app.state.map_features = create_map_service(enabled=settings.mode == "live" and os.getenv("ASTANA_MAP_LOOKUP_ENABLED", "false").lower() == "true")
             stack.push_async_callback(app.state.map_features.aclose)
+            app.state.place_directory = TwoGisPlacesService(enabled=settings.mode == "live")
+            stack.push_async_callback(app.state.place_directory.aclose)
             app.state.services = services
             if app.state.services is None:
                 try:
@@ -371,6 +374,29 @@ def create_app(settings=None, services=None):
         app.state.feedback.append({"feedback_id": feedback_id, "request_id": payload["request_id"], "rating": payload["rating"], "comment": payload["comment"], "created_at": utcnow()})
         return {"feedback_id": feedback_id, "accepted": True}
 
+    @app.post("/v1/place-directory")
+    async def place_directory(request: Request):
+        payload = await read_payload(request, "PlaceDirectoryRequest")
+        # Only the canonical public catalog provides the search name/location.
+        # The browser cannot submit credentials, arbitrary queries or coordinates.
+        place = await call(request, lambda s: s.repository.get(payload["place_id"]))
+        if place is None:
+            raise APIError("not_found")
+        place = checked("Place", place, settings)
+        await acquire_gate()
+        try:
+            async with asyncio.timeout(min(8, settings.request_timeout_seconds)):
+                result = await app.state.place_directory.search(place, payload["locale"])
+        except TimeoutError:
+            raise APIError("provider_unavailable") from None
+        except ProviderError as error:
+            raise APIError(error.code if error.code in STATUS else "provider_unavailable") from None
+        finally:
+            app.state.gate.release()
+        # Directory data is returned for this view only. It never changes Place
+        # facts, recommendations, stored groups, or model grounding.
+        return checked("MapFeatureResponse", result, settings)
+
     @app.get("/v1/data-status")
     async def data_status(request: Request):
         return checked("DataStatusResponse", await call(request, lambda s: s.repository.data_status()), settings)
@@ -392,6 +418,7 @@ def create_app(settings=None, services=None):
             "/v1/intent": ("post", "IntentRequest", "IntentResponse", "200"),
             "/v1/traffic": ("post", "TrafficRequest", "TrafficResponse", "200"),
             "/v1/map-features": ("post", "MapFeatureRequest", "MapFeatureResponse", "200"),
+            "/v1/place-directory": ("post", "PlaceDirectoryRequest", "MapFeatureResponse", "200"),
             "/v1/social/session": ("post", "SocialSessionRequest", "SocialSessionResponse", "200"),
             "/v1/social/state": ("get", None, "SocialState", "200"),
             "/v1/social/events": ("get", None, "CommunityEvents", "200"),
@@ -419,6 +446,7 @@ def create_app(settings=None, services=None):
                 operation["requestBody"] = {"required": True, "content": {"application/json": {"schema": {"$ref": f"#/components/schemas/{input_type}"}, "examples": examples.get(input_type, {})}}}
         schema["paths"]["/v1/health/ready"]["get"]["responses"]["503"] = {"description": "Unavailable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthResponse"}}}}
         schema["paths"]["/v1/places/{place_id}"]["get"]["responses"]["404"] = {"description": "Not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
+        schema["paths"]["/v1/place-directory"]["post"]["responses"]["404"] = {"description": "Catalog place not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
         schema["components"].setdefault("securitySchemes", {})["GuestBearer"] = {"type": "http", "scheme": "bearer", "description": "Temporary guest session token. The web proxy keeps it in an HttpOnly cookie."}
         app.openapi_schema = schema
         return schema

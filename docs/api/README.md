@@ -42,6 +42,24 @@ Configure the server-only `ROUTING_API_KEY` (or `ORS_API_KEY`) for ORS. Missing 
 
 Set `LLM_PROVIDER=openai` and `LLM_MODEL` plus `OPENAI_API_KEY`, or `LLM_PROVIDER=nvidia` and `LLM_MODEL` plus `NVIDIA_API_KEY`. `LLM_API_KEY` is an alternate server-only key. `none` disables external generation. Values are loaded from environment; copying `.env.example` does not automatically load secrets. Model names have no guessed default. The optional provider gets a reduced grounding payload; it does not get the user's coordinate object. See `packages/ai_providers/README.md` and `docs/ai/TRAINING.md` for its precise privacy and generation boundaries. No live model call or training is implied by passing mocked tests.
 
+## Optional organization directory
+
+`POST /v1/place-directory` takes canonical `PlaceDirectoryRequest`: only `place_id`
+and `locale`. The backend resolves the catalog place, then uses its public name
+and location to query 2GIS Places API. Set server-only `TWOGIS_API_KEY`; fixture
+mode never calls this provider. An unknown catalog ID returns 404 before any
+provider request. Missing access or provider failure returns 503, not an empty
+claim about the organization.
+
+The response is `MapFeatureResponse` with separate `twogis:branch:` candidates,
+their names, addresses, descriptions where present, and source schedules. Nearby
+results are not established matches. The user must check the branch's identity;
+hours are not automatically promoted to `Place` facts or opening-at-arrival
+claims. The frontend requests this data only after the user selects the directory
+button in a full place card. Responses have `Cache-Control: no-store`; no provider
+payload is retained in a catalog, response cache, browser storage, room or model
+prompt. See [limits, attribution and access](../operations/twogis.md).
+
 ## Operational boundaries
 
 - 32 KiB request body cap including chunked requests; 10-second receive deadline.
