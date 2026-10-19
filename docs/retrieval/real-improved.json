@@ -1,0 +1,802 @@
+{
+  "dataset": "astana-osm-628-source-regression-v1",
+  "judgment_kind": "agent-authored source-informed regression judgments; not independent human relevance labels",
+  "independent_human_quality": false,
+  "snapshot_sha256": "bc919999881d216cf7692d2c7e3b0289fc388ce227c94a8fd00f0966bd2030df",
+  "snapshot_places": 628,
+  "strategy": "snapshot-bm25-ru-kk-en-2",
+  "pool_limit": 1000,
+  "k": 3,
+  "passed": 45,
+  "total": 45,
+  "named_mrr_at_k": 1.0,
+  "by_locale": {
+    "ru": {
+      "passed": 15,
+      "total": 15
+    },
+    "kk": {
+      "passed": 15,
+      "total": 15
+    },
+    "en": {
+      "passed": 15,
+      "total": 15
+    }
+  },
+  "by_kind": {
+    "named": {
+      "passed": 28,
+      "total": 28
+    },
+    "category": {
+      "passed": 11,
+      "total": 11
+    },
+    "no_match": {
+      "passed": 6,
+      "total": 6
+    }
+  },
+  "known_required_or_radius_violations": 0,
+  "queries_with_required_constraints": 3,
+  "unsupported_matched_fact_keys": 0,
+  "single_run_latency_ms": {
+    "median": 1778.5,
+    "p95": 4659.13
+  },
+  "cases": [
+    {
+      "id": "ru-01",
+      "locale": "ru",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:way/1196402246"
+      ],
+      "names": [
+        "Ботаникалық бақ"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1850.0
+    },
+    {
+      "id": "ru-02",
+      "locale": "ru",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/12093489321",
+        "osm:node/10064384681",
+        "osm:node/4874140222"
+      ],
+      "names": [
+        "Дареджани",
+        "Дареджани",
+        "Дареджани"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1947.23
+    },
+    {
+      "id": "ru-03",
+      "locale": "ru",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/12514017369"
+      ],
+      "names": [
+        "Blackбери"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1553.35
+    },
+    {
+      "id": "ru-04",
+      "locale": "ru",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/10148735979"
+      ],
+      "names": [
+        "Олимпиада сақиналары"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1665.8
+    },
+    {
+      "id": "ru-05",
+      "locale": "ru",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/4894937300"
+      ],
+      "names": [
+        "Қазақстан Республикасының Ұлттық Мұражайы"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1619.19
+    },
+    {
+      "id": "ru-06",
+      "locale": "ru",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:way/917478479"
+      ],
+      "names": [
+        "Астана Опера"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 2082.45
+    },
+    {
+      "id": "ru-07",
+      "locale": "ru",
+      "kind": "category",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/2671060738",
+        "osm:node/4920075760",
+        "osm:node/12095489139"
+      ],
+      "names": [
+        "Избушка",
+        "Гурман",
+        "Durum"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 3352.07
+    },
+    {
+      "id": "ru-08",
+      "locale": "ru",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:way/240376692"
+      ],
+      "names": [
+        "Сәкен Сейфуллин музейі"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1865.52
+    },
+    {
+      "id": "ru-09",
+      "locale": "ru",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:way/734514013"
+      ],
+      "names": [
+        "Сызықтық саябақ"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1778.5
+    },
+    {
+      "id": "ru-10",
+      "locale": "ru",
+      "kind": "category",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/4894937300",
+        "osm:way/240376692",
+        "osm:way/963855443"
+      ],
+      "names": [
+        "Қазақстан Республикасының Ұлттық Мұражайы",
+        "Сәкен Сейфуллин музейі",
+        "Назарбаев орталығы-2"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 2335.37
+    },
+    {
+      "id": "ru-11",
+      "locale": "ru",
+      "kind": "no_match",
+      "passed": true,
+      "reciprocal_rank_at_k": null,
+      "actual": [],
+      "names": [],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 2304.31
+    },
+    {
+      "id": "ru-12",
+      "locale": "ru",
+      "kind": "no_match",
+      "passed": true,
+      "reciprocal_rank_at_k": null,
+      "actual": [],
+      "names": [],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 2079.59
+    },
+    {
+      "id": "ru-13",
+      "locale": "ru",
+      "kind": "category",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/5936817288",
+        "osm:node/10957524588",
+        "osm:node/5913515789"
+      ],
+      "names": [
+        "Библиотека",
+        "Библиотека",
+        "Детская библиотека"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1555.09
+    },
+    {
+      "id": "ru-14",
+      "locale": "ru",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:way/112456426"
+      ],
+      "names": [
+        "Бауыржан Момышұлы атындағы саябақ"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1576.05
+    },
+    {
+      "id": "ru-15",
+      "locale": "ru",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/2349675581"
+      ],
+      "names": [
+        "Театр кукол"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1551.54
+    },
+    {
+      "id": "kk-01",
+      "locale": "kk",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:way/1196402246"
+      ],
+      "names": [
+        "Ботаникалық бақ"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 2570.4
+    },
+    {
+      "id": "kk-02",
+      "locale": "kk",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:way/1460537088"
+      ],
+      "names": [
+        "Astana Musical"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 2529.73
+    },
+    {
+      "id": "kk-03",
+      "locale": "kk",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:way/549307755"
+      ],
+      "names": [
+        "Мәңгілік Ел салтанат қақпасы"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 3795.82
+    },
+    {
+      "id": "kk-04",
+      "locale": "kk",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/4361681890"
+      ],
+      "names": [
+        "Kazakh food"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 3381.41
+    },
+    {
+      "id": "kk-05",
+      "locale": "kk",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/4920065833"
+      ],
+      "names": [
+        "Қазақ музыкалық драма театры"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 4040.52
+    },
+    {
+      "id": "kk-06",
+      "locale": "kk",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/10148735979"
+      ],
+      "names": [
+        "Олимпиада сақиналары"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 4139.39
+    },
+    {
+      "id": "kk-07",
+      "locale": "kk",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:relation/16002498"
+      ],
+      "names": [
+        "Жерұйық саябағы"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 3173.18
+    },
+    {
+      "id": "kk-08",
+      "locale": "kk",
+      "kind": "category",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/12041597369",
+        "osm:node/6408271985",
+        "osm:node/10564988185"
+      ],
+      "names": [
+        "MÖKKi",
+        "CrepeCafe",
+        "Degirmen"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 5829.12
+    },
+    {
+      "id": "kk-09",
+      "locale": "kk",
+      "kind": "category",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/12041597369",
+        "osm:node/6408271985",
+        "osm:node/10564988185"
+      ],
+      "names": [
+        "MÖKKi",
+        "CrepeCafe",
+        "Degirmen"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 5200.18
+    },
+    {
+      "id": "kk-10",
+      "locale": "kk",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/12125736551"
+      ],
+      "names": [
+        "Балалар кітапханасы"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 3949.84
+    },
+    {
+      "id": "kk-11",
+      "locale": "kk",
+      "kind": "category",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/2864129921",
+        "osm:node/10798946230",
+        "osm:node/12041597269"
+      ],
+      "names": [
+        "Алтын Адам",
+        "Selfie",
+        "RIBAMBELLE"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 4059.31
+    },
+    {
+      "id": "kk-12",
+      "locale": "kk",
+      "kind": "no_match",
+      "passed": true,
+      "reciprocal_rank_at_k": null,
+      "actual": [],
+      "names": [],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 4659.13
+    },
+    {
+      "id": "kk-13",
+      "locale": "kk",
+      "kind": "no_match",
+      "passed": true,
+      "reciprocal_rank_at_k": null,
+      "actual": [],
+      "names": [],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 4678.82
+    },
+    {
+      "id": "kk-14",
+      "locale": "kk",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:way/1456208624"
+      ],
+      "names": [
+        "Бейбітшілік пен Келісім аллеясы"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 3184.39
+    },
+    {
+      "id": "kk-15",
+      "locale": "kk",
+      "kind": "category",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/12041597369",
+        "osm:node/6408271985",
+        "osm:node/10564988185"
+      ],
+      "names": [
+        "MÖKKi",
+        "CrepeCafe",
+        "Degirmen"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1582.14
+    },
+    {
+      "id": "en-01",
+      "locale": "en",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/4409067789"
+      ],
+      "names": [
+        "The Garden"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1341.74
+    },
+    {
+      "id": "en-02",
+      "locale": "en",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/10171023213"
+      ],
+      "names": [
+        "Coffee Bus Expresso Luxury"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1213.75
+    },
+    {
+      "id": "en-03",
+      "locale": "en",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:way/1424109192"
+      ],
+      "names": [
+        "Самал саябағы"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1241.12
+    },
+    {
+      "id": "en-04",
+      "locale": "en",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/5132817725",
+        "osm:node/9047331880",
+        "osm:node/10170946741"
+      ],
+      "names": [
+        "Starbucks",
+        "Starbucks",
+        "Starbucks"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1323.5
+    },
+    {
+      "id": "en-05",
+      "locale": "en",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:way/549307755"
+      ],
+      "names": [
+        "Мәңгілік Ел салтанат қақпасы"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1235.25
+    },
+    {
+      "id": "en-06",
+      "locale": "en",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/4894937300"
+      ],
+      "names": [
+        "Қазақстан Республикасының Ұлттық Мұражайы"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1232.12
+    },
+    {
+      "id": "en-07",
+      "locale": "en",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/4920065833"
+      ],
+      "names": [
+        "Қазақ музыкалық драма театры"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1440.89
+    },
+    {
+      "id": "en-08",
+      "locale": "en",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:relation/15957444"
+      ],
+      "names": [
+        "Астана саябағы"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1545.48
+    },
+    {
+      "id": "en-09",
+      "locale": "en",
+      "kind": "category",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/12041597369",
+        "osm:node/6408271985",
+        "osm:node/10564988185"
+      ],
+      "names": [
+        "MÖKKi",
+        "CrepeCafe",
+        "Degirmen"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1417.0
+    },
+    {
+      "id": "en-10",
+      "locale": "en",
+      "kind": "named",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/6494912582",
+        "osm:node/6494912583",
+        "osm:node/13148690873"
+      ],
+      "names": [
+        "Coffee Like",
+        "Coffee Like",
+        "Coffee Like"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1232.56
+    },
+    {
+      "id": "en-11",
+      "locale": "en",
+      "kind": "category",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/5936817288",
+        "osm:node/10957524588",
+        "osm:node/5913515789"
+      ],
+      "names": [
+        "Библиотека",
+        "Библиотека",
+        "Детская библиотека"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1225.18
+    },
+    {
+      "id": "en-12",
+      "locale": "en",
+      "kind": "category",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/2388707906",
+        "osm:way/230358847",
+        "osm:way/240376692"
+      ],
+      "names": [
+        "Астана-Экспо КС",
+        "Көрме",
+        "Сәкен Сейфуллин музейі"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1264.15
+    },
+    {
+      "id": "en-13",
+      "locale": "en",
+      "kind": "no_match",
+      "passed": true,
+      "reciprocal_rank_at_k": null,
+      "actual": [],
+      "names": [],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1429.59
+    },
+    {
+      "id": "en-14",
+      "locale": "en",
+      "kind": "no_match",
+      "passed": true,
+      "reciprocal_rank_at_k": null,
+      "actual": [],
+      "names": [],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1323.06
+    },
+    {
+      "id": "en-15",
+      "locale": "en",
+      "kind": "category",
+      "passed": true,
+      "reciprocal_rank_at_k": 1.0,
+      "actual": [
+        "osm:node/6290442885",
+        "osm:node/10948680993",
+        "osm:node/12752199559"
+      ],
+      "names": [
+        "МОККО",
+        "Инжу",
+        "Кофейня"
+      ],
+      "known_required_or_radius_violations": 0,
+      "unsupported_matched_fact_keys": 0,
+      "elapsed_ms": 1270.99
+    }
+  ]
+}
