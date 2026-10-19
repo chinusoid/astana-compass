@@ -171,6 +171,66 @@ def test_unrelated_query_is_not_filled_with_nearest_real_places(offline_live):
     assert response.json()["recommendations"] == []
 
 
+@pytest.mark.parametrize(("query", "locale", "categories"), [
+    ("Сначала хочу попить кофе, а потом сходить в какой-нибудь парк", "ru", [{"cafe"}, {"park", "garden"}]),
+    ("First coffee then a park", "en", [{"cafe"}, {"park", "garden"}]),
+    ("Алдымен кофе, содан кейін саябақ", "kk", [{"cafe"}, {"park", "garden"}]),
+    ("Сначала парк, затем кофе", "ru", [{"park", "garden"}, {"cafe"}]),
+    ("First coffee then a park then a museum", "en", [{"cafe"}, {"park", "garden"}, {"museum"}]),
+])
+def test_real_sequence_covers_each_requested_activity_in_order(offline_live, query, locale, categories):
+    payload = request(query, locale)
+    payload["available_seconds"] = 60  # Timing is a warning, never a lost stage.
+    response = offline_live.post("/v1/recommendations", json=payload)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    validate_payload("RecommendationResponse", result)
+    places = {place["id"]: place for place in result["places"]}
+    ids = [item["place_id"] for item in result["recommendations"]]
+    assert len(ids) == len(categories)
+    for place_id, expected in zip(ids, categories, strict=True):
+        assert expected.intersection(places[place_id]["categories"])
+        assert not places[place_id]["is_synthetic"]
+    itinerary_response = offline_live.post("/v1/itineraries", json={**payload, "place_ids": ids})
+    assert itinerary_response.status_code == 200, itinerary_response.text
+    itinerary = itinerary_response.json()
+    assert [stop["place_id"] for stop in itinerary["stops"]] == ids
+    assert itinerary["route"]["includes_return"]
+    assert itinerary["total_duration_seconds"] > payload["available_seconds"]
+
+
+def test_unmatched_sequence_stage_is_not_replaced_with_another_coffee_shop(offline_live):
+    response = offline_live.post("/v1/recommendations", json=request("First coffee then quantum teleportation", "en"))
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "partial"
+    assert len(result["recommendations"]) == 1
+    assert "cafe" in result["places"][0]["categories"]
+    assert "stage 2" in " ".join(result["warnings"])
+
+
+def test_required_wifi_is_not_relaxed_to_complete_a_park_stage(offline_live):
+    response = offline_live.post("/v1/recommendations", json=request(
+        "First Estet Coffee then Botanical Garden", "en",
+        constraints=[{"key": "has_wifi", "value": True, "strength": "required"}],
+    ))
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "partial"
+    assert [item["place_id"] for item in result["recommendations"]] == ["osm:way/1395465867"]
+    assert "stage 2" in " ".join(result["warnings"])
+
+
+def test_named_stages_keep_the_requested_real_venues(offline_live):
+    response = offline_live.post("/v1/recommendations", json=request(
+        "Сначала Ботанический сад, потом Центральный парк",
+    ))
+    assert response.status_code == 200
+    assert [item["place_id"] for item in response.json()["recommendations"]] == [
+        "osm:way/1196402246", "osm:relation/15957444",
+    ]
+
+
 @pytest.mark.parametrize("path", [None, "missing-snapshot.json"])
 def test_real_factory_does_not_fall_back_when_snapshot_is_unconfigured(monkeypatch, path):
     if path is None:

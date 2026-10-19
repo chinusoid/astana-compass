@@ -243,6 +243,83 @@ class RecommendationTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
         self.assertIn("Synthetic", " ".join(value["warnings"]))
         self.assertEqual(value["generated_at"], "2026-10-18T07:00:00+00:00")
 
+    async def test_ordered_stages_choose_distinct_places_and_keep_order_after_parallel_routes(self):
+        self.setup_service([place(1), place(2), place(3)])
+        value = await self.service.recommend(request(query="First coffee then park then museum"))
+        self.assertEqual([item["place_id"] for item in value["recommendations"]],
+                         [place(1)["id"], place(2)["id"], place(3)["id"]])
+        self.assertEqual([item["query"] for item in self.retriever.requests], ["coffee", "park", "museum"])
+        self.assertEqual(sum(item["candidate_limit"] for item in self.retriever.requests), 24)
+        self.assertEqual(len(self.context.routes), 3)
+        self.assertEqual(len(self.context.context_requests), 1)
+
+    async def test_two_stages_do_not_fill_the_trip_with_a_third_unrequested_stop(self):
+        self.setup_service([place(1), place(2), place(3)])
+        value = await self.service.recommend(request(query="Coffee then park"))
+        self.assertEqual(len(value["recommendations"]), 2)
+        self.assertEqual([item["rank"] for item in value["recommendations"]], [1, 2])
+
+    async def test_ordered_stage_search_failure_never_uses_unrelated_nearest_fallback(self):
+        self.setup_service([place(1), place(2)])
+        self.retriever.error = RuntimeError("sensitive provider failure")
+        value = await self.service.recommend(request(query="First coffee then park"))
+        self.assertEqual(value["status"], "needs_clarification")
+        self.assertEqual(value["places"], [])
+        self.assertEqual(len(value["clarification_questions"]), 2)
+        self.assertFalse(self.context.routes)
+        self.assertNotIn("sensitive", json.dumps(value))
+
+    async def test_empty_stage_is_reported_as_incomplete_without_fake_destination(self):
+        self.setup_service([place(1)])
+        value = await self.service.recommend(request(query="First coffee then"))
+        self.assertEqual(value["status"], "partial")
+        self.assertEqual(len(value["recommendations"]), 1)
+        self.assertEqual([item["query"] for item in self.retriever.requests], ["coffee"])
+        self.assertIn("stage 2", " ".join(value["warnings"]))
+
+    async def test_missing_middle_stage_retains_original_stage_numbers_in_explanations(self):
+        self.setup_service([place(1), place(2)])
+        value = await self.service.recommend(request(query="First coffee then then park"))
+        self.assertEqual(len(value["recommendations"]), 2)
+        self.assertTrue(value["recommendations"][0]["why"].startswith("Stage 1"))
+        self.assertTrue(value["recommendations"][1]["why"].startswith("Stage 3"))
+        self.assertIn("stage 2", " ".join(value["warnings"]))
+
+    async def test_ordered_stages_preserve_required_constraints_and_soft_time(self):
+        self.setup_service([place(1), place(2, facts=[fact()]), place(3, facts=[fact()])])
+        value = await self.service.recommend(request(
+            query="First coffee then park", available_seconds=60, constraints=[constraint()],
+        ))
+        self.assertEqual([item["place_id"] for item in value["recommendations"]], [place(2)["id"], place(3)["id"]])
+        self.assertEqual(value["status"], "partial")
+        self.assertTrue(all(item["total_duration_seconds"] > 60 for item in value["recommendations"]))
+        self.assertTrue(all(item["constraints"] == [constraint()] for item in self.retriever.requests))
+
+    async def test_stage_route_failure_can_use_next_relevant_candidate_without_reordering(self):
+        self.setup_service([place(1), place(2), place(3)])
+        original = self.context.estimate_route
+
+        async def route(**kwargs):
+            if kwargs["destinations"][0] == place(1)["location"]:
+                raise RuntimeError("unroutable")
+            return await original(**kwargs)
+
+        self.context.estimate_route = route
+        value = await self.service.recommend(request(query="First coffee then park"))
+        self.assertEqual([item["place_id"] for item in value["recommendations"]], [place(3)["id"], place(2)["id"]])
+        self.assertEqual(value["status"], "partial")
+
+    async def test_sequence_respects_explicit_result_limit_and_reports_omitted_stages(self):
+        self.setup_service([place(1), place(2), place(3)])
+        for limit in (1, 2, 3):
+            with self.subTest(limit=limit):
+                value = await self.service.recommend(request(
+                    query="First coffee then park then museum then gallery", limit=limit,
+                ))
+                self.assertEqual(len(value["recommendations"]), limit)
+                self.assertEqual(value["status"], "partial")
+                self.assertIn(f"first {limit} stages", " ".join(value["warnings"]))
+
     async def test_unknown_conflicting_false_and_absent_required_all_exclude(self):
         variants = [
             [fact(value=False)], [fact(status="unknown")],

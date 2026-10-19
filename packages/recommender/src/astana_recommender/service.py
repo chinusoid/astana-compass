@@ -20,6 +20,7 @@ from astana_contracts import (
 )
 
 from .explanations import ExplanationGenerator, GroundedExplanation, GroundedReason
+from .journey import journey_stages
 from .text import TEXT, label
 
 
@@ -134,15 +135,18 @@ class DefaultRecommendationService:
             "ItineraryResponse" if itinerary else "RecommendationResponse", response
         )
 
-    async def _retrieve(self, request: JSON) -> tuple[list[JSON], list[str], bool]:
+    async def _retrieve(
+        self, request: JSON, *, candidate_limit: int | None = None, allow_fallback: bool = True,
+    ) -> tuple[list[JSON], list[str], bool]:
         locale = request["locale"]
+        limit = self.candidate_limit if candidate_limit is None else candidate_limit
         payload = {
             "query": request["query"],
             "locale": locale,
             "origin": deepcopy(request["origin"]),
             "radius_meters": self.radius_meters,
             "constraints": deepcopy(request["constraints"]),
-            "candidate_limit": self.candidate_limit,
+            "candidate_limit": limit,
         }
         validate_payload("RetrievalRequest", payload)
         try:
@@ -153,18 +157,20 @@ class DefaultRecommendationService:
             places = {p["id"]: p for p in result["places"]}
             candidates = [
                 deepcopy(places[h["place_id"]])
-                for h in result["hits"][: self.candidate_limit]
+                for h in result["hits"][:limit]
             ]
             return candidates, list(result["warnings"]), False
         except Exception:
             # Never echo provider exceptions: they may contain tokens or raw input.
+            if not allow_fallback:
+                return [], [TEXT[locale]["stage_search_failed"]], True
             warnings = [TEXT[locale]["retrieval_failed"]]
         try:
             nearby = await asyncio.wait_for(
                 self.repository.nearby(
                     origin=deepcopy(request["origin"]),
                     radius_meters=self.radius_meters,
-                    limit=self.candidate_limit,
+                    limit=limit,
                 ),
                 timeout=self.timeout_seconds,
             )
@@ -172,7 +178,7 @@ class DefaultRecommendationService:
                 raise ValueError("invalid repository result")
             candidates = []
             seen = set()
-            for place in nearby[: self.candidate_limit]:
+            for place in nearby[:limit]:
                 validate_payload("Place", place)
                 if place["id"] not in seen:
                     candidates.append(deepcopy(place))
@@ -396,8 +402,37 @@ class DefaultRecommendationService:
         request = self._request("RecommendationRequest", request)
         response = self._base(request)
         text = TEXT[request["locale"]]
-        candidates, warnings, degraded = await self._retrieve(request)
-        response["warnings"].extend(warnings)
+        stages = journey_stages(request["query"])
+        stage_ids: list[list[str]] = []
+        missing_stages: list[int] = []
+        if stages:
+            # Reuse lexical/name retrieval independently for each destination,
+            # while keeping the total candidate and provider work bounded.
+            active_stages = stages[:request["limit"]]
+            limit = max(1, self.candidate_limit // len(active_stages))
+
+            async def retrieve_stage(query: str) -> tuple[list[JSON], list[str], bool]:
+                if not query:
+                    return [], [], False
+                return await self._retrieve(
+                    {**request, "query": query}, candidate_limit=limit, allow_fallback=False,
+                )
+
+            results = await asyncio.gather(*(retrieve_stage(stage) for stage in active_stages))
+            unique = {}
+            degraded = False
+            for places, warnings, failed in results:
+                stage_ids.append([place["id"] for place in places])
+                unique.update((place["id"], place) for place in places)
+                response["warnings"].extend(warnings)
+                degraded |= failed
+            candidates = list(unique.values())
+            if len(stages) > len(active_stages):
+                response["warnings"].append(text["stage_limit"].format(limit=request["limit"]))
+                degraded = True
+        else:
+            candidates, warnings, degraded = await self._retrieve(request)
+            response["warnings"].extend(warnings)
         candidates, warnings, context_degraded = await self._enrich(candidates, request)
         response["warnings"].extend(warnings)
         degraded |= context_degraded
@@ -412,7 +447,46 @@ class DefaultRecommendationService:
         route_failed = False
         offset = 0
         selected = []
-        while offset < len(eligible) and len(selected) < request["limit"]:
+        selected_stage_orders: list[int] = []
+        if stages:
+            by_id = {place["id"]: (place, evaluations) for place, evaluations in eligible}
+            groups = [[by_id[place_id] for place_id in ids if place_id in by_id] for ids in stage_ids]
+            offsets = [0] * len(groups)
+            completed = {}
+            used: set[str] = set()
+            while True:
+                batch = []
+                reserved = set(used)
+                for index, group in enumerate(groups):
+                    if index in completed:
+                        continue
+                    while offsets[index] < len(group) and group[offsets[index]][0]["id"] in reserved:
+                        offsets[index] += 1
+                    if offsets[index] < len(group) and len(batch) < self.route_concurrency:
+                        item = group[offsets[index]]
+                        offsets[index] += 1
+                        batch.append((index, item))
+                        reserved.add(item[0]["id"])
+                if not batch:
+                    break
+                routes = await asyncio.gather(*(self._route([item[0]], request) for _, item in batch))
+                for (index, (place, evaluations)), route in zip(batch, routes, strict=True):
+                    if route is None:
+                        route_failed = True
+                        continue
+                    visit = self._visit_seconds(place)
+                    completed[index] = (place, evaluations, route, visit, route["duration_seconds"] + visit)
+                    used.add(place["id"])
+            for index in range(len(groups)):
+                if index in completed:
+                    selected.append(completed[index])
+                    selected_stage_orders.append(index + 1)
+                else:
+                    missing_stages.append(index + 1)
+            if missing_stages:
+                degraded = True
+                response["warnings"].extend(text["stage_missing"].format(order=index) for index in missing_stages)
+        while not stages and offset < len(eligible) and len(selected) < request["limit"]:
             # Route only as many candidates as can still be returned. A longer
             # outing is a visible alternative, not a reason to scan the pool.
             needed = request["limit"] - len(selected)
@@ -437,6 +511,8 @@ class DefaultRecommendationService:
             selected, explanations, strict=True
         ):
             why, activity, generator_warnings = explanation
+            if stages:
+                why = text["stage_found"].format(order=selected_stage_orders[len(response["recommendations"])]) + " " + why
             item_warnings = self._route_warnings([place], route, request["locale"])
             item_warnings.extend(generator_warnings)
             time_warning = self._time_warning(total, request)
@@ -471,6 +547,9 @@ class DefaultRecommendationService:
             response["status"] = "partial" if degraded else "matched"
         else:
             response["warnings"].append(text["no_match"])
+            if missing_stages:
+                response["status"] = "needs_clarification"
+                response["clarification_questions"] = [text["stage_missing"].format(order=index) for index in missing_stages]
         return self._finish(response)
 
     async def build_itinerary(self, request: JSON) -> JSON:

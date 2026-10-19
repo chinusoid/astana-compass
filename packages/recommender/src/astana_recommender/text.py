@@ -2,6 +2,10 @@
 
 TEXT = {
     "ru": {
+        "stage_found": "Этап {order} из вашего пожелания.",
+        "stage_missing": "Для этапа {order} не найдено отдельного места с подтверждёнными обязательными условиями и маршрутом. Уточните название или занятие этого этапа; план пока неполный.",
+        "stage_search_failed": "Поиск одного из этапов недоступен; случайное ближайшее место вместо него не подставлялось.",
+        "stage_limit": "В этом плане показаны только первые {limit} этапа. Сократите пожелание до этого числа остановок, чтобы построить полный план.",
         "no_match": "Не удалось подтвердить вариант по запросу с выполнением всех обязательных условий.",
         "no_model": "Языковая модель не настроена: объяснения составлены по проверяемым шаблонам; семантические возможности зависят от режима поиска.",
         "generation_failed": "Генератор объяснений недоступен или вернул неподтверждённые ссылки. Использовано объяснение по данным.",
@@ -30,6 +34,10 @@ TEXT = {
         "take_break": "Если обстановка позволяет, сделайте небольшую паузу.",
     },
     "kk": {
+        "stage_found": "Қалауыңыздағы {order}-кезең.",
+        "stage_missing": "{order}-кезең үшін міндетті талаптары мен маршруты расталған бөлек орын табылмады. Осы кезеңдегі орын атауын немесе әрекетті нақтылаңыз; жоспар әзірге толық емес.",
+        "stage_search_failed": "Кезеңдердің бірінің іздеуі қолжетімсіз; оның орнына кездейсоқ жақын орын қосылмады.",
+        "stage_limit": "Бұл жоспарда тек алғашқы {limit} кезең көрсетілген. Толық жоспар құру үшін қалауды осы аялдама санына дейін қысқартыңыз.",
         "no_match": "Сұрауға сәйкес барлық міндетті талаптарды орындайтын нұсқа расталмады.",
         "no_model": "Тілдік модель бапталмаған: түсіндірмелер тексерілетін үлгілермен жасалды; мағыналық іздеу мүмкіндігі іздеу режиміне байланысты.",
         "generation_failed": "Түсіндірме генераторы қолжетімсіз немесе расталмаған сілтемелер қайтарды. Деректерге негізделген түсіндірме қолданылды.",
@@ -58,6 +66,10 @@ TEXT = {
         "take_break": "Жағдай мүмкіндік берсе, аздап үзіліс жасаңыз.",
     },
     "en": {
+        "stage_found": "Stage {order} of your wish.",
+        "stage_missing": "No distinct place with verified required conditions and a route was found for stage {order}. Clarify its place name or activity; the plan is still incomplete.",
+        "stage_search_failed": "Search for a stage is unavailable; an arbitrary nearby place was not substituted.",
+        "stage_limit": "This plan shows only the first {limit} stages. Shorten your wish to this number of stops to build a complete plan.",
         "no_match": "No option matching the request could be verified to meet all required constraints.",
         "no_model": "No language model is configured: explanations use verifiable templates; semantic capabilities depend on the retrieval mode.",
         "generation_failed": "The explanation generator was unavailable or returned unverified references. A data-based explanation was used.",

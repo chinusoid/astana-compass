@@ -20,7 +20,17 @@ Importing the package creates no clients, makes no requests and reads no secrets
   The selected time is a preference: longer alternatives and complete selected
   itineraries remain visible with a localized duration/overrun warning and a
   partial status. Selected stops preserve their requested ID order.
-- Uses an explicit nearby-catalog fallback if retrieval fails. Context failure
+- Explicit sequences such as `сначала кофе, потом парк`, `first coffee then
+  park` and `алдымен кофе, содан кейін саябақ` retrieve each destination
+  separately and return one distinct place per stage in that order (up to the
+  requested limit of three). Two stages produce two stops. Ordinary mixed
+  wishes retain normal relevance/diversity ranking. The same required-condition
+  checks and soft time preference apply; no additional LLM parsing is used.
+- An empty, unmatched or unroutable sequence stage is disclosed as an
+  incomplete plan, with its original stage number. Available stops remain a
+  partial result; if none are available, the response needs clarification.
+  A failed stage search never substitutes an arbitrary nearby place.
+- Uses an explicit nearby-catalog fallback for ordinary requests if retrieval fails. Context failure
   invalidates request-time facts; static facts may still support a partial result.
   Route failure excludes a candidate rather than fabricating a path.
 - Marks synthetic data, approximate routing, visit estimates, generator failure
