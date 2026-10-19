@@ -60,6 +60,9 @@ test("real foundation API: manual start, sources, exact seconds, return itinerar
   const sent = page.waitForRequest(
     (r) => r.url().endsWith("/recommendations") && r.method() === "POST",
   );
+  const itineraryRequest = page.waitForRequest((r) =>
+    r.url().endsWith("/itineraries"),
+  );
   await search(page);
   const request = (await sent).postDataJSON() as RecommendationRequest;
   expect(request.available_seconds).toBe(5400);
@@ -86,24 +89,12 @@ test("real foundation API: manual start, sources, exact seconds, return itinerar
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(detailsButton).toBeFocused();
-  await cards(page)
-    .nth(0)
-    .getByRole("button", { name: "В мой план", exact: true })
-    .click();
-  await cards(page)
-    .nth(1)
-    .getByRole("button", { name: "В мой план", exact: true })
-    .click();
   const selectedBefore = await page
     .getByTestId("selected-stops")
     .locator("li strong")
     .allTextContents();
-  const itineraryRequest = page.waitForRequest((r) =>
-    r.url().endsWith("/itineraries"),
-  );
-  await page.getByRole("button", { name: "Рассчитать весь маршрут" }).click();
   const body = (await itineraryRequest).postDataJSON();
-  expect(body.place_ids).toHaveLength(2);
+  expect(body.place_ids).toHaveLength(3);
   expect(body.return_to_origin).toBe(true);
   await expect(page.locator(".journey-total")).toBeVisible();
   expect(
@@ -242,14 +233,6 @@ test("real API: no-match keeps every stop; explicit reorder clears the previous 
 }) => {
   await fill(page);
   await search(page);
-  await cards(page)
-    .nth(0)
-    .getByRole("button", { name: "В мой план", exact: true })
-    .click();
-  await cards(page)
-    .nth(1)
-    .getByRole("button", { name: "В мой план", exact: true })
-    .click();
   const original = await page
     .getByTestId("selected-stops")
     .locator("li strong")
@@ -264,15 +247,18 @@ test("real API: no-match keeps every stop; explicit reorder clears the previous 
       .getByTestId("selected-stops")
       .locator("li strong")
       .allTextContents(),
-  ).toEqual([...original].reverse());
-  await page.locator('input[name="minutes"]').fill("1");
+  ).toEqual([original[1], original[0], original[2]]);
+  await page.locator(".strict-constraints > summary").click();
+  await page
+    .getByRole("combobox", { name: "Доступно на коляске" })
+    .selectOption("required");
   await page.getByRole("button", { name: "Рассчитать весь маршрут" }).click();
   await expect(
     page
       .locator(".itinerary-result")
       .getByRole("heading", { name: "Подтверждённого варианта пока нет" }),
   ).toBeVisible();
-  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(2);
+  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(3);
   await expect(page.locator(".journey-total")).toHaveCount(0);
   await expect(page.getByTestId("map-panel")).toHaveAttribute(
     "data-route-geometry",
@@ -284,16 +270,6 @@ test("synthetic response fault: server must not reorder the selected stops", asy
   page,
 }) => {
   await fill(page);
-  await search(page);
-  for (const index of [0, 1])
-    await cards(page)
-      .nth(index)
-      .getByRole("button", { name: "В мой план", exact: true })
-      .click();
-  const selected = await page
-    .getByTestId("selected-stops")
-    .locator("li strong")
-    .allTextContents();
   await page.route("**/api/v1/itineraries", async (route) => {
     const actual = await route.fetch();
     const payload = (await actual.json()) as ItineraryResponse;
@@ -303,7 +279,11 @@ test("synthetic response fault: server must not reorder the selected stops", asy
     });
     await route.fulfill({ response: actual, json: payload });
   });
-  await page.getByRole("button", { name: "Рассчитать весь маршрут" }).click();
+  await search(page);
+  const selected = await page
+    .getByTestId("selected-stops")
+    .locator("li strong")
+    .allTextContents();
   await expect(page.locator(".journey").getByRole("alert")).toContainText(
     "Не удалось проверить ответ",
   );
@@ -427,11 +407,6 @@ test("synthetic routed response draws a line, and editing removes it", async ({
   page,
 }) => {
   await fill(page);
-  await search(page);
-  await cards(page)
-    .first()
-    .getByRole("button", { name: "В мой план", exact: true })
-    .click();
   await page.route("**/api/v1/itineraries", async (route) => {
     const actual = await route.fetch();
     const payload = (await actual.json()) as ItineraryResponse;
@@ -447,7 +422,7 @@ test("synthetic routed response draws a line, and editing removes it", async ({
     payload.route!.provider = "synthetic:e2e-route-renderer";
     await route.fulfill({ response: actual, json: payload });
   });
-  await page.getByRole("button", { name: "Рассчитать весь маршрут" }).click();
+  await search(page);
   await expect(page.getByTestId("map-panel")).toHaveAttribute(
     "data-route-geometry",
     "routed",
@@ -464,7 +439,7 @@ test("synthetic routed response draws a line, and editing removes it", async ({
     "data-route-geometry",
     "none",
   );
-  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(3);
 });
 
 test("editing during a slow request cancels obsolete results", async ({
@@ -618,10 +593,6 @@ test("navigation preserves the private plan in memory and offers direct URLs", a
 }) => {
   await fill(page);
   await search(page);
-  await cards(page)
-    .first()
-    .getByRole("button", { name: "В мой план", exact: true })
-    .click();
   const coordinates = await page.locator('input[name="latitude"]').inputValue();
   await page.getByRole("link", { name: "Избранное", exact: true }).click();
   await expect(page).toHaveURL(/\/saved$/);
@@ -630,7 +601,7 @@ test("navigation preserves the private plan in memory and offers direct URLs", a
     "Прогулка без спешки",
   );
   await expect(page.locator('input[name="latitude"]')).toHaveValue(coordinates);
-  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(3);
   expect(page.url()).not.toContain("51.");
   for (const route of ["/saved", "/about", "/party", "/events"]) {
     const response = await page.goto(route);

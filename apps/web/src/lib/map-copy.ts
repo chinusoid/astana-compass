@@ -67,6 +67,31 @@ const copy = {
     "Line and arrows follow the roads",
   ],
   overview: ["Весь маршрут", "Бүкіл маршрут", "Route overview"],
+  selectedWalkQuery: [
+    "Прогулка по выбранным местам",
+    "Таңдалған орындар бойынша серуен",
+    "A walk through the selected places",
+  ],
+  connectedStops: [
+    "Все остановки соединены одним маршрутом · мест: {count}",
+    "Барлық аялдамалар бір маршрутқа біріктірілді · орындар: {count}",
+    "Every stop is connected in one route · places: {count}",
+  ],
+  connectingStops: [
+    "Соединяем все остановки по порядку в один маршрут…",
+    "Барлық аялдамаларды ретімен бір маршрутқа біріктірудеміз…",
+    "Connecting every stop in order into one route…",
+  ],
+  connectionFailed: [
+    "Не удалось соединить остановки. Все точки сохранены; повторите расчёт в блоке «Мой маршрут» ниже.",
+    "Аялдамаларды біріктіру мүмкін болмады. Барлық нүктелер сақталды; төмендегі «Менің маршрутым» бөлімінде қайта есептеңіз.",
+    "The stops could not be connected. Every point is kept; retry in My little journey below.",
+  ],
+  journeyNeedsOrigin: [
+    "Выберите старт — маршрут через все остановки построится автоматически.",
+    "Бастау нүктесін таңдаңыз — барлық аялдамалар арқылы маршрут автоматты түрде құрылады.",
+    "Choose a starting point to calculate the route through every stop automatically.",
+  ],
   buildAllStops: [
     "Собрать один маршрут · мест: {count}",
     "Бір маршрут құру · орындар: {count}",

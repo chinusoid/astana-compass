@@ -117,7 +117,7 @@ function scenarioResponse(
   };
 }
 
-it("keeps the path while browsing and builds all three recommendations as one visible itinerary", async () => {
+it("automatically connects all three recommendations and keeps the whole path while browsing", async () => {
   const seed = structuredClone(
     examples.cases.find((entry) => entry.name === "itinerary_valid")!.instance,
   ) as ItineraryResponse;
@@ -186,18 +186,8 @@ it("keeps the path while browsing and builds all three recommendations as one vi
   await user.click(
     screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
   );
-  const build = await screen.findByRole("button", {
-    name: mapText("ru", "buildAllStops").replace("{count}", "3"),
-  });
   const map = screen.getByTestId("map");
   expect(map).toHaveAttribute("data-picking", "false");
-  const preview = map.getAttribute("data-route");
-  expect(preview).not.toBe("null");
-  await user.click(
-    screen.getByRole("button", { name: `Map select ${places[3].id}` }),
-  );
-  expect(map).toHaveAttribute("data-route", preview);
-  await user.click(build);
   await waitFor(() =>
     expect(container.querySelectorAll(".itinerary-visits > li")).toHaveLength(
       3,
@@ -229,6 +219,299 @@ it("keeps the path while browsing and builds all three recommendations as one vi
     screen.getByRole("button", { name: mapText("ru", "overview") }),
   );
   expect(map).toHaveAttribute("data-overview", String(overview + 1));
+});
+
+function orderedJourneyResponse(
+  request: ItineraryRequest,
+  places: Place[],
+): ItineraryResponse {
+  const seed = structuredClone(
+    examples.cases.find((entry) => entry.name === "itinerary_valid")!.instance,
+  ) as ItineraryResponse;
+  const ordered = request.place_ids.map((id) =>
+    places.find((place) => place.id === id)!,
+  );
+  return {
+    ...seed,
+    request,
+    places: ordered,
+    route: { ...seed.route!, includes_return: request.return_to_origin },
+    stops: ordered.map((place, index) => ({
+      ...seed.stops[0],
+      order: index + 1,
+      place_id: place.id,
+      visit_duration_seconds: 60,
+      constraint_evaluations: [],
+    })),
+    total_duration_seconds: seed.route!.duration_seconds + ordered.length * 60,
+  };
+}
+
+function journeyPlaces() {
+  const seed = examples.cases.find((entry) => entry.name === "itinerary_valid")!
+    .instance as ItineraryResponse;
+  return ["Coffee", "Park", "Museum"].map((name, index) => ({
+    ...structuredClone(seed.places[0]),
+    id: `synthetic:place:journey-${index}`,
+    name: `SYNTHETIC ${name}`,
+  }));
+}
+
+it("shows every ordered stop while connecting and never substitutes a single-place path on failure", async () => {
+  const places = journeyPlaces().slice(0, 2);
+  let finish!: (response: Response) => void;
+  let submitted!: ItineraryRequest;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/places?"))
+        return Promise.resolve(Response.json({ places, next_cursor: null }));
+      const request = JSON.parse(String(init?.body));
+      if (url.endsWith("/recommendations")) {
+        const response = scenarioResponse(request, "matched");
+        return Promise.resolve(
+          Response.json({
+            ...response,
+            places,
+            recommendations: places.map((place, index) => ({
+              ...response.recommendations[0],
+              place_id: place.id,
+              rank: index + 1,
+            })),
+          }),
+        );
+      }
+      submitted = request;
+      return new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+    }),
+  );
+  const user = userEvent.setup();
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  await user.type(
+    screen.getByRole("textbox", { name: t("ru", "query") }),
+    "Сначала кофе, затем парк{Enter}",
+  );
+  const map = screen.getByTestId("map");
+  await waitFor(() =>
+    expect(submitted?.place_ids).toEqual(places.map((p) => p.id)),
+  );
+  expect(map).toHaveAttribute("data-stops", places.map((p) => p.id).join(","));
+  expect(map).toHaveAttribute("data-route", "null");
+  expect(
+    screen.getAllByText(mapText("ru", "connectingStops"))[0],
+  ).toBeVisible();
+  await user.click(
+    screen.getByRole("button", { name: `Map select ${places[0].id}` }),
+  );
+  expect(map).toHaveAttribute("data-route", "null");
+  await act(async () =>
+    finish(
+      Response.json(
+        {
+          request_id: "chain-unavailable",
+          error: {
+            code: "provider_unavailable",
+            message: "Unavailable",
+            details: [],
+            retryable: true,
+          },
+        },
+        { status: 503 },
+      ),
+    ),
+  );
+  expect(
+    await screen.findByRole("button", { name: t("ru", "buildPlan") }),
+  ).toBeEnabled();
+  expect(map).toHaveAttribute("data-route", "null");
+  expect(map).toHaveAttribute("data-stops", places.map((p) => p.id).join(","));
+  expect(screen.getByText(mapText("ru", "connectionFailed"))).toBeVisible();
+  await user.click(screen.getByRole("button", { name: t("ru", "buildPlan") }));
+  await act(async () =>
+    finish(Response.json(orderedJourneyResponse(submitted, places))),
+  );
+  await waitFor(() => expect(map.getAttribute("data-route")).not.toBe("null"));
+  expect(Number(map.getAttribute("data-overview"))).toBeGreaterThan(0);
+});
+
+for (const locale of locales)
+  it(`automatically connects catalogue selections without a wishlist in ${locale}`, async () => {
+    const places = journeyPlaces();
+    const submitted: ItineraryRequest[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("/api/v1/places?"))
+          return Response.json({ places, next_cursor: null });
+        const request = JSON.parse(String(init?.body)) as ItineraryRequest;
+        submitted.push(request);
+        return Response.json(orderedJourneyResponse(request, places));
+      }),
+    );
+    const user = userEvent.setup();
+    navigation.pathname = "/";
+    const app = (
+      <CompassApp
+        initialStart="2026-10-19T12:00"
+        allowFixtures
+        mapProvider="none"
+      />
+    );
+    const { rerender } = render(app);
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: t("ru", "language") }),
+      locale,
+    );
+    const add = await screen.findAllByRole("button", {
+      name: t(locale, "add"),
+    });
+    await user.click(add[0]);
+    await user.click(add[1]);
+    expect(submitted).toHaveLength(0);
+    navigation.pathname = "/walk";
+    rerender(
+      <CompassApp
+        initialStart="2026-10-19T12:00"
+        allowFixtures
+        mapProvider="none"
+      />,
+    );
+    expect(
+      screen.getByText(mapText(locale, "journeyNeedsOrigin")),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Map pick" }));
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0].query).toBe(mapText(locale, "selectedWalkQuery"));
+    expect(submitted[0].place_ids).toEqual(places.slice(0, 2).map((p) => p.id));
+    expect(
+      screen.getByRole("textbox", { name: t(locale, "query") }),
+    ).toHaveValue("");
+    await waitFor(() =>
+      expect(screen.getByTestId("map").getAttribute("data-route")).not.toBe(
+        "null",
+      ),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: new RegExp(t(locale, "return")) }),
+    );
+    await waitFor(() => expect(submitted).toHaveLength(2));
+    expect(submitted[1].return_to_origin).toBe(false);
+    expect(submitted[1].place_ids).toEqual(submitted[0].place_ids);
+    await waitFor(() =>
+      expect(
+        JSON.parse(screen.getByTestId("map").getAttribute("data-route")!),
+      ).toMatchObject({ includes_return: false }),
+    );
+  });
+
+it("recalculates edits during a pending journey and ignores late responses from superseded orders", async () => {
+  const places = journeyPlaces();
+  const pending: {
+    request: ItineraryRequest;
+    signal: AbortSignal | null | undefined;
+    finish: () => void;
+  }[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/places?"))
+        return Promise.resolve(Response.json({ places, next_cursor: null }));
+      const request = JSON.parse(String(init?.body)) as ItineraryRequest;
+      return new Promise<Response>((resolve) =>
+        pending.push({
+          request,
+          signal: init?.signal,
+          finish: () =>
+            resolve(Response.json(orderedJourneyResponse(request, places))),
+        }),
+      );
+    }),
+  );
+  const user = userEvent.setup();
+  navigation.pathname = "/";
+  const { rerender } = render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  const add = await screen.findAllByRole("button", { name: t("ru", "add") });
+  await user.click(add[0]);
+  await user.click(add[1]);
+  await user.click(add[2]);
+  expect(pending).toHaveLength(3);
+  expect(pending.slice(0, 2).every((item) => item.signal?.aborted)).toBe(true);
+  navigation.pathname = "/walk";
+  rerender(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  await user.click(
+    screen.getByRole("button", {
+      name: `${t("ru", "moveUp")}: ${places[1].name}`,
+    }),
+  );
+  expect(pending[2].signal?.aborted).toBe(true);
+  expect(pending[3].request.place_ids).toEqual([
+    places[1].id,
+    places[0].id,
+    places[2].id,
+  ]);
+  await user.click(
+    screen.getByRole("button", {
+      name: `${t("ru", "remove")}: ${places[2].name}`,
+    }),
+  );
+  expect(pending[3].signal?.aborted).toBe(true);
+  expect(pending[4].request.place_ids).toEqual([places[1].id, places[0].id]);
+  const map = screen.getByTestId("map");
+  expect(map).toHaveAttribute("data-route", "null");
+  expect(map).toHaveAttribute(
+    "data-stops",
+    [places[1].id, places[0].id].join(","),
+  );
+  await act(async () => pending[4].finish());
+  const fullRoute = map.getAttribute("data-route");
+  const overview = map.getAttribute("data-overview");
+  expect(fullRoute).not.toBe("null");
+  await act(async () => {
+    for (const item of pending.slice(0, 4).reverse()) item.finish();
+  });
+  expect(map).toHaveAttribute("data-route", fullRoute);
+  expect(map).toHaveAttribute("data-overview", overview);
+  expect(map).toHaveAttribute(
+    "data-stops",
+    [places[1].id, places[0].id].join(","),
+  );
+  await user.click(
+    screen.getByRole("button", {
+      name: `${t("ru", "remove")}: ${places[0].name}`,
+    }),
+  );
+  await user.click(
+    screen.getByRole("button", {
+      name: `${t("ru", "remove")}: ${places[1].name}`,
+    }),
+  );
+  expect(pending[5].signal?.aborted).toBe(true);
+  expect(pending).toHaveLength(6);
+  await act(async () => pending[5].finish());
+  expect(map).toHaveAttribute("data-route", "null");
+  expect(map).toHaveAttribute("data-stops", "");
 });
 
 it("submits the wishlist with Enter, shows progress immediately, and prevents duplicate requests", async () => {
@@ -416,6 +699,8 @@ it("ignores an old search after an edit and marks a language change as unapplied
           Response.json({ places: [], next_cursor: null }),
         );
       const request = JSON.parse(String(init?.body)) as RecommendationRequest;
+      if (url.endsWith("/itineraries"))
+        return Promise.resolve(Response.json({}));
       searches++;
       if (searches === 1) {
         oldSignal = init?.signal;
@@ -793,9 +1078,7 @@ for (const locale of locales) {
       ["architectureWalk", "architectureWalkQuery"],
       ["mixedWalk", "mixedWalkQuery"],
     ] as const) {
-      await user.click(
-        screen.getByRole("button", { name: t(locale, preset) }),
-      );
+      await user.click(screen.getByRole("button", { name: t(locale, preset) }));
       expect(
         screen.getByRole("textbox", { name: t(locale, "query") }),
       ).toHaveValue(t(locale, queryKey));
