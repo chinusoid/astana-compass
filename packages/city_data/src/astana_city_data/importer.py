@@ -1,7 +1,6 @@
 """Separate, single-request OSM import CLI. Never used from the HTTP repository."""
 import argparse
 import asyncio
-from collections import Counter
 from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -10,7 +9,7 @@ import httpx
 
 from .common import (BBOX, ENDPOINT, FORMAT, LICENSE, MAX_BYTES, DataError, atomic_json, canonical,
                      digest, instant, load_json, utcnow)
-from .normalize import normalize_response, query
+from .normalize import NORMALIZATION, fact_counts, normalize_response, query
 
 CACHE_SECONDS = 86400
 COOLDOWN_SECONDS = 60
@@ -77,20 +76,26 @@ def select_sample(places, limit):
     return sorted(selected, key=lambda place: place["id"])
 
 
-async def import_snapshot(*, output, cache, manifest_path=None, limit=300, transport=None, now=None):
+async def import_snapshot(*, output, cache, manifest_path=None, limit=1000, transport=None, now=None,
+                          offline=False, wikidata_cache=None):
     if type(limit) is not int or not 1 <= limit <= 1000:
         raise DataError("Sample limit must be between 1 and 1000")
     fixed_now = now
     now = now or utcnow()
     instant(now.isoformat())
     cache, output = Path(cache), Path(output)
-    if cache.resolve() == output.resolve() or (manifest_path and Path(manifest_path).resolve() in {cache.resolve(), output.resolve()}):
+    paths = [cache.resolve(), output.resolve(), *([Path(manifest_path).resolve()] if manifest_path else []),
+             *([Path(wikidata_cache).resolve()] if wikidata_cache else [])]
+    if len(paths) != len(set(paths)):
         raise DataError("Cache, snapshot and manifest require distinct paths")
     with import_lock(cache):
         cached = load_json(cache, MAX_BYTES + 65536) if cache.exists() else None
-        usable = (isinstance(cached, dict) and cached.get("query_sha256") == digest(query())
-                  and cached.get("raw_sha256") == digest(cached.get("payload"))
-                  and timedelta(0) <= now - instant(cached["retrieved_at"]) < timedelta(seconds=CACHE_SECONDS))
+        valid = (isinstance(cached, dict) and cached.get("query_sha256") == digest(query())
+                 and cached.get("raw_sha256") == digest(cached.get("payload"))
+                 and instant(cached["retrieved_at"]) <= now)
+        usable = valid and (offline or now - instant(cached["retrieved_at"]) < timedelta(seconds=CACHE_SECONDS))
+        if offline and not usable:
+            raise DataError("Offline import requires a valid, checksum-matching completed cache")
         if usable:
             payload, retrieved_at = cached["payload"], cached["retrieved_at"]
         else:
@@ -112,6 +117,12 @@ async def import_snapshot(*, output, cache, manifest_path=None, limit=300, trans
             atomic_json(cache, cached)
         places, report = normalize_response(payload, retrieved_at)
         selected = select_sample(places, limit)
+        enrichment = None
+        if wikidata_cache:
+            from .wikidata import enrich
+            selected, enrichment = enrich(selected, load_json(wikidata_cache))
+            if instant(enrichment["retrieved_at"]) > now:
+                raise DataError("Wikidata cache timestamp is in the future")
         manifest = {
             "format": FORMAT, "source": "OpenStreetMap contributors", "endpoint": ENDPOINT,
             "license": "ODbL-1.0", "license_url": LICENSE,
@@ -121,14 +132,14 @@ async def import_snapshot(*, output, cache, manifest_path=None, limit=300, trans
             "places_sha256": digest(selected), "complete_query_response": True,
             "sample_policy": "category-grid-round-robin-v1", "sample_limit": limit,
             "place_count": len(selected), "omitted_by_sample_limit": len(places) - len(selected),
-            "normalization": "osm-tags-v1", "report": report,
-            "sample_report": {"categories": dict(sorted(Counter(c for p in selected for c in p["categories"]).items())),
-                              "known_facts": dict(sorted(Counter(f["key"] for p in selected for f in p["facts"] if f["status"] == "known").items())),
-                              "unknown_facts": dict(sorted(Counter(f["key"] for p in selected for f in p["facts"] if f["status"] == "unknown").items()))},
+            "normalization": NORMALIZATION, "report": report,
+            "sample_report": fact_counts(selected),
             "limitations": ["A named, category-filtered city sample; not exhaustive city coverage.",
                             "Download time and OSM replica time are not fact verification times.",
                             "Way/relation locations are bounding-box centers, not verified entrances.",
                             "OSM tags are community source claims; opening and accessibility require confirmation."]}
+        if enrichment is not None:
+            manifest["wikidata_enrichment"] = enrichment
         snapshot = {"format": FORMAT, "manifest": manifest, "places": selected}
         if len(canonical(snapshot)) > 16 * 1024 * 1024:
             raise DataError("Normalized snapshot exceeds size limit")
@@ -143,11 +154,14 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--cache", required=True, type=Path, help="Successful raw response cache, reused for 24 hours")
     parser.add_argument("--manifest", type=Path)
-    parser.add_argument("--limit", type=int, default=300)
+    parser.add_argument("--limit", type=int, default=1000)
+    parser.add_argument("--offline", action="store_true", help="Replay verified raw cache without network, preserving original source times")
+    parser.add_argument("--wikidata-cache", type=Path, help="Optional verified local cache; this option never fetches Wikidata")
     args = parser.parse_args()
     try:
         manifest = asyncio.run(import_snapshot(output=args.output, cache=args.cache,
-                                              manifest_path=args.manifest, limit=args.limit))
+                                              manifest_path=args.manifest, limit=args.limit,
+                                              offline=args.offline, wikidata_cache=args.wikidata_cache))
     except DataError as error:
         parser.exit(1, f"Import failed: {error}.\n")
     except (OSError, KeyError, TypeError, ValueError):

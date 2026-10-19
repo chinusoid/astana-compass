@@ -257,7 +257,11 @@ def test_committed_real_sample_replays_from_raw_cache_without_network():
     assert digest(cache["payload"]) == cache["raw_sha256"] == manifest["raw_sha256"]
     places, report = normalize_response(cache["payload"], cache["retrieved_at"])
     assert report == manifest["report"]
-    assert select_sample(places, manifest["sample_limit"]) == snapshot["places"]
+    from astana_city_data.wikidata import enrich
+    enriched, enrichment = enrich(select_sample(places, manifest["sample_limit"]),
+                                 load_json(root / "data/samples/astana-wikidata-cache.json"))
+    assert enriched == snapshot["places"]
+    assert enrichment == manifest["wikidata_enrichment"]
     assert manifest["places_sha256"] == digest(snapshot["places"])
     assert len(snapshot["places"]) == manifest["place_count"] > 0
     assert all(not place["is_synthetic"] for place in snapshot["places"])

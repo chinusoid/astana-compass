@@ -10,6 +10,7 @@ import {
 } from "../../apps/web/e2e-support";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { t } from "../../apps/web/src/lib/i18n";
 import type {
   IntentResponse,
   SocialState,
@@ -568,8 +569,13 @@ test("keyboard, separate data page, empty catalog and map point selection", asyn
     .getByRole("button", { name: "Найти", exact: true })
     .click();
   await expect(
-    page.locator(".catalog").getByText("Здесь пока нет мест"),
+    page.locator(".catalog").getByText(t("ru", "catalogNoMatch"), { exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: t("ru", "catalogShowAll") }).click();
+  await expect(page.locator("#catalog-query")).toHaveValue("");
+  await expect(
+    page.locator(".catalog-cards").getByTestId("place-card"),
+  ).toHaveCount(3);
   const canvas = page.locator(".maplibregl-canvas");
   await expect(canvas).toBeVisible();
   await canvas.click({ position: { x: 120, y: 140 } });

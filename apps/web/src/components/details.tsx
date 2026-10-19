@@ -5,7 +5,16 @@ import { AlertCircle, ArrowUpRight, Check, X } from "lucide-react";
 import type { Evidence, Place, RouteEstimate } from "@astana/api-client";
 import { ApiError } from "@/lib/api";
 import { dateTime, safeUrl } from "@/lib/format";
-import { label, t, type Locale } from "@/lib/i18n";
+import { t, type Locale } from "@/lib/i18n";
+import {
+  factLabel,
+  factValue,
+  placeText,
+  primaryFact,
+  rawFactValue,
+  type PlaceFact,
+} from "@/lib/place-presentation";
+import PlaceOverview from "./place-overview";
 
 export function ErrorNotice({
   error,
@@ -40,9 +49,11 @@ export function ErrorNotice({
 export function Warnings({
   warnings,
   locale,
+  expanded = false,
 }: {
   warnings: string[];
   locale: Locale;
+  expanded?: boolean;
 }) {
   if (!warnings.length) return null;
   // The current contract has human-readable warnings, without generation status codes.
@@ -57,7 +68,7 @@ export function Warnings({
       {fallback && (
         <p className="small fallback-label">{t(locale, "fallback")}</p>
       )}
-      <details className="warnings">
+      <details className="warnings" open={expanded || undefined}>
         <summary>
           {t(locale, "warnings")} <span>{warnings.length}</span>
         </summary>
@@ -140,39 +151,73 @@ export function PlaceFacts({
   place: Place;
   locale: Locale;
 }) {
-  return (
-    <>
-      {place.description && <p>{place.description}</p>}
-      <h3>{t(locale, "facts")}</h3>
-      <div className="fact-list">
-        {place.facts.map((f) => (
-          <div className="fact" key={f.key}>
-            <div className="fact-heading">
-              <strong>{label(locale, f.key)}</strong>
-              <span className={`fact-status ${f.status}`}>
-                {f.status === "known" && <Check size={14} aria-hidden="true" />}
-                {t(locale, f.status)}
-              </span>
-            </div>
-            {f.status === "known" && (
+  const mainFacts = place.facts
+    .filter(primaryFact)
+    .sort(
+      (a, b) => Number(b.status === "known") - Number(a.status === "known"),
+    );
+  const otherFacts = place.facts.filter((fact) => !primaryFact(fact));
+  const factRecord = (fact: PlaceFact) => {
+    const value = factValue(locale, fact);
+    const website =
+      ["osm:website", "osm:contact:website"].includes(fact.key) &&
+      typeof fact.value === "string"
+        ? safeUrl(fact.value)
+        : undefined;
+    return (
+      <div className="fact" key={fact.key}>
+        <div className="fact-heading">
+          <strong>{factLabel(locale, fact.key)}</strong>
+          <span className={`fact-status ${fact.status}`}>
+            {fact.status === "known" && <Check size={14} aria-hidden="true" />}
+            {t(locale, fact.status)}
+          </span>
+        </div>
+        {fact.status === "known" && (
+          <p>
+            {website ? (
+              <a href={website} target="_blank" rel="noopener noreferrer">
+                {value}
+              </a>
+            ) : (
+              value
+            )}
+          </p>
+        )}
+        {(fact.note || fact.evidence_ids.length > 0) && (
+          <details className="fact-original">
+            <summary>{placeText(locale, "sourceDetails")}</summary>
+            {fact.status === "known" && (
               <p>
-                {typeof f.value === "boolean"
-                  ? t(locale, f.value ? "yes" : "no")
-                  : Array.isArray(f.value)
-                    ? f.value.join(", ")
-                    : String(f.value)}
+                <code>{fact.key}</code>: {rawFactValue(fact)}
               </p>
             )}
-            {f.note && <p className="muted">{f.note}</p>}
+            {fact.note && <p className="muted">{fact.note}</p>}
             <Sources
-              evidence={place.evidence.filter((e) =>
-                f.evidence_ids.includes(e.id),
+              evidence={place.evidence.filter((source) =>
+                fact.evidence_ids.includes(source.id),
               )}
               locale={locale}
             />
-          </div>
-        ))}
+          </details>
+        )}
       </div>
+    );
+  };
+  return (
+    <>
+      <PlaceOverview place={place} locale={locale} detailed />
+      <h3>{placeText(locale, "amenities")}</h3>
+      <p className="field-hint">{placeText(locale, "sourceClaim")}</p>
+      <div className="fact-list">{mainFacts.map(factRecord)}</div>
+      {otherFacts.length > 0 && (
+        <details className="other-source-facts">
+          <summary>
+            {placeText(locale, "otherFacts")} · {otherFacts.length}
+          </summary>
+          {otherFacts.map(factRecord)}
+        </details>
+      )}
       <h3>{t(locale, "sources")}</h3>
       <p className="small muted">{t(locale, "freshness")}</p>
       <Sources evidence={place.evidence} locale={locale} />

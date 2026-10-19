@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import re
 import unicodedata
 
-LEXICON_VERSION = "ru-kk-en-1"
+LEXICON_VERSION = "ru-kk-en-2"
 CATEGORIES = {
     "cafe": r"кафе(?:ге|де|ден|ні|нің|лер(?:ге|де|ден|і|ін)?)?|кофе\w{0,12}|coffee|caf[eé]s?|cappuccino|капучино|латте",
     "restaurant": r"рестора\w{0,12}|поесть|обед\w{0,12}|ужин\w{0,12}|еда|restaurants?|dining|lunch|dinner|eat|тамақ\w{0,12}|мейрамхана\w{0,12}",
@@ -25,6 +25,7 @@ CATEGORY_GROUPS = {
     **{key: frozenset({key}) for key in CATEGORIES},
     "art": frozenset({"art", "gallery", "arts_centre", "artwork"}),
     "park": frozenset({"park", "garden"}),
+    "paintings": frozenset({"gallery", "museum"}),
 }
 FEATURES = {
     "quiet": r"тих\w{0,12}|тишин\w{0,12}|спокойн\w{0,12}|quiet|peaceful|тыныш\w{0,12}|без\s+шума|not\s+noisy",
@@ -41,6 +42,11 @@ PATTERNS = {
 }
 CLAUSE = re.compile(r"[,;.!?\n]|\b(?:но|but|instead|однако|а|бірақ)\b", re.I)
 WALK = re.compile(r"(?<!\w)(?:погулять|прогул\w{0,12}|walk\w{0,8}|серуен\w{0,12})(?!\w)", re.I)
+ACTIVITIES = {
+    "library": re.compile(r"(?<!\w)(?:study|studying|read\s+books?|позаниматься|почитать|оқуға|кітап\s+оқу)(?!\w)", re.I),
+    "restaurant": re.compile(r"(?<!\w)дәмді\s+ас(?!\w)", re.I),
+    "paintings": re.compile(r"(?<!\w)(?:paintings?|картины|картиналар)(?!\w)", re.I),
+}
 ANCHOR_BEFORE = re.compile(
     r"(?<!\w)(?:near|by|beside|around|next\s+to|close\s+to|у|возле|около|от|рядом\s+с|недалеко\s+от)"
     r"\s+(?:(?:a|an|the)\s+)?$", re.I,
@@ -60,13 +66,13 @@ NEG_AFTER = re.compile(
 )
 WORDS = re.compile(r"[^\W_]+(?:['’][^\W_]+)*", re.UNICODE)
 STOPWORDS = frozenset("""
-я мы мне нам меня нас хочу хотим нужно нужна нужны нужен найти найди ищу есть где рядом около возле
+я мы мне нам меня нас хочу хотим нужно нужна нужны нужен найти найди ищу есть где рядом около возле выпить сходить
 место места куда можно пожалуйста для чтобы и или на в во у с со к от до за по это тут там сейчас
 а но не без час часа часов минут минуты минуту мин сегодня завтра вечером утром аст whereto
 i we me my our want would like find please need needs needed a an the to at in on near nearby with
 and or for of by is are it this somewhere place places go have has can now today tomorrow not no without
 minutes minute hours hour mins min hr h astana астана астане астаны
-мен маған біз бізге керек қажет бар қайда жақын жанында үшін және немесе бір екі сағат минут
+мен маған біз бізге керек қажет бар қайда жақын жанында үшін және немесе бір екі сағат минут барғым келеді жаяу
 бойынша осы жер орын қаласы қалада қазір емес
 """.split())
 
@@ -93,14 +99,19 @@ class Query:
     has_unresolved_anchor: bool
 
 
-def understand(text: str) -> Query:
+def understand(text: str, *, named_goal: bool = False) -> Query:
     terms, positive, negative, features, negative_features = set(), set(), set(), set(), set()
-    walk_requested, has_anchor = False, False
+    walk_requested, has_anchor, activities = False, False, set()
     for clause in CLAUSE.split(normalize(text)):
         covered: set[int] = set()
         for match in WALK.finditer(clause):
             covered.update(range(match.start(), match.end()))
             walk_requested |= not negated(clause, match.start(), match.end())
+        for category, pattern in ACTIVITIES.items():
+            for match in pattern.finditer(clause):
+                covered.update(range(match.start(), match.end()))
+                if not negated(clause, match.start(), match.end()):
+                    activities.add(category)
         for key, pattern in PATTERNS.items():
             for match in pattern.finditer(clause):
                 covered.update(range(match.start(), match.end()))
@@ -122,9 +133,11 @@ def understand(text: str) -> Query:
                 terms.add(token)
     positive -= negative
     features -= negative_features
+    if not positive and not named_goal:
+        positive.update(activities - negative)
     # A walk is an activity, not a competing park destination when the user
     # explicitly asks to walk to a cafe/museum. Spatial anchors are not goals.
-    if walk_requested and not positive and "park" not in negative:
+    if walk_requested and not positive and "park" not in negative and not named_goal:
         positive.add("park")
     terms.update("category:" + key for key in positive)
     terms.update("feature:" + key for key in features)
@@ -136,18 +149,18 @@ def understand(text: str) -> Query:
 
 def document_terms(place: dict) -> Counter[str]:
     """Source wording and known true facts are searchable, not equally authoritative."""
+    from .names import source_names, source_texts, words
+
     terms: Counter[str] = Counter()
-    names = [place["name"]]
-    names.extend(
-        fact["value"] for fact in place["facts"]
-        if fact["key"] in {"name:ru", "name:kk", "name:en"} and fact["status"] == "known"
-        and isinstance(fact["value"], str)
-    )
-    for text, weight in [(name[:500], 3) for name in names] + [((place["description"] or "")[:8000], 1)]:
+    for name, _ in source_names(place):
+        # Literal names are source data, never parsed as negation or category commands.
+        for term in words(name):
+            terms[term] = 3
+    for text, _ in source_texts(place):
         parsed = understand(text)
         # A lexical feature token from wording is not a matched_fact_keys claim.
         for term in parsed.terms:
-            terms[term] += weight
+            terms[term] = max(terms[term], 1)
     for key, categories in CATEGORY_GROUPS.items():
         if categories.intersection(place["categories"]):
             terms["category:" + key] += 3

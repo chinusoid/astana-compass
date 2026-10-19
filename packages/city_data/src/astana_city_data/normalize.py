@@ -9,6 +9,31 @@ CATEGORIES = {
     "leisure": ("park", "garden", "playground"),
 }
 UNKNOWN = "Not explicitly established by the imported OSM tags; no field verification."
+NORMALIZATION = "osm-tags-v2"
+LANGUAGES = ("ru", "kk", "en")
+RAW_TAGS = (
+    "wheelchair", "indoor", "fee", "access", "opening_hours:signed", "check_date", "check_date:opening_hours",
+    "addr:street", "addr:housenumber", "addr:city", "addr:place", "addr:postcode", "addr:country", "addr:floor",
+    "website", "contact:website", "website:menu", "wikipedia", "wikidata", "cuisine", "description",
+    "internet_access", "internet_access:fee", "toilets", "toilets:wheelchair", "indoor_seating", "outdoor_seating",
+    "highchair", "changing_table", "takeaway", "delivery", "diet:vegetarian", "diet:vegan", "diet:halal",
+    "alt_name", "short_name", "official_name", "int_name",
+    *(f"{key}:{lang}" for key in ("alt_name", "short_name", "official_name", "description") for lang in LANGUAGES),
+)
+
+
+def wifi(tags):
+    tokens = {part.strip() for part in (tags.get("internet_access") or "").split(";") if part.strip()}
+    if "wlan" in tokens and tokens <= {"wlan", "wired", "terminal", "yes", "service"}:
+        return True
+    return False if tokens == {"no"} else None
+
+
+def fact_counts(places):
+    return {"categories": dict(sorted(Counter(c for p in places for c in p["categories"]).items())),
+            "known_facts": dict(sorted(Counter(f["key"] for p in places for f in p["facts"] if f["status"] == "known").items())),
+            "unknown_facts": dict(sorted(Counter(f["key"] for p in places for f in p["facts"] if f["status"] == "unknown").items())),
+            "descriptions": sum(p["description"] is not None for p in places)}
 
 
 def query():
@@ -59,17 +84,26 @@ def normalize_element(element, retrieved_at):
         fact(key, {"yes": True, "no": False}.get(tags.get(tag)), tag)
     fact("free_entry", {"no": True, "yes": False}.get(tags.get("fee")), "fee")
     fact("opening_hours", text(tags.get("opening_hours")), "opening_hours")
-    for key in ("child_friendly", "toilets", "quiet", "open_at_requested_time"):
+    fact("has_wifi", wifi(tags), "internet_access")
+    fact("toilets", {"yes": True, "no": False}.get(tags.get("toilets")), "toilets")
+    for key in ("child_friendly", "quiet", "has_power_outlets", "open_at_requested_time"):
         fact(key, None, key)
     # Keep source-provided localized names and useful raw values. Never translate them.
-    for tag in ("name:ru", "name:kk", "name:en", "alt_name", "wheelchair", "indoor", "fee", "access",
-                "addr:street", "addr:housenumber", "addr:city", "website", "wikipedia", "wikidata"):
+    for tag in (*(f"name:{lang}" for lang in LANGUAGES), *RAW_TAGS):
         value = text(tags.get(tag))
         if value:
             fact(tag if tag.startswith("name:") else "osm:" + tag, value, tag)
+    description = text(tags.get("description"))
+    if description:
+        fact("description:source", "osm", "description")
+    elif any(text(tags.get(f"description:{lang}")) for lang in LANGUAGES):
+        lang = next(lang for lang in LANGUAGES if text(tags.get(f"description:{lang}")))
+        description = text(tags[f"description:{lang}"])
+        fact("description:source", "osm", f"description:{lang}")
+        fact("description:language", lang, f"description:{lang}")
     fact("osm:coordinate_kind", "node" if element["type"] == "node" else "bounding_box_center", "geometry")
     place = {"id": place_id, "name": name, "location": {"lat": location["lat"], "lon": location["lon"]},
-             "categories": categories, "description": text(tags.get("description")), "facts": facts,
+             "categories": categories, "description": description, "facts": facts,
              "evidence": [{"id": evidence_id, "source_name": "OpenStreetMap contributors (ODbL 1.0)",
                            "source_type": "osm", "source_url": "https://www.openstreetmap.org/" + record,
                            "source_record_id": record, "retrieved_at": retrieved_at, "is_synthetic": False}],
@@ -114,6 +148,8 @@ def normalize_response(payload, retrieved_at):
         raise DataError("No valid named places in the completed import")
     places.sort(key=lambda p: p["id"])
     return places, {"received_elements": len(elements), "retained_places": len(places), "excluded": dict(excluded),
-                    "categories": dict(sorted(Counter(c for p in places for c in p["categories"]).items())),
-                    "known_facts": dict(sorted(Counter(f["key"] for p in places for f in p["facts"] if f["status"] == "known").items())),
+                    **fact_counts(places),
+                    "raw_tag_counts": dict(sorted(Counter(k for e in elements if isinstance(e, dict)
+                                                          and isinstance(e.get("tags", {}), dict) for k in e.get("tags", {})
+                                                          if isinstance(k, str)).items())),
                     "attribution": "© OpenStreetMap contributors", "copyright_url": COPYRIGHT}

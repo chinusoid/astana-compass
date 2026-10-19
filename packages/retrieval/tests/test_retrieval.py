@@ -289,3 +289,119 @@ def test_timeout_and_cancellation_propagate_without_logging_raw_query():
             raise asyncio.CancelledError
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(LexicalRetriever(CancelledRepository()).retrieve(request()))
+
+
+def named(name, category="cafe", **kwargs):
+    fixture_id = name if name.isascii() and name.isalnum() else name.encode("utf-8").hex()
+    result = place(fixture_id, category, **kwargs)
+    result["name"] = name
+    result["evidence"][0]["source_url"] = "https://example.invalid/retrieval/fixture"
+    return result
+
+
+@pytest.mark.parametrize("name,category,other", [
+    ("The Garden", "restaurant", "garden"),
+    ("Coffee Bus Expresso Luxury", "restaurant", "cafe"),
+    ("Ботанический сад", "park", "garden"),
+    ("No Cafe", "restaurant", "cafe"),
+])
+def test_literal_source_name_is_not_interpreted_as_a_category_instruction(name, category, other):
+    target = named(name, category)
+    assert ids(search([target, named("Other", other)], name)) == [target["id"]]
+
+
+@pytest.mark.parametrize("key,value,query", [
+    ("osm:alt_name", "Damu-Sfera park; Samal Garden", "Damu-Sfera park"),
+    ("osm:official_name:kk", "Қазақстан Орталық концерт залы", "Қазақстан Орталық концерт залы"),
+    ("osm:short_name", "Golden Ray", "Golden Ray"),
+    ("wikidata:label:en", "Golden Ray", "Golden Ray"),
+    ("wikidata:aliases:ru", ["Золотой луч", "Луч света"], "Луч света"),
+])
+def test_whitelisted_known_aliases_are_searchable_with_real_fact_evidence(key, value, query):
+    target = named("Original", "attraction", facts={key: value})
+    result = search([target, named("Park", "park")], query)
+    assert ids(result) == [target["id"]]
+    assert key in result["hits"][0]["matched_fact_keys"]
+
+
+def test_unknown_alias_and_technical_metadata_never_become_searchable_names():
+    target = named("Original", facts={"osm:website": "https://golden-ray.example", "name:en": None})
+    assert not ids(search([target], "golden ray"))
+    assert not ids(search([target], "not established translation"))
+
+
+@pytest.mark.parametrize("query,locale", [
+    ("coffee near National Museum", "en"),
+    ("Near National Museum I want a coffee", "en"),
+    ("Кафе у Астана Опера", "ru"),
+    ("У Астана Опера хочу кафе", "ru"),
+    ("Астана Опера жанындағы кафе", "kk"),
+])
+def test_named_landmark_is_not_a_competing_destination_or_verified_proximity(query, locale):
+    result = search([
+        named("National Museum", "museum"), named("Астана Опера", "theatre"), named("Target", "cafe"),
+    ], query, locale)
+    assert ids(result) == ["synthetic:Target"]
+    assert len(result["warnings"]) >= 2
+
+
+def test_standalone_named_landmark_and_walk_to_it_remain_destinations():
+    target = named("Astana Opera", "theatre")
+    for query in ("Astana Opera", "walk to Astana Opera"):
+        assert ids(search([target, named("Unrelated", "park")], query)) == [target["id"]]
+
+
+@pytest.mark.parametrize("name,query", [
+    ("Starbucks", "Starbuks"), ("Дареджани", "Дареджни"), ("Жерұйық", "Жерұйқ"),
+    ("Starbucks", "Starbcuks"), ("Starbucks", "Starbuckss"),
+])
+def test_unique_single_edit_name_typo_is_bounded_and_disclosed(name, query):
+    target = named(name)
+    result = search([target, named("Unrelated")], query)
+    assert ids(result) == [target["id"]]
+    assert any("spelling" in warning for warning in result["warnings"])
+
+
+@pytest.mark.parametrize("query,other", [("Starbuks", "Starbaks"), ("Starbocks", "Starbooks")])
+def test_ambiguous_name_correction_is_not_guessed(query, other):
+    assert not ids(search([named("Starbucks"), named(other)], query))
+
+
+@pytest.mark.parametrize("name,query", [("Paul", "Pual"), ("Starbucks", "Starbxxks"), ("Atlas", "Аtlas")])
+def test_no_short_multi_edit_or_mixed_script_correction(name, query):
+    assert not ids(search([named(name)], query))
+
+
+def test_exact_token_match_prevents_fuzzy_expansion_to_a_different_source_name():
+    result = search([named("Starbucks"), named("Starbocks")], "Starbocks")
+    assert ids(result) == ["synthetic:Starbocks"]
+    assert not any("spelling" in warning for warning in result["warnings"])
+
+
+@pytest.mark.parametrize("query", ["Бешбармақияға барғым келеді", "Бешбармақияда", "Хочу в Бешбармақия"])
+def test_source_backed_name_accepts_bounded_kazakh_case_suffixes(query):
+    target = named("Бешбармақия", "cafe")
+    assert ids(search([target, named("Other")], query, "kk")) == [target["id"]]
+
+
+def test_name_hit_never_overrides_required_radius_or_explicit_category_negation():
+    target = named("The Garden", "restaurant", facts={"wheelchair_accessible": False})
+    assert not ids(search([target], "The Garden", constraints=[
+        {"key": "wheelchair_accessible", "value": True, "strength": "required"},
+    ]))
+    assert not ids(search([target], "The Garden", radius_meters=1))
+    assert not ids(search([target], "not a restaurant, The Garden"))
+
+
+def test_source_description_alias_text_does_not_invent_feature_evidence():
+    target = named("Original", facts={"wikidata:description:en": "An astronomical observatory with a quiet room"})
+    result = search([target], "astronomical observatory")
+    assert ids(result) == [target["id"]]
+    assert "wikidata:description:en" in result["hits"][0]["matched_fact_keys"]
+    assert "quiet" not in result["hits"][0]["matched_fact_keys"]
+
+
+def test_short_name_inside_a_larger_activity_does_not_capture_food_request():
+    cafe, restaurant = named("Дәмді", "cafe"), named("Dinner", "restaurant")
+    assert ids(search([cafe, restaurant], "Дәмді ас", "kk")) == [restaurant["id"]]
+    assert ids(search([cafe, restaurant], "Дәмді", "kk")) == [cafe["id"]]

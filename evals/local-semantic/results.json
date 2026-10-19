@@ -1,0 +1,770 @@
+{
+  "kind": "exploratory-real-source-dense-search",
+  "product_quality_benchmark": false,
+  "filters_applied": false,
+  "model": "intfloat/multilingual-e5-small",
+  "model_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+  "provider": "CPUExecutionProvider",
+  "corpus_sha256": "bc919999881d216cf7692d2c7e3b0289fc388ce227c94a8fd00f0966bd2030df",
+  "documents_sha256": "fe8042e31c2aefde91bd2ef26c5dd26ed3a95fde38705bb46fb948e578c4eea9",
+  "places": 628,
+  "startup_seconds": 2.212,
+  "index_seconds": 0.017,
+  "rss_mib": 776.5,
+  "query_p50_ms": 14.2,
+  "query_p95_ms": 21.6,
+  "cases": [
+    {
+      "id": "en-study",
+      "query": "Somewhere to study",
+      "elapsed_ms": 8.0,
+      "results": [
+        {
+          "id": "osm:way/315257889",
+          "name": "Кең жол",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8367
+        },
+        {
+          "id": "osm:node/4286097093",
+          "name": "Дипломат",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8308
+        },
+        {
+          "id": "osm:way/257088764",
+          "name": "The Table",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8296
+        },
+        {
+          "id": "osm:node/5764023972",
+          "name": "У Гафура",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.829
+        },
+        {
+          "id": "osm:node/12125755601",
+          "name": "Sayajay аrt",
+          "categories": [
+            "arts_centre"
+          ],
+          "score": 0.8278
+        }
+      ]
+    },
+    {
+      "id": "ru-study",
+      "query": "Где можно позаниматься и почитать книги",
+      "elapsed_ms": 8.2,
+      "results": [
+        {
+          "id": "osm:node/12125736551",
+          "name": "Балалар кітапханасы",
+          "categories": [
+            "library"
+          ],
+          "score": 0.8601
+        },
+        {
+          "id": "osm:node/5913515789",
+          "name": "Детская библиотека",
+          "categories": [
+            "library"
+          ],
+          "score": 0.8522
+        },
+        {
+          "id": "osm:node/10957524588",
+          "name": "Библиотека",
+          "categories": [
+            "library"
+          ],
+          "score": 0.8478
+        },
+        {
+          "id": "osm:node/5936817288",
+          "name": "Библиотека",
+          "categories": [
+            "library"
+          ],
+          "score": 0.8478
+        },
+        {
+          "id": "osm:node/4938765522",
+          "name": "Техническая библиотека",
+          "categories": [
+            "library"
+          ],
+          "score": 0.8351
+        }
+      ]
+    },
+    {
+      "id": "kk-food",
+      "query": "Дәмді ас",
+      "elapsed_ms": 8.6,
+      "results": [
+        {
+          "id": "osm:node/5638132697",
+          "name": "Damdes",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.8965
+        },
+        {
+          "id": "osm:node/5936770586",
+          "name": "Damil",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8765
+        },
+        {
+          "id": "osm:node/5966356086",
+          "name": "Lavash food",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.876
+        },
+        {
+          "id": "osm:node/13955565333",
+          "name": "Woodly",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.8744
+        },
+        {
+          "id": "osm:node/9092969813",
+          "name": "The Torium",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.8699
+        }
+      ]
+    },
+    {
+      "id": "ru-food",
+      "query": "Хочу пообедать",
+      "elapsed_ms": 11.5,
+      "results": [
+        {
+          "id": "osm:node/5901728086",
+          "name": "Ми гён",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.8831
+        },
+        {
+          "id": "osm:node/4499897795",
+          "name": "Рыба моей мечты",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8769
+        },
+        {
+          "id": "osm:node/11149613015",
+          "name": "Еда города",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8706
+        },
+        {
+          "id": "osm:node/5913428224",
+          "name": "Жасмин",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.8704
+        },
+        {
+          "id": "osm:node/2495957777",
+          "name": "Махаббат",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.8698
+        }
+      ]
+    },
+    {
+      "id": "en-art",
+      "query": "Look at paintings",
+      "elapsed_ms": 10.2,
+      "results": [
+        {
+          "id": "osm:node/13340040665",
+          "name": "Жетігенші",
+          "categories": [
+            "artwork"
+          ],
+          "score": 0.857
+        },
+        {
+          "id": "osm:way/734476104",
+          "name": "Буран",
+          "categories": [
+            "artwork"
+          ],
+          "score": 0.852
+        },
+        {
+          "id": "osm:node/13340040666",
+          "name": "Қобызшы",
+          "categories": [
+            "artwork"
+          ],
+          "score": 0.8516
+        },
+        {
+          "id": "osm:node/13340050452",
+          "name": "Хатико",
+          "categories": [
+            "artwork"
+          ],
+          "score": 0.8435
+        },
+        {
+          "id": "osm:node/14080048397",
+          "name": "Әл-Фараби",
+          "categories": [
+            "artwork"
+          ],
+          "score": 0.8432
+        }
+      ]
+    },
+    {
+      "id": "kk-library",
+      "query": "Кітап оқитын орын",
+      "elapsed_ms": 15.0,
+      "results": [
+        {
+          "id": "osm:node/9092969813",
+          "name": "The Torium",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.8471
+        },
+        {
+          "id": "osm:node/5918102092",
+          "name": "the Karasson",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.8464
+        },
+        {
+          "id": "osm:node/12125736551",
+          "name": "Балалар кітапханасы",
+          "categories": [
+            "library"
+          ],
+          "score": 0.8459
+        },
+        {
+          "id": "osm:way/1490038325",
+          "name": "Welcome to Astana",
+          "categories": [
+            "artwork"
+          ],
+          "score": 0.8459
+        },
+        {
+          "id": "osm:way/1449322336",
+          "name": "Pop Up",
+          "categories": [
+            "attraction"
+          ],
+          "score": 0.8441
+        }
+      ]
+    },
+    {
+      "id": "ru-wifi",
+      "query": "Кафе с вайфаем",
+      "elapsed_ms": 15.5,
+      "results": [
+        {
+          "id": "osm:node/13448000429",
+          "name": "Waffle",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.893
+        },
+        {
+          "id": "osm:node/13467930249",
+          "name": "Roastbeef",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.89
+        },
+        {
+          "id": "osm:node/5878547585",
+          "name": "Food line",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8891
+        },
+        {
+          "id": "osm:node/12993941252",
+          "name": "Wine cafe",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8867
+        },
+        {
+          "id": "osm:node/12104374564",
+          "name": "Soul kitchen",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8867
+        }
+      ]
+    },
+    {
+      "id": "en-wifi",
+      "query": "Cafe with wireless internet",
+      "elapsed_ms": 13.9,
+      "results": [
+        {
+          "id": "osm:node/11109477264",
+          "name": "Coffee inn",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8939
+        },
+        {
+          "id": "osm:node/6408255389",
+          "name": "завтрак бар",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8838
+        },
+        {
+          "id": "osm:way/315257889",
+          "name": "Кең жол",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8781
+        },
+        {
+          "id": "osm:node/12917095624",
+          "name": "Махаббатпен",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8747
+        },
+        {
+          "id": "osm:node/12809042306",
+          "name": "Coffee BOOM",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8742
+        }
+      ]
+    },
+    {
+      "id": "ru-exact",
+      "query": "Ботанический сад",
+      "elapsed_ms": 21.4,
+      "results": [
+        {
+          "id": "osm:way/1470780026",
+          "name": "Дубовая аллея",
+          "categories": [
+            "garden"
+          ],
+          "score": 0.8623
+        },
+        {
+          "id": "osm:way/1196402246",
+          "name": "Ботаникалық бақ",
+          "categories": [
+            "park"
+          ],
+          "score": 0.8583
+        },
+        {
+          "id": "osm:way/556574284",
+          "name": "Сад \"Чистый ручей\"",
+          "categories": [
+            "park"
+          ],
+          "score": 0.8557
+        },
+        {
+          "id": "osm:relation/3573848",
+          "name": "Гүл бақшасы",
+          "categories": [
+            "park"
+          ],
+          "score": 0.8483
+        },
+        {
+          "id": "osm:way/1296051287",
+          "name": "Корей бақшасы",
+          "categories": [
+            "garden"
+          ],
+          "score": 0.8413
+        }
+      ]
+    },
+    {
+      "id": "en-name",
+      "query": "The Garden",
+      "elapsed_ms": 18.9,
+      "results": [
+        {
+          "id": "osm:node/4409067789",
+          "name": "The Garden",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.881
+        },
+        {
+          "id": "osm:way/1470780026",
+          "name": "Дубовая аллея",
+          "categories": [
+            "garden"
+          ],
+          "score": 0.8706
+        },
+        {
+          "id": "osm:way/1424558972",
+          "name": "Mereke Park",
+          "categories": [
+            "garden"
+          ],
+          "score": 0.8639
+        },
+        {
+          "id": "osm:way/1296051287",
+          "name": "Корей бақшасы",
+          "categories": [
+            "garden"
+          ],
+          "score": 0.8506
+        },
+        {
+          "id": "osm:node/4986871030",
+          "name": "Шедевр Гарден",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.8498
+        }
+      ]
+    },
+    {
+      "id": "en-negation",
+      "query": "Not a cafe, a museum",
+      "elapsed_ms": 22.3,
+      "results": [
+        {
+          "id": "osm:node/5764023972",
+          "name": "У Гафура",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8867
+        },
+        {
+          "id": "osm:node/10964845149",
+          "name": "Тойхана Akhmadi",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.8853
+        },
+        {
+          "id": "osm:node/4935012769",
+          "name": "Фарангиз",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8806
+        },
+        {
+          "id": "osm:way/385515611",
+          "name": "Ақмарал",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8805
+        },
+        {
+          "id": "osm:way/315257889",
+          "name": "Кең жол",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.879
+        }
+      ]
+    },
+    {
+      "id": "ru-anchor",
+      "query": "Кафе рядом с Национальным музеем",
+      "elapsed_ms": 20.0,
+      "results": [
+        {
+          "id": "osm:node/5878572885",
+          "name": "Семейное кафе бум",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8928
+        },
+        {
+          "id": "osm:node/11149613015",
+          "name": "Еда города",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8863
+        },
+        {
+          "id": "osm:node/4941659457",
+          "name": "Чайхана Павлин Мавлин",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8856
+        },
+        {
+          "id": "osm:node/5890018687",
+          "name": "Столичная столовая",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8848
+        },
+        {
+          "id": "osm:node/2680126093",
+          "name": "Кавказкая пленница",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8838
+        }
+      ]
+    },
+    {
+      "id": "en-no-match",
+      "query": "quantum teleportation",
+      "elapsed_ms": 13.1,
+      "results": [
+        {
+          "id": "osm:way/1449322340",
+          "name": "Электронды көліктер",
+          "categories": [
+            "attraction"
+          ],
+          "score": 0.8041
+        },
+        {
+          "id": "osm:relation/20321070",
+          "name": "Макет ракеты-носителя Протон",
+          "categories": [
+            "artwork"
+          ],
+          "score": 0.7927
+        },
+        {
+          "id": "osm:way/1449322337",
+          "name": "НЛО",
+          "categories": [
+            "attraction"
+          ],
+          "score": 0.7848
+        },
+        {
+          "id": "osm:way/1449322338",
+          "name": "Ұшатын автобус",
+          "categories": [
+            "attraction"
+          ],
+          "score": 0.7843
+        },
+        {
+          "id": "osm:relation/20321069",
+          "name": "Макет ракеты-носителя Зенит",
+          "categories": [
+            "artwork"
+          ],
+          "score": 0.7815
+        }
+      ]
+    },
+    {
+      "id": "ru-no-match",
+      "query": "Купить трактор",
+      "elapsed_ms": 18.0,
+      "results": [
+        {
+          "id": "osm:node/4209560711",
+          "name": "Т34-85",
+          "categories": [
+            "attraction"
+          ],
+          "score": 0.8462
+        },
+        {
+          "id": "osm:way/1449322329",
+          "name": "Конвой",
+          "categories": [
+            "attraction"
+          ],
+          "score": 0.8426
+        },
+        {
+          "id": "osm:way/1449322340",
+          "name": "Электронды көліктер",
+          "categories": [
+            "attraction"
+          ],
+          "score": 0.8406
+        },
+        {
+          "id": "osm:way/1449322336",
+          "name": "Pop Up",
+          "categories": [
+            "attraction"
+          ],
+          "score": 0.836
+        },
+        {
+          "id": "osm:way/1449322338",
+          "name": "Ұшатын автобус",
+          "categories": [
+            "attraction"
+          ],
+          "score": 0.8325
+        }
+      ]
+    },
+    {
+      "id": "kk-no-match",
+      "query": "Ұшақ жөндеу",
+      "elapsed_ms": 8.5,
+      "results": [
+        {
+          "id": "osm:way/1449322336",
+          "name": "Pop Up",
+          "categories": [
+            "attraction"
+          ],
+          "score": 0.8515
+        },
+        {
+          "id": "osm:way/1490038325",
+          "name": "Welcome to Astana",
+          "categories": [
+            "artwork"
+          ],
+          "score": 0.8513
+        },
+        {
+          "id": "osm:node/5918174687",
+          "name": "Suevte",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.8489
+        },
+        {
+          "id": "osm:way/1449322335",
+          "name": "Gold Mine Coaster",
+          "categories": [
+            "attraction"
+          ],
+          "score": 0.8474
+        },
+        {
+          "id": "osm:node/5918102092",
+          "name": "the Karasson",
+          "categories": [
+            "restaurant"
+          ],
+          "score": 0.8444
+        }
+      ]
+    },
+    {
+      "id": "en-facilities",
+      "query": "quiet cafe with power outlets",
+      "elapsed_ms": 14.5,
+      "results": [
+        {
+          "id": "osm:node/12104374564",
+          "name": "Soul kitchen",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8434
+        },
+        {
+          "id": "osm:node/4941659457",
+          "name": "Чайхана Павлин Мавлин",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8393
+        },
+        {
+          "id": "osm:node/12917060979",
+          "name": "SQ Plov",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8366
+        },
+        {
+          "id": "osm:node/6408255389",
+          "name": "завтрак бар",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.8365
+        },
+        {
+          "id": "osm:node/4934262642",
+          "name": "Койче",
+          "categories": [
+            "cafe"
+          ],
+          "score": 0.836
+        }
+      ]
+    }
+  ]
+}

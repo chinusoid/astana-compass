@@ -100,6 +100,32 @@ def test_child_does_not_invent_stroller_access_or_playground(locale, query):
     assert len(result["clarification_questions"]) >= 2
 
 
+@pytest.mark.parametrize("locale,query", [
+    ("ru", "Кафе с Wi-Fi и туалетом"),
+    ("en", "Cafe with wifi and a restroom"),
+    ("kk", "Wi-Fi және дәретханасы бар кафе"),
+])
+def test_source_amenities_are_reviewable_preferences(locale, query):
+    result = rules(query, locale)
+    assert keys(result) == {"has_wifi", "toilets"}
+    for item in result["constraints"]:
+        assert item["source_quote"] in query
+        assert item["constraint"] == {"key": item["constraint"]["key"], "value": True, "strength": "preferred"}
+
+
+@pytest.mark.parametrize("locale,query", [
+    ("ru", "Wi-Fi не нужен, туалет не обязателен"),
+    ("en", "Wifi is not required, toilets are not important"),
+    ("kk", "Wi-Fi керек емес, дәретхана маңызды емес"),
+])
+def test_unwanted_amenities_do_not_become_positive_constraints(locale, query):
+    assert not {"has_wifi", "toilets"}.intersection(keys(rules(query, locale)))
+
+
+def test_generic_internet_does_not_assert_a_wireless_requirement():
+    assert "has_wifi" not in keys(rules("Кафе с интернетом"))
+
+
 @pytest.mark.parametrize(
     "locale,query",
     [

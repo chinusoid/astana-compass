@@ -746,6 +746,7 @@ export default function CompassApp({
                       value={catalogQuery}
                       maxLength={2000}
                       placeholder={t(locale, "catalogSearch")}
+                      aria-describedby="catalog-query-hint"
                       onChange={(e) => {
                         requests.current.catalog?.abort();
                         setCatalogLoading(false);
@@ -761,6 +762,20 @@ export default function CompassApp({
                       {t(locale, "search")}
                     </button>
                   </form>
+                  <p className="field-hint" id="catalog-query-hint">
+                    {t(locale, "catalogQueryHint")}
+                  </p>
+                  {!catalogLoading &&
+                    catalogQuery.trim() !== loadedQuery.trim() && (
+                      <p className="notice amber small" role="status">
+                        {t(locale, "catalogPendingQuery")}
+                      </p>
+                    )}
+                  {!catalogLoading && loadedQuery.trim() && (
+                    <p className="field-hint">
+                      {t(locale, "catalogResultsFor")}: «{loadedQuery}»
+                    </p>
+                  )}
                   <ErrorNotice
                     error={catalogError}
                     locale={locale}
@@ -772,7 +787,26 @@ export default function CompassApp({
                   {catalogLoading ? (
                     <p role="status">{t(locale, "loading")}</p>
                   ) : !catalog.length && !catalogError ? (
-                    <p>{t(locale, "empty")}</p>
+                    loadedQuery.trim() ? (
+                      <div className="catalog-empty" role="status">
+                        <p>{t(locale, "catalogNoMatch")}</p>
+                        <p className="field-hint">
+                          {t(locale, "catalogNoMatchHint")}
+                        </p>
+                        <button
+                          className="text-button"
+                          type="button"
+                          onClick={() => {
+                            setCatalogQuery("");
+                            void loadCatalog("");
+                          }}
+                        >
+                          {t(locale, "catalogShowAll")}
+                        </button>
+                      </div>
+                    ) : (
+                      <p>{t(locale, "empty")}</p>
+                    )
                   ) : null}
                   {cursor && (
                     <button
@@ -1068,7 +1102,11 @@ export default function CompassApp({
                           return place && card(place, recommendation);
                         })}
                       </div>
-                      <Warnings warnings={result.warnings} locale={locale} />
+                      <Warnings
+                        warnings={result.warnings}
+                        locale={locale}
+                        expanded={result.status === "no_match"}
+                      />
                       <div className="feedback">
                         <p>
                           {feedbackState === "sent"

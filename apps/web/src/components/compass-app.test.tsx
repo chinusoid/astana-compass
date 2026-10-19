@@ -110,6 +110,101 @@ it("credits the live OSM catalogue on the data page when the map is disabled", a
   expect(screen.queryByText(t("ru", "fixtureBanner"))).not.toBeInTheDocument();
 });
 
+it("distinguishes an unsubmitted name query from an empty catalog result and can reset it", async () => {
+  navigation.pathname = "/";
+  const queries: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      queries.push(
+        new URL(url, "http://test.local").searchParams.get("query") ?? "",
+      );
+      return Response.json(
+        { places: [], next_cursor: null },
+        { headers: { "x-astana-data-mode": "live" } },
+      );
+    }),
+  );
+  const user = userEvent.setup();
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures={false}
+      mapProvider="none"
+    />,
+  );
+  await screen.findByText(t("ru", "empty"));
+  const input = screen.getByRole("textbox", { name: t("ru", "catalogSearch") });
+  await user.type(input, "Unknown place");
+  expect(screen.getByText(t("ru", "catalogPendingQuery"))).toBeVisible();
+  expect(queries).toEqual([""]);
+  await user.click(
+    screen.getByRole("button", { name: t("ru", "search") }),
+  );
+  expect(await screen.findByText(t("ru", "catalogNoMatch"))).toBeVisible();
+  expect(screen.queryByText(t("ru", "empty"))).not.toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: t("ru", "catalogShowAll") }),
+  );
+  await screen.findByText(t("ru", "empty"));
+  expect(input).toHaveValue("");
+  expect(queries).toEqual(["", "Unknown place", ""]);
+});
+
+it("submits explicit Wi-Fi and toilets requirements without weakening them", async () => {
+  let submitted: RecommendationRequest | undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/places?"))
+        return Response.json({ places: [], next_cursor: null });
+      submitted = JSON.parse(String(init?.body)) as RecommendationRequest;
+      return Response.json(
+        {
+          request_id: "amenity-test",
+          error: {
+            code: "provider_unavailable",
+            message: "Offline test response",
+            details: [],
+            retryable: true,
+          },
+        },
+        { status: 503 },
+      );
+    }),
+  );
+  const user = userEvent.setup();
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures={false}
+      mapProvider="none"
+    />,
+  );
+  await user.type(
+    screen.getByRole("textbox", { name: t("ru", "query") }),
+    "Кафе",
+  );
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "Wi-Fi" }),
+    "required",
+  );
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: t("ru", "toilets") }),
+    "preferred",
+  );
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  await user.click(screen.getByRole("button", { name: t("ru", "find") }));
+  await waitFor(() => expect(submitted).toBeDefined());
+  expect(submitted?.constraints).toEqual(
+    expect.arrayContaining([
+      { key: "has_wifi", value: true, strength: "required" },
+      { key: "toilets", value: true, strength: "preferred" },
+    ]),
+  );
+  await screen.findByRole("alert");
+});
+
 for (const [key, preset] of [
   ["indoor", "indoors"],
   ["child_friendly", "family"],
