@@ -15,6 +15,7 @@ import {
   type PlaceFact,
 } from "@/lib/place-presentation";
 import PlaceOverview from "./place-overview";
+import PlaceDirectory from "./place-directory";
 
 export function ErrorNotice({
   error,
@@ -217,6 +218,7 @@ export function PlaceFacts({
   return (
     <>
       <PlaceOverview place={place} locale={locale} detailed />
+      <PlaceDirectory placeId={place.id} locale={locale} />
       <h3>{placeText(locale, "amenities")}</h3>
       <p className="field-hint">{placeText(locale, "sourceClaim")}</p>
       <div className="fact-list">{mainFacts.map(factRecord)}</div>
