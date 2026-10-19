@@ -340,6 +340,11 @@ const messages = {
     "Есептің негіздері",
     "Route assumptions & sources",
   ],
+  routeAccessNote: [
+    "TomTom строит маршрут по дорожкам и улицам. Отмеченные места могут быть до 300 м от линии. Подход от дорожки до входа не проверен и не включён во время маршрута.",
+    "TomTom маршрутты жолдар мен көшелер бойымен құрады. Белгіленген орындар сызықтан 300 м-ге дейін алыс болуы мүмкін. Жолдан кіреберіске дейінгі өту мүмкіндігі тексерілмеген және оның уақыты маршрут есебіне кірмейді.",
+    "TomTom follows mapped paths and streets. Marked places may be up to 300 m from the line. Access from the path to an entrance is unverified and is not included in the route time.",
+  ],
   showMap: ["Показать на карте", "Картадан көрсету", "Show on map"],
   add: ["В мой план", "Жоспарыма қосу", "Add to my plan"],
   added: ["В плане", "Жоспарда", "In your plan"],

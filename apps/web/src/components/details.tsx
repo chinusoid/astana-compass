@@ -128,19 +128,26 @@ export function RouteNotes({
   locale: Locale;
 }) {
   return (
-    <details className="route-notes">
-      <summary>{t(locale, "routeNotes")}</summary>
-      <p>
-        {route.provider} ·{" "}
-        {new Intl.NumberFormat(locale).format(route.distance_meters)} m
-      </p>
-      <ul>
-        {route.assumptions.map((a) => (
-          <li key={a}>{a}</li>
-        ))}
-      </ul>
-      <Sources evidence={route.evidence} locale={locale} />
-    </details>
+    <>
+      {route.method === "routed" && route.provider === "TomTom Maps" && (
+        <p className="notice" data-testid="route-access-note">
+          {t(locale, "routeAccessNote")}
+        </p>
+      )}
+      <details className="route-notes">
+        <summary>{t(locale, "routeNotes")}</summary>
+        <p>
+          {route.provider} ·{" "}
+          {new Intl.NumberFormat(locale).format(route.distance_meters)} m
+        </p>
+        <ul>
+          {route.assumptions.map((a) => (
+            <li key={a}>{a}</li>
+          ))}
+        </ul>
+        <Sources evidence={route.evidence} locale={locale} />
+      </details>
+    </>
   );
 }
 
