@@ -7,6 +7,11 @@ OSM получен одним ограниченным запросом Overpass
 получены одним GET 19 октября 2026, 07:45:49 UTC. Это времена загрузки источников,
 а не дата посещения или независимой проверки каждого места.
 
+19 октября добавлено [официальное редакционное дополнение](official-sources.md):
+девять страниц пяти организаций, 37 утверждений и шесть развёрнутых RU-описаний.
+OSM/Wikidata кэши и их даты не менялись. У каждой заметки своя ссылка и время чтения;
+это сведения источников, а не полевая проверка удобств.
+
 OSM: © OpenStreetMap contributors,
 [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/),
 [copyright/attribution](https://www.openstreetmap.org/copyright).
@@ -28,6 +33,9 @@ Wikidata text: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 | Категорий | 13 |
 | Точных Wikidata QID / связанных мест | 7 / 7 |
 | Мест с кратким Wikidata description | 6 |
+| Мест с официальным редакционным дополнением | 6 |
+| Официальных страниц / утверждений | 9 / 37 |
+| Непустых итоговых Place.description | 9 |
 
 Выбор ограничен именованными категориями и bbox, не всей Астаной. Если в будущем
 результат превысит 1000, применяется category × grid round-robin; число исключённых
@@ -88,12 +96,15 @@ true. [OSM internet_access](https://wiki.openstreetmap.org/wiki/Key:internet_acc
 подтверждения. Категория park/playground не доказывает пригодность для детей.
 
 Wikidata: 7 EN labels, 6 RU и 6 KK labels; aliases у 3 мест на RU, 1 на KK и 1 на EN.
-Descriptions после фильтра: 3 RU, 6 EN, **0 KK**. Всего в Place.description 7 текстов:
-1 OSM и 6 Wikidata. Это короткие исходные строки, не полные редакторские описания.
+Descriptions Wikidata после фильтра: 3 RU, 6 EN, **0 KK**. До официального дополнения
+в Place.description было 7 текстов: 1 OSM и 6 Wikidata. Теперь шесть карточек имеют
+развёрнутый официальный RU-пересказ, а всего непустых описаний девять. Короткие
+исходные тексты сохранены отдельными фактами.
 Одна субъективная RU-строка о Ботаническом саде исключена из нормализованных
 данных и поиска; выбран нейтральный EN-текст. Исходный кэш сохранён без изменений.
 Ограниченный словарный фильтр не является независимой проверкой фактов.
-Выбор: OSM description → OSM description:ru/kk/en → Wikidata description:ru/kk/en.
+Без редакционного дополнения выбор: OSM description → OSM description:ru/kk/en → Wikidata description:ru/kk/en.
+У обогащённых карточек приоритет имеет проверенный `official:description:ru`.
 Поддержанные языки остаются в facts; переводов, дополнительных
 amenities и заполнения одной категорией нет. `description:source` и, когда язык
 известен, `description:language` отмечают выбор.
@@ -119,6 +130,8 @@ opening_hours; неподдержанные расписания остаютс�
 - `data/samples/astana-overpass-cache.json`: неизменённый исходный OSM response;
 - `data/samples/astana-wikidata-cache.json`: один Wikidata response, request/raw
   hashes, точные QID, время загрузки, revisions и modified_at;
+- `data/samples/astana-official-supplement.json`: редакционные заметки, ссылки,
+  области фактов и точные привязки к шести OSM ID;
 - `data/samples/astana-osm.json`: canonical Places и встроенный manifest;
 - `data/manifests/astana-osm.json`: тот же manifest, bbox/query/hashes,
   normalization `osm-tags-v2`, coverage и отдельная Wikidata provenance;
@@ -126,10 +139,11 @@ opening_hours; неподдержанные расписания остаютс�
 
 OSM raw SHA-256: `7e10e38b97d8e5cb546905f51a46d881aa35f1f4ccb26d2083c23a738746151c`.
 Wikidata raw SHA-256: `770b57e20dcb680e2dec1e4f431575b4bef651fc6d48f3bd16f39957b1134985`.
-Places SHA-256: `c8aa21649a1549a020c8102e18bc03ed47c1e19b76c6dd552a55c35c6ae1f0dc`.
+Places SHA-256: `acb20fb2606c0a7f2ef24625ccccbed64318645c65715ea7c4432005fe5157c3`.
+Official supplement SHA-256: `8f5646a21864f07910d0e7586238d9b3c89a3de09059aa8d410d602166370539`.
 Canonical hashing описан в `data/samples/README.md`. Это контроль повреждения и
 воспроизводимости, не подпись доверенного издателя. Places воспроизводятся из
-двух кэшей без сети, включая descriptions и per-source evidence.
+двух кэшей и официального дополнения без сети, включая descriptions и per-source evidence.
 
 Wikidata evidence имеет type `provider`, CC0 source name, точный QID и URL revision.
 Repository проверяет allowlist, match с OSM QID, source times и manifest counts;

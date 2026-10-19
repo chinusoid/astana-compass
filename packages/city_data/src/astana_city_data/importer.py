@@ -77,7 +77,7 @@ def select_sample(places, limit):
 
 
 async def import_snapshot(*, output, cache, manifest_path=None, limit=1000, transport=None, now=None,
-                          offline=False, wikidata_cache=None):
+                          offline=False, wikidata_cache=None, official_supplement=None):
     if type(limit) is not int or not 1 <= limit <= 1000:
         raise DataError("Sample limit must be between 1 and 1000")
     fixed_now = now
@@ -123,6 +123,11 @@ async def import_snapshot(*, output, cache, manifest_path=None, limit=1000, tran
             selected, enrichment = enrich(selected, load_json(wikidata_cache))
             if instant(enrichment["retrieved_at"]) > now:
                 raise DataError("Wikidata cache timestamp is in the future")
+        official = None
+        if official_supplement:
+            from .official import MAX_BYTES as OFFICIAL_MAX_BYTES, enrich as enrich_official
+            selected, official = enrich_official(selected, load_json(official_supplement, OFFICIAL_MAX_BYTES),
+                                                 clock=lambda: now)
         manifest = {
             "format": FORMAT, "source": "OpenStreetMap contributors", "endpoint": ENDPOINT,
             "license": "ODbL-1.0", "license_url": LICENSE,
@@ -140,6 +145,9 @@ async def import_snapshot(*, output, cache, manifest_path=None, limit=1000, tran
                             "OSM tags are community source claims; opening and accessibility require confirmation."]}
         if enrichment is not None:
             manifest["wikidata_enrichment"] = enrichment
+        if official is not None:
+            manifest["official_enrichment"] = official
+            manifest["limitations"].append("Official-page editorial notes are source claims, not field verification; page access time is not a fact verification date.")
         snapshot = {"format": FORMAT, "manifest": manifest, "places": selected}
         if len(canonical(snapshot)) > 16 * 1024 * 1024:
             raise DataError("Normalized snapshot exceeds size limit")
@@ -157,11 +165,13 @@ def main():
     parser.add_argument("--limit", type=int, default=1000)
     parser.add_argument("--offline", action="store_true", help="Replay verified raw cache without network, preserving original source times")
     parser.add_argument("--wikidata-cache", type=Path, help="Optional verified local cache; this option never fetches Wikidata")
+    parser.add_argument("--official-supplement", type=Path, help="Optional reviewed official-page notes; offline only, no crawling")
     args = parser.parse_args()
     try:
         manifest = asyncio.run(import_snapshot(output=args.output, cache=args.cache,
                                               manifest_path=args.manifest, limit=args.limit,
-                                              offline=args.offline, wikidata_cache=args.wikidata_cache))
+                                              offline=args.offline, wikidata_cache=args.wikidata_cache,
+                                              official_supplement=args.official_supplement))
     except DataError as error:
         parser.exit(1, f"Import failed: {error}.\n")
     except (OSError, KeyError, TypeError, ValueError):

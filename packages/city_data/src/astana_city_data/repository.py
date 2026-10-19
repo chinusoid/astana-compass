@@ -11,6 +11,7 @@ from astana_contracts import validate_payload
 from .common import (COPYRIGHT, FORMAT, LICENSE, MAX_PLACES, SOURCE, DataError, canonical, coordinates,
                      digest, distance, instant, load_json, utcnow)
 from .wikidata import ENDPOINT as WIKIDATA_ENDPOINT, LICENSE as WIKIDATA_LICENSE, SOURCE as WIKIDATA_SOURCE, QID
+from .official import expected_records
 
 
 class SnapshotRepository:
@@ -61,6 +62,9 @@ class SnapshotRepository:
                 if (not QID.fullmatch(qid) or not isinstance(revision, dict) or type(revision.get("revision")) is not int
                         or revision["revision"] <= 0 or instant(revision["modified_at"]) > instant(enrichment["retrieved_at"])):
                     raise DataError("Invalid Wikidata revision")
+        official = manifest.get("official_enrichment")
+        official_records = expected_records(official, clock=self._clock) if official is not None else {}
+        official_used = set()
         used, enriched_count = set(), 0
         for place in places:
             validate_payload("Place", place)
@@ -73,7 +77,14 @@ class SnapshotRepository:
                     or osm[0]["source_url"] != "https://www.openstreetmap.org/" + record
                     or osm[0]["source_record_id"] != record or osm[0]["retrieved_at"] != manifest["imported_at"]):
                 raise DataError("Invalid OSM evidence identity")
-            other = [e for e in place["evidence"] if e["source_type"] != "osm"]
+            if place["id"] in official_records:
+                if canonical(place) != official_records[place["id"]]:
+                    raise DataError("Official enrichment does not match reviewed claims")
+                official_used.add(place["id"])
+            elif (any(e["source_type"] == "official" for e in place["evidence"])
+                    or any(f["key"].startswith("official:") for f in place["facts"])):
+                raise DataError("Undeclared official enrichment")
+            other = [e for e in place["evidence"] if e["source_type"] not in {"osm", "official"}]
             if other:
                 if enrichment is None or len(other) != 1:
                     raise DataError("Undeclared provider evidence")
@@ -101,6 +112,8 @@ class SnapshotRepository:
             records[place["id"]] = canonical(place)
         if enrichment and (used != set(enrichment["entities"]) or enriched_count != enrichment["place_count"]):
             raise DataError("Wikidata enrichment counts do not match records")
+        if official_used != set(official_records):
+            raise DataError("Official enrichment counts do not match records")
         # Encoded JSON is immutable; every public read returns fresh dictionaries.
         self._records = dict(sorted(records.items()))
         self._manifest = json.loads(canonical(manifest))
@@ -156,6 +169,7 @@ class SnapshotRepository:
                 if fact["status"] == "known" and fact["key"].startswith((
                     "name:", "osm:alt_name", "osm:short_name", "osm:official_name", "osm:int_name",
                     "osm:description", "wikidata:label:", "wikidata:aliases:", "wikidata:description:",
+                    "official:aliases:", "official:description:",
                 )):
                     value = fact["value"]
                     terms.extend([value] if isinstance(value, str) else [v for v in value if isinstance(v, str)] if isinstance(value, list) else [])
@@ -204,6 +218,17 @@ class SnapshotRepository:
                             "warnings": ["CC0 1.0: " + WIKIDATA_LICENSE,
                                          "Exact OSM-linked Wikidata text only; no field verification or inferred amenities.",
                                          *(["Wikidata cache exceeds its freshness interval."] if stale else [])]})
+        official = self._manifest.get("official_enrichment") if self._manifest else None
+        if official:
+            bundle = official["bundle"]
+            for source_id, source in sorted(bundle["sources"].items()):
+                stale = now - instant(source["retrieved_at"]) > timedelta(seconds=self._stale_after)
+                count = sum(any(source_id in f["sources"] for f in p["facts"]) for p in bundle["places"])
+                sources.append({"source_name": source["source_name"], "source_url": source["source_url"],
+                    "status": "stale" if stale else "ready", "last_success_at": source["retrieved_at"],
+                    "place_count": count, "warnings": [source["usage"],
+                        "Reviewed source claims, not field verification; retrieval time is page access time.",
+                        *(["Official notes exceed their freshness interval; review the source pages."] if stale else [])]})
         return validate_payload("DataStatusResponse", {"sources": sources, "total_places": len(self._records),
             "checked_at": now.isoformat()})
 

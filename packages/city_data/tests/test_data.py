@@ -260,8 +260,11 @@ def test_committed_real_sample_replays_from_raw_cache_without_network():
     from astana_city_data.wikidata import enrich
     enriched, enrichment = enrich(select_sample(places, manifest["sample_limit"]),
                                  load_json(root / "data/samples/astana-wikidata-cache.json"))
-    assert enriched == snapshot["places"]
     assert enrichment == manifest["wikidata_enrichment"]
+    from astana_city_data.official import enrich as enrich_official
+    enriched, official = enrich_official(enriched, load_json(root / "data/samples/astana-official-supplement.json"))
+    assert official == manifest["official_enrichment"]
+    assert enriched == snapshot["places"]
     assert manifest["places_sha256"] == digest(snapshot["places"])
     assert len(snapshot["places"]) == manifest["place_count"] > 0
     assert all(not place["is_synthetic"] for place in snapshot["places"])

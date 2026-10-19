@@ -13,11 +13,13 @@ NAME_KEYS = frozenset({
       for suffix in ("", ":ru", ":kk", ":en")),
     "osm:int_name",
     *(f"wikidata:{kind}:{lang}" for kind in ("label", "aliases") for lang in ("ru", "kk", "en")),
+    *(f"official:aliases:{lang}" for lang in ("ru", "kk", "en")),
 })
 TEXT_KEYS = frozenset({
     "osm:cuisine", "osm:addr:street", "osm:addr:place",
     "osm:description", *(f"osm:description:{lang}" for lang in ("ru", "kk", "en")),
     *(f"wikidata:description:{lang}" for lang in ("ru", "kk", "en")),
+    *(f"official:description:{lang}" for lang in ("ru", "kk", "en")),
 })
 ANCHOR_START = re.compile(
     r"(?<!\w)(?:near|by|beside|around|next\s+to|close\s+to|у|возле|около|рядом\s+с|недалеко\s+от)\s+", re.I,
