@@ -1,5 +1,7 @@
 import {
+  act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -13,6 +15,7 @@ import type {
   ItineraryResponse,
   Place,
   RecommendationRequest,
+  RecommendationResponse,
 } from "@astana/api-client";
 import examples from "../../../../contracts.examples.json";
 import CompassApp from "./compass-app";
@@ -70,6 +73,316 @@ afterEach(() => {
       Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
     else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
   });
+});
+
+function scenarioResponse(
+  request: RecommendationRequest,
+  status: "matched" | "no_match" = "no_match",
+): RecommendationResponse {
+  const seed = structuredClone(
+    examples.cases.find(
+      (entry) =>
+        entry.name ===
+        (status === "matched" ? "recommendations_valid" : "no_match_valid"),
+    )!.instance,
+  ) as RecommendationResponse;
+  return {
+    ...seed,
+    status,
+    request,
+    recommendations: seed.recommendations.map((recommendation) => ({
+      ...recommendation,
+      constraint_evaluations: [],
+      route: {
+        ...recommendation.route,
+        includes_return: request.return_to_origin,
+      },
+    })),
+  };
+}
+
+it("submits the wishlist with Enter, shows progress immediately, and prevents duplicate requests", async () => {
+  let resolve!: (response: Response) => void;
+  let submitted!: RecommendationRequest;
+  const fetcher = vi.fn((url: string, init?: RequestInit) => {
+    if (url.startsWith("/api/v1/places?"))
+      return Promise.resolve(Response.json({ places: [], next_cursor: null }));
+    submitted = JSON.parse(String(init?.body)) as RecommendationRequest;
+    return new Promise<Response>((done) => {
+      resolve = done;
+    });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  const input = screen.getByRole("textbox", { name: t("ru", "query") });
+  await user.type(input, "Хочу самые красивые места");
+  await user.keyboard("{Shift>}{Enter}{/Shift}И парк");
+  expect(input).toHaveValue("Хочу самые красивые места\nИ парк");
+  fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+  fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+  expect(
+    fetcher.mock.calls.filter(([url]) => url === "/api/v1/recommendations"),
+  ).toHaveLength(0);
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(
+    screen.getByRole("button", { name: intentText("ru", "scenarioFinding") }),
+  ).toBeDisabled();
+  expect(screen.getByText(intentText("ru", "scenarioPending"))).toBeVisible();
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(
+    fetcher.mock.calls.filter(([url]) => url === "/api/v1/recommendations"),
+  ).toHaveLength(1);
+  expect(submitted.query).toBe("Хочу самые красивые места\nИ парк");
+  expect(submitted.constraints).toEqual([]);
+  await act(async () => resolve(Response.json(scenarioResponse(submitted))));
+  expect(
+    await screen.findByText(intentText("ru", "scenarioNoMatch")),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
+  ).toBeEnabled();
+});
+
+for (const locale of locales)
+  it(`confirms a completed wishlist search in ${locale}`, async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) =>
+        url.startsWith("/api/v1/places?")
+          ? Response.json({ places: [], next_cursor: null })
+          : Response.json(
+              scenarioResponse(JSON.parse(String(init?.body)), "matched"),
+            ),
+      ),
+    );
+    const user = userEvent.setup();
+    render(
+      <CompassApp
+        initialStart="2026-10-19T12:00"
+        allowFixtures
+        mapProvider="none"
+      />,
+    );
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: t("ru", "language") }),
+      locale,
+    );
+    await user.click(screen.getByRole("button", { name: "Map pick" }));
+    await user.type(
+      screen.getByRole("textbox", { name: t(locale, "query") }),
+      "Beautiful places",
+    );
+    await user.click(
+      screen.getByRole("button", { name: intentText(locale, "scenarioFind") }),
+    );
+    expect(
+      await screen.findByText(intentText(locale, "scenarioApplied")),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        `«Beautiful places» · ${intentText(locale, "scenarioCount")}: 1`,
+      ),
+    ).toBeVisible();
+    expect(document.getElementById("scenario-status")).toHaveAttribute(
+      "data-state",
+      "matched",
+    );
+  });
+
+it("marks text, time, constraints, start and return edits as unapplied until the next search", async () => {
+  const submitted: RecommendationRequest[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/places?"))
+        return Response.json({ places: [], next_cursor: null });
+      const request = JSON.parse(String(init?.body)) as RecommendationRequest;
+      submitted.push(request);
+      return Response.json(scenarioResponse(request));
+    }),
+  );
+  const user = userEvent.setup();
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  const input = screen.getByRole("textbox", { name: t("ru", "query") });
+  await user.type(input, "Красивые места");
+  async function search() {
+    await user.click(
+      screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
+    );
+    await screen.findByText(intentText("ru", "scenarioNoMatch"));
+    expect(
+      screen.queryByText(intentText("ru", "scenarioDirty")),
+    ).not.toBeInTheDocument();
+  }
+  const changes = [
+    async () => user.type(input, " и парк"),
+    async () =>
+      user.selectOptions(
+        screen.getByRole("combobox", { name: "Wi-Fi" }),
+        "required",
+      ),
+    async () => {
+      const time = screen.getByRole("spinbutton", {
+        name: t("ru", "timeBudget"),
+      });
+      await user.clear(time);
+      await user.type(time, "90");
+    },
+    async () =>
+      fireEvent.change(screen.getByLabelText(t("ru", "startTime")), {
+        target: { value: "2026-10-20T13:00" },
+      }),
+    async () => {
+      await user.click(screen.getByText(t("ru", "manualOrigin")));
+      fireEvent.change(
+        screen.getByRole("spinbutton", { name: t("ru", "latitude") }),
+        { target: { value: "51.12" } },
+      );
+    },
+    async () =>
+      user.click(
+        screen.getByRole("checkbox", { name: new RegExp(t("ru", "return")) }),
+      ),
+  ];
+  await search();
+  for (const change of changes) {
+    await change();
+    expect(screen.getByText(intentText("ru", "scenarioDirty"))).toBeVisible();
+    expect(
+      screen.queryByText(intentText("ru", "scenarioNoMatch")),
+    ).not.toBeInTheDocument();
+    await search();
+  }
+  expect(submitted).toHaveLength(7);
+  expect(submitted.at(-1)).toMatchObject({
+    query: "Красивые места и парк",
+    available_seconds: 5400,
+    origin: { lat: 51.12, lon: 71.42 },
+    return_to_origin: false,
+    constraints: [{ key: "has_wifi", value: true, strength: "required" }],
+  });
+});
+
+it("ignores an old search after an edit and marks a language change as unapplied", async () => {
+  let finishOldSearch!: () => void;
+  let oldSignal: AbortSignal | null | undefined;
+  let searches = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/places?"))
+        return Promise.resolve(
+          Response.json({ places: [], next_cursor: null }),
+        );
+      const request = JSON.parse(String(init?.body)) as RecommendationRequest;
+      searches++;
+      if (searches === 1) {
+        oldSignal = init?.signal;
+        return new Promise<Response>((resolve) => {
+          finishOldSearch = () =>
+            resolve(Response.json(scenarioResponse(request, "matched")));
+        });
+      }
+      return Promise.resolve(
+        Response.json(scenarioResponse(request, "matched")),
+      );
+    }),
+  );
+  const user = userEvent.setup();
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  const input = screen.getByRole("textbox", { name: t("ru", "query") });
+  await user.type(input, "Парк{Enter}");
+  expect(screen.getByText(intentText("ru", "scenarioPending"))).toBeVisible();
+  await user.type(input, " у реки");
+  expect(oldSignal?.aborted).toBe(true);
+  await act(async () => finishOldSearch());
+  expect(screen.getByText(intentText("ru", "scenarioDirty"))).toBeVisible();
+  expect(
+    screen.queryByText(intentText("ru", "scenarioApplied")),
+  ).not.toBeInTheDocument();
+  await user.keyboard("{Enter}");
+  expect(
+    await screen.findByText(intentText("ru", "scenarioApplied")),
+  ).toBeVisible();
+  expect(searches).toBe(2);
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: t("ru", "language") }),
+    "en",
+  );
+  expect(screen.getByText(intentText("en", "scenarioDirty"))).toBeVisible();
+  expect(
+    screen.queryByText(intentText("en", "scenarioApplied")),
+  ).not.toBeInTheDocument();
+});
+
+it("explains a missing origin next to the wishlist and reports a failed search without claiming it applied", async () => {
+  const fetcher = vi.fn(async (url: string) =>
+    url.startsWith("/api/v1/places?")
+      ? Response.json({ places: [], next_cursor: null })
+      : Response.json(
+          {
+            request_id: "test-unavailable",
+            error: {
+              code: "provider_unavailable",
+              message: "offline",
+              details: [],
+              retryable: true,
+            },
+          },
+          { status: 503 },
+        ),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures={false}
+      mapProvider="none"
+    />,
+  );
+  await user.type(
+    screen.getByRole("textbox", { name: t("ru", "query") }),
+    "Красивые места{Enter}",
+  );
+  expect(
+    screen.getByText(intentText("ru", "scenarioNeedsOrigin")),
+  ).toBeVisible();
+  expect(
+    fetcher.mock.calls.filter(([url]) => url === "/api/v1/recommendations"),
+  ).toHaveLength(0);
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  await user.click(
+    screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
+  );
+  expect(
+    await screen.findByText(intentText("ru", "scenarioError")),
+  ).toBeVisible();
+  expect(
+    screen.queryByText(intentText("ru", "scenarioApplied")),
+  ).not.toBeInTheDocument();
 });
 
 it("credits the live OSM catalogue on the data page when the map is disabled", async () => {
@@ -138,9 +451,7 @@ it("distinguishes an unsubmitted name query from an empty catalog result and can
   await user.type(input, "Unknown place");
   expect(screen.getByText(t("ru", "catalogPendingQuery"))).toBeVisible();
   expect(queries).toEqual([""]);
-  await user.click(
-    screen.getByRole("button", { name: t("ru", "search") }),
-  );
+  await user.click(screen.getByRole("button", { name: t("ru", "search") }));
   expect(await screen.findByText(t("ru", "catalogNoMatch"))).toBeVisible();
   expect(screen.queryByText(t("ru", "empty"))).not.toBeInTheDocument();
   await user.click(

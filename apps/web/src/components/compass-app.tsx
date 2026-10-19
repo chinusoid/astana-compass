@@ -19,6 +19,7 @@ import {
   MapPin,
   Plus,
   RotateCcw,
+  Search,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -50,6 +51,8 @@ import PlaceCard from "./place-card";
 import IntentReview from "./intent-review";
 import OsmAttribution, { isOsmSourceUrl } from "./osm-attribution";
 import { applyIntentConstraints } from "@/lib/intent";
+import { intentText } from "@/lib/intent-copy";
+import scenarioStyles from "./scenario-feedback.module.css";
 
 const CityMap = dynamic(() => import("./city-map"), { ssr: false });
 const FAVORITES_KEY = "astana-compass:favorites:v1";
@@ -64,6 +67,21 @@ type FormState = {
   constraints: Record<string, "" | Constraint["strength"]>;
 };
 type DialogState = "place" | null;
+
+function scenarioKey(form: FormState, locale: Locale) {
+  return JSON.stringify([
+    locale,
+    form.query.trim(),
+    form.minutes,
+    form.start,
+    form.lat,
+    form.lon,
+    form.returnToOrigin,
+    Object.entries(form.constraints)
+      .filter(([, strength]) => strength)
+      .sort(([left], [right]) => left.localeCompare(right)),
+  ]);
+}
 
 export default function CompassApp({
   initialStart,
@@ -104,6 +122,10 @@ export default function CompassApp({
   const [result, setResult] = useState<RecommendationResponse | null>(null);
   const [resultError, setResultError] = useState<ApiError | null>(null);
   const [searching, setSearching] = useState(false);
+  const [submittedScenario, setSubmittedScenario] = useState<{
+    key: string;
+    query: string;
+  } | null>(null);
   const [formError, setFormError] = useState(false);
   const [answer, setAnswer] = useState("");
   const [selected, setSelected] = useState<Place[]>([]);
@@ -138,6 +160,7 @@ export default function CompassApp({
   >("idle");
   const [feedbackError, setFeedbackError] = useState<ApiError | null>(null);
   const requests = useRef<Record<string, AbortController>>({});
+  const searchPending = useRef(false);
   const geoVersion = useRef(0);
   const resultHeading = useRef<HTMLHeadingElement>(null);
   const planHeading = useRef<HTMLHeadingElement>(null);
@@ -238,6 +261,7 @@ export default function CompassApp({
     requests.current.recommendation?.abort();
     requests.current.feedback?.abort();
     setSearching(false);
+    searchPending.current = false;
     setResult(null);
     setResultError(null);
     setFormError(false);
@@ -270,7 +294,7 @@ export default function CompassApp({
     )
       throw new Error("invalid form");
     const seconds = Number(form.minutes) * 60;
-    if (!Number.isSafeInteger(seconds) || seconds < 1)
+    if (!Number.isSafeInteger(seconds) || seconds < 60 || seconds > 86400)
       throw new Error("invalid budget");
     const request: RecommendationRequest = {
       query: query.trim(),
@@ -291,6 +315,8 @@ export default function CompassApp({
     return request;
   }
   async function recommend(query = form.query) {
+    // The ref also covers repeated Enter presses before React renders busy state.
+    if (searchPending.current) return;
     invalidateSearch();
     let body: RecommendationRequest;
     try {
@@ -299,10 +325,15 @@ export default function CompassApp({
       setFormError(true);
       document
         .getElementById("planner-form")
-        ?.scrollIntoView({ block: "start" });
+        ?.scrollIntoView?.({ block: "start" });
       return;
     }
     const controller = begin("recommendation");
+    searchPending.current = true;
+    setSubmittedScenario({
+      key: scenarioKey({ ...form, query }, locale),
+      query: body.query,
+    });
     setSearching(true);
     try {
       const response = await api.recommend(body, controller.signal);
@@ -314,7 +345,10 @@ export default function CompassApp({
     } catch (error) {
       if (!controller.signal.aborted) setResultError(asApiError(error));
     } finally {
-      if (!controller.signal.aborted) setSearching(false);
+      if (!controller.signal.aborted) {
+        searchPending.current = false;
+        setSearching(false);
+      }
     }
   }
   async function buildItinerary() {
@@ -473,6 +507,42 @@ export default function CompassApp({
       ? point
       : null;
   }, [form.lat, form.lon]);
+  const scenarioDirty =
+    submittedScenario !== null &&
+    submittedScenario.key !== scenarioKey(form, locale);
+  const scenarioState = formError
+    ? "invalid"
+    : searching
+      ? "pending"
+      : scenarioDirty
+        ? "dirty"
+        : resultError
+          ? "error"
+          : result
+            ? result.status
+            : "draft";
+  const scenarioMessage = intentText(
+    locale,
+    formError
+      ? !form.query.trim()
+        ? "scenarioNeedsQuery"
+        : !origin
+          ? "scenarioNeedsOrigin"
+          : "scenarioInvalid"
+      : searching
+        ? "scenarioPending"
+        : scenarioDirty
+          ? "scenarioDirty"
+          : resultError
+            ? "scenarioError"
+            : result?.status === "no_match"
+              ? "scenarioNoMatch"
+              : result?.status === "needs_clarification"
+                ? "scenarioClarify"
+                : result
+                  ? "scenarioApplied"
+                  : "scenarioDraft",
+  );
   const mapPlaces = useMemo(
     () => [
       ...new Map(
@@ -826,6 +896,7 @@ export default function CompassApp({
                 <form
                   id="planner-form"
                   className="planner panel"
+                  noValidate
                   onSubmit={(event) => {
                     event.preventDefault();
                     void recommend();
@@ -845,13 +916,76 @@ export default function CompassApp({
                       maxLength={2000}
                       rows={3}
                       placeholder={t(locale, "queryPlaceholder")}
-                      aria-describedby="query-hint"
+                      aria-describedby="query-hint scenario-keyboard-hint scenario-status"
                       onChange={(e) => updateForm({ query: e.target.value })}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === "Enter" &&
+                          !event.shiftKey &&
+                          !event.nativeEvent.isComposing &&
+                          event.keyCode !== 229
+                        ) {
+                          event.preventDefault();
+                          void recommend();
+                        }
+                      }}
                     />
                   </label>
                   <p id="query-hint" className="field-hint">
                     {t(locale, "queryHint")}
                   </p>
+                  <div className={scenarioStyles.action}>
+                    <button
+                      className="primary"
+                      type="submit"
+                      disabled={searching}
+                    >
+                      {searching ? (
+                        <span className="spinner" aria-hidden="true" />
+                      ) : (
+                        <Search size={18} aria-hidden="true" />
+                      )}
+                      {intentText(
+                        locale,
+                        searching ? "scenarioFinding" : "scenarioFind",
+                      )}
+                    </button>
+                    <p id="scenario-keyboard-hint" className="field-hint">
+                      {intentText(locale, "scenarioKeyboard")}
+                    </p>
+                  </div>
+                  <div
+                    id="scenario-status"
+                    className={scenarioStyles.status}
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    data-state={scenarioState}
+                  >
+                    <p>{scenarioMessage}</p>
+                    {submittedScenario && !scenarioDirty && !formError && (
+                      <p className={scenarioStyles.query}>
+                        «{submittedScenario.query}»
+                        {result &&
+                          ` · ${intentText(locale, "scenarioCount")}: ${result.recommendations.length}`}
+                      </p>
+                    )}
+                    {formError && !origin && form.query.trim() && (
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => {
+                          setPicking(true);
+                          setMapEnabled(true);
+                          document
+                            .getElementById("start-heading")
+                            ?.scrollIntoView?.({ block: "nearest" });
+                        }}
+                      >
+                        {t(locale, "pickMap")}
+                      </button>
+                    )}
+                  </div>
                   <IntentReview
                     query={form.query}
                     locale={locale}
