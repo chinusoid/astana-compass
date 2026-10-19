@@ -794,7 +794,7 @@ for (const locale of locales) {
       ["mixedWalk", "mixedWalkQuery"],
     ] as const) {
       await user.click(
-        screen.getByRole("button", { name: t(locale, preset), exact: true }),
+        screen.getByRole("button", { name: t(locale, preset) }),
       );
       expect(
         screen.getByRole("textbox", { name: t(locale, "query") }),
