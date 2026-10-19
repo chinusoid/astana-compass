@@ -12,6 +12,7 @@ from astana_contracts import ContextProvider, JSON, validate_payload
 from .common import JsonHTTP, ProviderError, parse_instant
 from .routing import ORSWalkingRouter
 from .osrm import OSRMWalkingRouter
+from .tomtom import TomTomWalkingRouter
 from .schedules import enrich_schedule
 from .weather import OpenMeteoWeather
 
@@ -136,7 +137,7 @@ async def create_context(*, config: dict) -> ContextProvider:
     if config.get("mode") != "live" or config.get("timezone") != "Asia/Almaty":
         raise ValueError("Context factory requires live mode and Asia/Almaty")
     routing_provider = os.environ.get("ROUTING_PROVIDER", "openrouteservice")
-    if routing_provider not in {"", "openrouteservice", "osrm_public"}:
+    if routing_provider not in {"", "openrouteservice", "osrm_public", "tomtom"}:
         raise ValueError("Unsupported ROUTING_PROVIDER")
     if os.environ.get("WEATHER_PROVIDER", "open_meteo") not in {"", "open_meteo"}:
         raise ValueError("Unsupported WEATHER_PROVIDER")
@@ -150,12 +151,20 @@ async def create_context(*, config: dict) -> ContextProvider:
         raise ValueError("ASTANA_WALKING_PACE_MPS must be finite and positive")
     approximate = _boolean("ASTANA_ROUTE_ALLOW_APPROXIMATE", True)
     weather_enabled = _boolean("ASTANA_WEATHER_ENABLED", False)
-    http = JsonHTTP(timeout_seconds=timeout, retries=0 if routing_provider == "osrm_public" else retries)
+    http = JsonHTTP(timeout_seconds=timeout, retries=0 if routing_provider in {"osrm_public", "tomtom"} else retries)
     try:
-        router = OSRMWalkingRouter(http, pace_mps=pace, allow_approximate=approximate) if routing_provider == "osrm_public" else ORSWalkingRouter(
-            http, api_key=os.environ.get("ROUTING_API_KEY") or os.environ.get("ORS_API_KEY"),
-            pace_mps=pace, allow_approximate=approximate,
-        )
+        if routing_provider == "tomtom":
+            router = TomTomWalkingRouter(
+                http, api_key=os.environ.get("TOMTOM_API_KEY"), timeout_seconds=timeout,
+                pace_mps=pace, allow_approximate=approximate,
+            )
+        elif routing_provider == "osrm_public":
+            router = OSRMWalkingRouter(http, pace_mps=pace, allow_approximate=approximate)
+        else:
+            router = ORSWalkingRouter(
+                http, api_key=os.environ.get("ROUTING_API_KEY") or os.environ.get("ORS_API_KEY"),
+                pace_mps=pace, allow_approximate=approximate,
+            )
         weather = OpenMeteoWeather(http, enabled=weather_enabled)
         return CityContext(router=router, weather=weather, http=http)
     except BaseException:

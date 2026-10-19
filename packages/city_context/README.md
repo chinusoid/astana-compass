@@ -25,8 +25,9 @@ always recalculated for the requested instant in Asia/Almaty. Missing, unsupport
 and holiday-dependent schedules stay unknown; source conflicts stay conflicting.
 Published hours do not establish that a venue actually operates today.
 
-Routing uses the real ORS `foot-walking` GeoJSON endpoint, checking the complete
-ordered trip, every leg and waypoint. Cycling and driving raise the safe
+Routing supports ORS `foot-walking`, FOSSGIS OSRM `foot`, or TomTom Maps
+`pedestrian` with OSRM fallback, checking the complete ordered trip, every leg
+and waypoint. Cycling and driving raise the safe
 `unsupported_transport` error. Missing credentials or upstream failure produce
 an explicit local great-circle approximation with **null geometry**, or a safe
 error under the strict policy. No fixture mode is selected by this package.
@@ -71,12 +72,13 @@ requested in [team-02-integration](../../docs/requests/team-02-integration.md).
 
 | Variable | Default / meaning |
 |---|---|
-| `ROUTING_PROVIDER` | `openrouteservice`; other providers rejected |
+| `ROUTING_PROVIDER` | `openrouteservice`; also `osrm_public` or `tomtom` |
 | `ROUTING_API_KEY` | Private ORS key; `ORS_API_KEY` is an alias, canonical name wins |
+| `TOMTOM_API_KEY` | Private server key for `ROUTING_PROVIDER=tomtom`; missing key skips directly to OSRM |
 | `ASTANA_ROUTE_ALLOW_APPROXIMATE` | `true`; `false` fails if a full routed trip cannot be verified |
 | `ASTANA_WALKING_PACE_MPS` | Optional positive speed in m/s; default provider duration for routed trips, 1.25 m/s for local estimates |
 | `ASTANA_CONTEXT_TIMEOUT_SECONDS` | `6`; total per-provider deadline including retries, range (0,30] seconds; keep below orchestration deadline |
-| `ASTANA_CONTEXT_RETRIES` | `1`; integer 0–2; transient failures only, never immediate 429 retries |
+| `ASTANA_CONTEXT_RETRIES` | `1`; integer 0–2; forced to zero for `osrm_public` and `tomtom` |
 | `WEATHER_PROVIDER` | `open_meteo`; other providers rejected |
 | `ASTANA_WEATHER_ENABLED` | `false`; opt in only for permitted noncommercial use of the free endpoint |
 
@@ -93,6 +95,33 @@ route-calculation POST; response bodies are size-bounded, redirects disabled.
 Caches are memory-only, bounded and expire explicitly; their source timestamps
 are preserved. Provider quotas apply across processes/accounts: deployment must
 coordinate the provider's actual shared allowances.
+
+## Optional TomTom pedestrian routing
+
+Enable `ROUTING_PROVIDER=tomtom` and set `TOMTOM_API_KEY` privately on the backend.
+No new dependency or public contract is required. This uses the supported
+[TomTom Maps v1 pedestrian profile](https://docs.tomtom.com/routing-api/documentation/tomtom-maps/v1/calculate-route),
+preserving up to three ordered stops and the requested return. Every returned
+travel-mode section must be pedestrian. Incomplete geometry, disconnected legs,
+implausible metrics and stops snapped over 100 m away are rejected. Attribution
+`© TomTom` and a credential-free documentation source accompany routed results.
+
+TomTom gets at most 2.5 seconds (half the configured timeout if smaller); OSRM
+gets the remainder of a shared `min(ASTANA_CONTEXT_TIMEOUT_SECONDS, 6.5)` seconds.
+There are no automatic TomTom retries. Per-process rolling limits are 10/minute
+and 600/day; HTTP 429 honours Retry-After. TomTom results are not reused or stored,
+respecting the documented no-cache response policy. OSRM retains its separate
+bounded memory cache and request pacing. If both fail, the existing explicit
+approximation has null geometry; strict mode raises a safe error instead.
+
+[Kazakhstan is covered](https://docs.tomtom.com/routing-api/documentation/tomtom-maps/v1/product-information/market-coverage);
+this does not verify every footpath, entrance or current closure. As checked on
+2026-10-19, [Orbis v3](https://docs.tomtom.com/routing-api/documentation/tomtom-orbis-maps/v3/calculate-route)
+only documents car/taxi travel modes, so it is not substituted for walking.
+Account allowances and API entitlements must be checked in the TomTom dashboard;
+this adapter does not purchase a plan. Tests use MockTransport only and do not
+claim live key/coverage verification. Exact route coordinates are sent to TomTom
+and, when needed, OSRM after the existing location-consent flow.
 
 ## Optional live walking smoke
 
