@@ -376,7 +376,9 @@ test("geolocation denial preserves manual entry; late callbacks cannot overwrite
       },
     });
   });
-  await page.getByRole("button", { name: "Моё местоположение" }).click();
+  await page
+    .getByRole("button", { name: "Моё местоположение", exact: true })
+    .click();
   await expect(page.getByText(/Местоположение недоступно/)).toBeVisible();
   await fill(page);
   await search(page);
@@ -395,7 +397,9 @@ test("geolocation denial preserves manual entry; late callbacks cannot overwrite
       },
     });
   });
-  await page.getByRole("button", { name: "Моё местоположение" }).click();
+  await page
+    .getByRole("button", { name: "Моё местоположение", exact: true })
+    .click();
   await page.locator('input[name="latitude"]').fill("51.095");
   await page.evaluate(() =>
     (window as unknown as { finishLocation: () => void }).finishLocation(),
