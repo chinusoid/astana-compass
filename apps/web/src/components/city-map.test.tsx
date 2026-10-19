@@ -8,7 +8,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
-import type { RouteEstimate } from "@astana/api-client";
+import type { Place, RouteEstimate } from "@astana/api-client";
 import examples from "../../../../contracts.examples.json";
 import { BUILDING_LAYER } from "@/lib/map-style";
 import { mapText } from "@/lib/map-copy";
@@ -29,6 +29,7 @@ class MockMap {
   zoom = 15.5;
   bearing = -18;
   addControl = vi.fn();
+  addImage = vi.fn();
   setLayoutProperty = vi.fn();
   remove = vi.fn();
   resize = vi.fn();
@@ -102,6 +103,7 @@ class MockMap {
 }
 class MockPopup {
   content: HTMLElement | null = null;
+  remove = vi.fn();
   setDOMContent(content: HTMLElement) {
     this.content = content;
     return this;
@@ -110,6 +112,10 @@ class MockPopup {
 class MockMarker {
   element: HTMLElement;
   popup: MockPopup | null = null;
+  togglePopup = vi.fn();
+  getPopup() {
+    return this.popup;
+  }
   remove = vi.fn(() => this.element.remove());
   constructor(options: { element: HTMLElement }) {
     this.element = options.element;
@@ -216,6 +222,18 @@ it("starts with real vector 3D and switches to genuinely flat footprints", async
   expect(screen.getByText(mapText("ru", "heights"))).toBeVisible();
 });
 it("accepts map clicks only during start selection and does not swap lat/lon", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: "empty",
+        features: [],
+        retrieved_at: "2026-10-19T10:00:00Z",
+        attribution: "© OpenStreetMap contributors",
+      }),
+    });
+  vi.stubGlobal("fetch", fetch);
   const config = props();
   const view = render(<CityMap {...config} />);
   const map = await loadMap();
@@ -229,6 +247,116 @@ it("accepts map clicks only during start selection and does not swap lat/lon", a
   view.rerender(<CityMap {...config} picking={false} />);
   act(() => map.emit("click", { lngLat: { lng: 71.44, lat: 51.13 } }));
   expect(config.onPick).toHaveBeenCalledTimes(1);
+  await waitFor(() =>
+    expect(screen.getByText(mapText("ru", "inspectEmpty"))).toBeVisible(),
+  );
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/v1/map-features",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        location: { lat: 51.13, lon: 71.44 },
+        locale: "ru",
+      }),
+    }),
+  );
+});
+
+it("opens numbered stop details on click and keyboard and retains the popup when activeId updates", async () => {
+  const place = structuredClone(
+    examples.cases.find((entry) => entry.name === "place_valid")!.instance,
+  ) as Place;
+  const config = {
+    ...props(),
+    places: [place],
+    selectedIds: [],
+    routeStopIds: [place.id],
+    picking: false,
+    onDetails: vi.fn(),
+  };
+  const view = render(<CityMap {...config} />);
+  await loadMap();
+  const button = await screen.findByRole("button", {
+    name: `${mapText("ru", "firstStop")}: ${place.name}`,
+  });
+  expect(button.querySelector(".map-marker-symbol")).toHaveTextContent("1");
+  fireEvent.click(button);
+  const marker = fake.markers.find((entry) => entry.element === button)!;
+  expect(marker.togglePopup).toHaveBeenCalledOnce();
+  expect(config.onSelect).toHaveBeenCalledWith(place.id);
+  const popup = marker.popup!.content!;
+  expect(popup.textContent).toContain(mapText("ru", "firstStop"));
+  expect(popup.textContent).toContain(place.name);
+  fireEvent.click(popup.querySelector("button")!);
+  expect(config.onDetails).toHaveBeenCalledWith(place.id);
+  view.rerender(
+    <CityMap {...config} routeStopIds={[place.id]} activeId={place.id} />,
+  );
+  expect(marker.remove).not.toHaveBeenCalled();
+  expect(button).toHaveAttribute("aria-pressed", "true");
+  fireEvent.keyDown(button, { key: "Enter" });
+  expect(marker.togglePopup).toHaveBeenCalledTimes(2);
+});
+
+it("ignores stale object lookups and distinguishes nearby information from an exact building", async () => {
+  let finishFirst: (result: unknown) => void = () => {};
+  const first = new Promise((resolve) => {
+    finishFirst = resolve;
+  });
+  const feature = {
+    id: "osm:way:123",
+    name: "Nearby building",
+    kind: "building",
+    description: null,
+    address: null,
+    location: { lat: 51.13, lon: 71.44 },
+    match: "nearby",
+    distance_meters: 35,
+    attributes: [],
+    source_url: "https://www.openstreetmap.org/way/123",
+    source_label: "OpenStreetMap",
+  };
+  const response = {
+    status: "ok",
+    features: [feature],
+    retrieved_at: "2026-10-19T10:00:00Z",
+    attribution: "© OpenStreetMap contributors",
+  };
+  const fetch = vi
+    .fn()
+    .mockImplementationOnce(() => first)
+    .mockResolvedValue({ ok: true, json: async () => response });
+  vi.stubGlobal("fetch", fetch);
+  render(<CityMap {...props()} picking={false} />);
+  const map = await loadMap();
+  act(() => map.emit("click", { lngLat: { lng: 71.43, lat: 51.12 } }));
+  expect(screen.getByRole("status")).toHaveTextContent(
+    mapText("ru", "inspectLoading"),
+  );
+  act(() => map.emit("click", { lngLat: { lng: 71.44, lat: 51.13 } }));
+  await screen.findByText("Nearby building");
+  expect(
+    screen.getByText(`${mapText("ru", "nearbyMatch")} · 35 м`),
+  ).toBeVisible();
+  expect(screen.getByRole("link", { name: "OpenStreetMap" })).toHaveAttribute(
+    "href",
+    feature.source_url,
+  );
+  expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
+  await act(async () => {
+    finishFirst({
+      ok: true,
+      json: async () => ({
+        ...response,
+        features: [{ ...feature, name: "Old result" }],
+      }),
+    });
+  });
+  expect(screen.queryByText("Old result")).not.toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole("button", { name: mapText("ru", "closePopup") }),
+  );
+  expect(screen.queryByTestId("map-inspection")).not.toBeInTheDocument();
 });
 for (const locale of ["ru", "kk", "en"] as const) {
   it(`has a keyboard-operable centre confirmation and translated controls in ${locale}`, async () => {

@@ -8,6 +8,9 @@ import {
   RotateCcw,
   Crosshair,
   CarFront,
+  Route,
+  Search,
+  X,
 } from "lucide-react";
 import type {
   CommunityEvent,
@@ -17,7 +20,7 @@ import type {
   SharedLocation,
   TrafficResponse,
 } from "@astana/api-client";
-import type { Map as LibreMap, Marker, GeoJSONSource } from "maplibre-gl";
+import type { Map as LibreMap, Marker } from "maplibre-gl";
 import { t, type Locale } from "@/lib/i18n";
 import { mapText } from "@/lib/map-copy";
 import {
@@ -31,6 +34,21 @@ import {
 } from "@/lib/map-style";
 import { startMapMotion, type MotionStatus } from "@/lib/map-motion";
 import { valid } from "@/lib/contracts";
+import {
+  bindMarkerPopup,
+  categorySymbol,
+  fitJourney,
+  installJourney,
+  placePopup,
+  stopTitle,
+  updateJourney,
+} from "@/lib/map-route";
+import {
+  fetchMapFeatures,
+  MapFeatureError,
+  safeSourceUrl,
+  type MapFeaturesResult,
+} from "@/lib/map-feature";
 import {
   fetchTraffic,
   sampleVisibleRoads,
@@ -46,6 +64,7 @@ type Props = {
   origin: Location | null;
   activeId: string | null;
   selectedIds: string[];
+  routeStopIds?: string[];
   route: RouteEstimate | null;
   locale: Locale;
   picking: boolean;
@@ -56,6 +75,7 @@ type Props = {
   onEnable: () => void;
   onPick: (point: Location) => void;
   onSelect: (id: string) => void;
+  onDetails?: (id: string) => void;
 };
 
 type Camera = { center: [number, number]; zoom: number; bearing: number };
@@ -63,9 +83,18 @@ type Camera = { center: [number, number]; zoom: number; bearing: number };
 export default function CityMap(props: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LibreMap | null>(null);
+  const mapLibrary = useRef<typeof import("maplibre-gl") | null>(null);
   const current = useRef(props);
   const markers = useRef<Marker[]>([]);
+  const inspectionMarker = useRef<Marker | null>(null);
   const camera = useRef<Camera | null>(null);
+  const featureRequest = useRef<AbortController | null>(null);
+  const [inspection, setInspection] = useState<{
+    point: Location;
+    state: "loading" | "ready" | "error" | "busy";
+    result?: MapFeaturesResult;
+  } | null>(null);
+  const inspectionPoint = inspection?.point;
   const mode = useRef(true);
   const stopMotion = useRef<(() => void) | null>(null);
   const stopTraffic = useRef<(() => void) | null>(null);
@@ -94,6 +123,8 @@ export default function CityMap(props: Props) {
     () => validatedRouteGeometry(props.route),
     [props.route],
   );
+  const stopIdKey = JSON.stringify(props.routeStopIds ?? props.selectedIds);
+  const stopIds: string[] = useMemo(() => JSON.parse(stopIdKey), [stopIdKey]);
   const ready = status === "ready";
   const has3D = props.provider === "openfreemap" && buildings;
   const is3D = has3D && threeD;
@@ -117,6 +148,7 @@ export default function CityMap(props: Props) {
     import("maplibre-gl")
       .then((lib) => {
         if (disposed) return;
+        mapLibrary.current = lib;
         try {
           setStatus("loading");
           setTransient(false);
@@ -180,21 +212,7 @@ export default function CityMap(props: Props) {
               setBuildings(
                 props.provider === "openfreemap" && installBuildings(map),
               );
-              map.addSource("journey", {
-                type: "geojson",
-                data: { type: "FeatureCollection", features: [] },
-              });
-              map.addLayer({
-                id: "journey-line",
-                type: "line",
-                source: "journey",
-                paint: {
-                  "line-color": "#167a63",
-                  "line-width": 5,
-                  "line-opacity": 0.95,
-                },
-                layout: { "line-cap": "round", "line-join": "round" },
-              });
+              installJourney(map);
               setStatus("ready");
             } catch {
               setStatus("failed");
@@ -224,12 +242,19 @@ export default function CityMap(props: Props) {
             };
           });
           map.on("click", (event) => {
-            if (!current.current.picking) return;
+            if (
+              (event.originalEvent?.target as Element | null)?.closest?.(
+                ".map-marker, .origin-marker, .maplibregl-popup",
+              )
+            )
+              return;
             const point = pickedLocation(event.lngLat.lng, event.lngLat.lat);
-            if (point) {
+            if (!point) return;
+            if (current.current.picking) {
+              closeInspection();
               setPicked(true);
               current.current.onPick(point);
-            }
+            } else void inspectPoint(point);
           });
           observer = new ResizeObserver(() => map.resize());
           observer.observe(host);
@@ -248,10 +273,13 @@ export default function CityMap(props: Props) {
       stopMotion.current?.();
       stopMotion.current = null;
       trafficRequest.current?.abort();
+      featureRequest.current?.abort();
       stopTraffic.current?.();
       stopTraffic.current = null;
       markers.current.forEach((marker) => marker.remove());
       markers.current = [];
+      inspectionMarker.current?.remove();
+      inspectionMarker.current = null;
       localMap?.remove();
       if (mapRef.current === localMap) mapRef.current = null;
     };
@@ -270,38 +298,74 @@ export default function CityMap(props: Props) {
         const next: Marker[] = [];
         props.places.forEach((place) => {
           const button = document.createElement("button");
-          const index = props.selectedIds.indexOf(place.id);
-          button.className = `map-marker ${place.id === props.activeId ? "active" : ""} ${index >= 0 ? "selected" : ""}`;
+          const index = stopIds.indexOf(place.id);
+          button.className = `map-marker ${place.id === current.current.activeId ? "active" : ""} ${index >= 0 ? "selected" : ""}`;
           button.type = "button";
-          button.textContent = index >= 0 ? String(index + 1) : "•";
+          button.dataset.placeId = place.id;
+          const symbol = document.createElement("span");
+          symbol.className = "map-marker-symbol";
+          symbol.setAttribute("aria-hidden", "true");
+          symbol.textContent =
+            index >= 0 ? String(index + 1) : categorySymbol(place.categories);
+          button.append(symbol);
+          button.title = `${index >= 0 ? `${stopTitle(props.locale, index)} · ` : ""}${place.name}`;
+          if (index >= 0) {
+            const caption = document.createElement("span");
+            caption.className = "map-marker-caption";
+            caption.textContent = `${place.name}${geometry && !props.route?.includes_return && index === stopIds.length - 1 ? ` · ${mapText(props.locale, "endRoute")}` : ""}`;
+            button.append(caption);
+          }
           button.setAttribute(
             "aria-label",
-            `${mapText(props.locale, "place")}: ${place.name}`,
+            `${index >= 0 ? stopTitle(props.locale, index) : mapText(props.locale, "place")}: ${place.name}`,
           );
           button.setAttribute(
             "aria-pressed",
-            String(place.id === props.activeId),
+            String(place.id === current.current.activeId),
           );
-          button.onclick = (event) => {
-            event.stopPropagation();
+          const marker = new lib.Marker({ element: button })
+            .setLngLat([place.location.lon, place.location.lat])
+            .setPopup(
+              new lib.Popup({
+                offset: 26,
+                maxWidth: "330px",
+                focusAfterOpen: false,
+              }).setDOMContent(
+                placePopup(place, props.locale, index, () =>
+                  (current.current.onDetails ?? current.current.onSelect)(
+                    place.id,
+                  ),
+                ),
+              ),
+            )
+            .addTo(map);
+          bindMarkerPopup(button, marker, () => {
+            closeInspection();
+            for (const other of markers.current)
+              if (other !== marker) other.getPopup()?.remove();
             current.current.onSelect(place.id);
-          };
-          next.push(
-            new lib.Marker({ element: button })
-              .setLngLat([place.location.lon, place.location.lat])
-              .addTo(map),
-          );
+          });
+          next.push(marker);
         });
         if (props.origin) {
-          const element = document.createElement("div");
+          const element = document.createElement("button");
+          element.type = "button";
           element.className = "origin-marker";
-          element.setAttribute("role", "img");
-          element.setAttribute("aria-label", mapText(props.locale, "start"));
-          next.push(
-            new lib.Marker({ element })
-              .setLngLat([props.origin.lon, props.origin.lat])
-              .addTo(map),
+          element.textContent = "S";
+          const title = mapText(
+            props.locale,
+            props.route?.includes_return ? "returnStart" : "start",
           );
+          element.setAttribute("aria-label", title);
+          element.title = title;
+          const content = document.createElement("p");
+          content.textContent = title;
+          const marker = new lib.Marker({ element })
+            .setLngLat([props.origin.lon, props.origin.lat])
+            .setPopup(new lib.Popup({ offset: 24 }).setDOMContent(content))
+            .addTo(map);
+          bindMarkerPopup(element, marker);
+          next.push(marker);
         }
         for (const event of props.communityEvents ?? []) {
           const remaining = Date.parse(event.ends_at) - Date.now();
@@ -314,7 +378,6 @@ export default function CityMap(props: Props) {
             "aria-label",
             `${mapText(props.locale, "community")}: ${event.title}`,
           );
-          button.onclick = (click) => click.stopPropagation();
           const content = document.createElement("div");
           content.className = "map-community-popup";
           for (const [tag, value] of [
@@ -330,6 +393,7 @@ export default function CityMap(props: Props) {
             .setLngLat([event.location.lon, event.location.lat])
             .setPopup(new lib.Popup({ offset: 24 }).setDOMContent(content))
             .addTo(map);
+          bindMarkerPopup(button, marker);
           next.push(marker);
           if (remaining < 2_147_483_647)
             expiryTimers.push(setTimeout(() => marker.remove(), remaining));
@@ -361,12 +425,7 @@ export default function CityMap(props: Props) {
           );
         }
         markers.current = next;
-        (map.getSource("journey") as GeoJSONSource | undefined)?.setData({
-          type: "FeatureCollection",
-          features: geometry
-            ? [{ type: "Feature", properties: {}, geometry }]
-            : [],
-        });
+        updateJourney(map, geometry);
       })
       .catch(() => {
         if (!disposed) setTransient(true);
@@ -380,14 +439,43 @@ export default function CityMap(props: Props) {
     ready,
     props.places,
     props.origin,
-    props.activeId,
-    props.selectedIds,
+    stopIds,
+    props.route?.includes_return,
     geometry,
     props.locale,
     props.picking,
     props.communityEvents,
     props.sharedLocations,
   ]);
+
+  useEffect(() => {
+    const buttons = container.current?.querySelectorAll<HTMLButtonElement>(
+      "button.map-marker[aria-pressed]",
+    );
+    for (const button of buttons ?? []) {
+      const active = button.dataset.placeId === props.activeId;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
+  }, [ready, props.activeId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const lib = mapLibrary.current;
+    if (!ready || !map || !lib || !inspectionPoint || props.picking) return;
+    inspectionMarker.current?.remove();
+    const element = document.createElement("div");
+    element.className = "map-inspection-pin";
+    element.setAttribute("role", "img");
+    element.setAttribute("aria-label", mapText(props.locale, "inspect"));
+    inspectionMarker.current = new lib.Marker({ element })
+      .setLngLat([inspectionPoint.lon, inspectionPoint.lat])
+      .addTo(map);
+    return () => {
+      inspectionMarker.current?.remove();
+      inspectionMarker.current = null;
+    };
+  }, [ready, inspectionPoint, props.picking, props.locale]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -455,7 +543,7 @@ export default function CityMap(props: Props) {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!ready || !map) return;
+    if (!ready || !map || geometry) return;
     const point =
       props.places.find((place) => place.id === props.activeId)?.location ??
       props.origin;
@@ -465,28 +553,44 @@ export default function CityMap(props: Props) {
         zoom: Math.max(map.getZoom(), ASTANA_VIEW.zoom),
         duration: 0,
       });
-  }, [ready, props.activeId, props.origin, props.places]);
+  }, [ready, props.activeId, props.origin, props.places, geometry]);
 
   useEffect(() => {
     if (!ready || !mapRef.current || !geometry) return;
-    let west = Infinity,
-      south = Infinity,
-      east = -Infinity,
-      north = -Infinity;
-    for (const [lon, lat] of geometry.coordinates) {
-      west = Math.min(west, lon);
-      east = Math.max(east, lon);
-      south = Math.min(south, lat);
-      north = Math.max(north, lat);
-    }
-    mapRef.current.fitBounds(
-      [
-        [west, south],
-        [east, north],
-      ],
-      { padding: 65, maxZoom: 16, duration: 0 },
-    );
+    fitJourney(mapRef.current, geometry);
   }, [ready, geometry]);
+
+  function closeInspection() {
+    featureRequest.current?.abort();
+    featureRequest.current = null;
+    setInspection(null);
+  }
+  async function inspectPoint(point: Location) {
+    featureRequest.current?.abort();
+    const controller = new AbortController();
+    featureRequest.current = controller;
+    setInspection({ point, state: "loading" });
+    try {
+      const result = await fetchMapFeatures(
+        point,
+        current.current.locale,
+        controller.signal,
+      );
+      if (!controller.signal.aborted && featureRequest.current === controller)
+        setInspection({ point, state: "ready", result });
+    } catch (error) {
+      if (!controller.signal.aborted && featureRequest.current === controller)
+        setInspection({
+          point,
+          state:
+            error instanceof MapFeatureError && error.code === "busy"
+              ? "busy"
+              : "error",
+        });
+    } finally {
+      if (featureRequest.current === controller) featureRequest.current = null;
+    }
+  }
 
   function setDimension(value: boolean) {
     mode.current = value;
@@ -626,6 +730,36 @@ export default function CityMap(props: Props) {
             >
               <LocateFixed size={20} aria-hidden="true" />
             </button>
+            {geometry && (
+              <button
+                type="button"
+                className="map-tool"
+                data-testid="map-route-overview"
+                disabled={!ready}
+                onClick={() => {
+                  if (mapRef.current) fitJourney(mapRef.current, geometry);
+                }}
+              >
+                <Route size={18} aria-hidden="true" />
+                {text("overview")}
+              </button>
+            )}
+            {!props.picking && (
+              <button
+                type="button"
+                className="map-tool"
+                disabled={!ready}
+                onClick={() => {
+                  const center = mapRef.current?.getCenter();
+                  const point =
+                    center && pickedLocation(center.lng, center.lat);
+                  if (point) void inspectPoint(point);
+                }}
+              >
+                <Search size={18} aria-hidden="true" />
+                {text("inspectCentre")}
+              </button>
+            )}
             {props.provider === "openfreemap" && (
               <button
                 type="button"
@@ -750,6 +884,112 @@ export default function CityMap(props: Props) {
             </div>
           </>
         )}
+        {props.enabled && ready && !props.picking && inspection && (
+          <aside
+            className="map-inspection"
+            aria-labelledby="map-inspection-heading"
+            data-testid="map-inspection"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") closeInspection();
+            }}
+          >
+            <div className="map-inspection-heading">
+              <h3 id="map-inspection-heading">{text("inspect")}</h3>
+              <button
+                type="button"
+                className="map-tool"
+                aria-label={text("closePopup")}
+                onClick={closeInspection}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="map-inspection-coordinate">
+              {inspection.point.lat.toFixed(5)},{" "}
+              {inspection.point.lon.toFixed(5)}
+            </p>
+            {inspection.state === "loading" && (
+              <p role="status">{text("inspectLoading")}</p>
+            )}
+            {(inspection.state === "error" || inspection.state === "busy") && (
+              <div role="status">
+                <p>
+                  {text(
+                    inspection.state === "busy"
+                      ? "inspectSlow"
+                      : "inspectError",
+                  )}
+                </p>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void inspectPoint(inspection.point)}
+                >
+                  {text("retry")}
+                </button>
+              </div>
+            )}
+            {inspection.result?.status === "empty" && (
+              <p role="status">{text("inspectEmpty")}</p>
+            )}
+            {!!inspection.result?.features.length && (
+              <>
+                {inspection.result.features.map((feature) => (
+                  <article key={feature.id}>
+                    <p className="map-feature-match">
+                      {text(
+                        feature.match === "contains"
+                          ? "contains"
+                          : "nearbyMatch",
+                      )}
+                      {feature.match === "nearby"
+                        ? ` · ${Math.round(feature.distance_meters)} ${text("meters")}`
+                        : ""}
+                    </p>
+                    <h4>{feature.name}</h4>
+                    <p>{feature.kind}</p>
+                    <p>{feature.address ?? text("addressUnknown")}</p>
+                    <p>
+                      {feature.description ?? text("inspectDescriptionUnknown")}
+                    </p>
+                    <dl>
+                      {feature.attributes.map((attribute, index) => (
+                        <div key={`${attribute.label}-${index}`}>
+                          <dt>{attribute.label}</dt>
+                          <dd>{attribute.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    {safeSourceUrl(feature.source_url) && (
+                      <a
+                        href={safeSourceUrl(feature.source_url)!}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {feature.source_label || text("inspectSource")}
+                      </a>
+                    )}
+                  </article>
+                ))}
+                <small>{text("sourceClaim")}</small>
+              </>
+            )}
+            {inspection.result && (
+              <footer>
+                <p>{inspection.result.attribution}</p>
+                <p>
+                  {text("retrieved")}:{" "}
+                  <time dateTime={inspection.result.retrieved_at}>
+                    {new Intl.DateTimeFormat(props.locale, {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    }).format(new Date(inspection.result.retrieved_at))}
+                  </time>
+                </p>
+              </footer>
+            )}
+          </aside>
+        )}
         {(!props.enabled || !ready || !props.picking) && (
           <span id="map-keyboard-instructions" className="sr-only">
             {text("keyboard")}
@@ -777,9 +1017,41 @@ export default function CityMap(props: Props) {
           </span>
         )}
         <span>
-          <i className="legend-dot" />
-          {picked && !props.picking ? text("selected") : text("start")}
+          <b className="map-legend-origin" aria-hidden="true">
+            S
+          </b>
+          {props.route?.includes_return
+            ? text("returnStart")
+            : picked && !props.picking
+              ? text("selected")
+              : text("start")}
         </span>
+        <span>
+          <b aria-hidden="true">☕ ♧ ▥</b>
+          {text("placesLegend")}
+        </span>
+        {!!stopIds.length && (
+          <span>
+            <b className="map-legend-stop" aria-hidden="true">
+              1
+            </b>
+            {text("stopsLegend")}
+          </span>
+        )}
+        {geometry && (
+          <span>
+            <b className="map-legend-route" aria-hidden="true">
+              ➜
+            </b>
+            {text("routeLegend")}
+          </span>
+        )}
+        {!props.picking && (
+          <span className="map-inspect-hint">{text("inspectHint")}</span>
+        )}
+        {!props.picking && props.enabled && (
+          <span className="map-inspect-privacy">{text("inspectPrivacy")}</span>
+        )}
         {props.route && (
           <span>{t(props.locale, geometry ? "routed" : "approximate")}</span>
         )}
