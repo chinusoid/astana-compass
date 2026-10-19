@@ -348,6 +348,7 @@ it("starts with real vector 3D and switches to genuinely flat footprints", async
     "visibility",
     "visible",
   );
+  fireEvent.click(screen.getByText(mapText("ru", "privacyLabel")));
   expect(screen.getByText(mapText("ru", "heights"))).toBeVisible();
 });
 it("accepts map clicks only during start selection and does not swap lat/lon", async () => {
@@ -739,15 +740,51 @@ it("starts the labelled motion demo by default and lets the user turn it off", a
   await loadMap();
   const toggle = screen.getByTestId("map-motion-toggle");
   expect(toggle).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByTestId("map-motion-summary")).toBeVisible();
+  expect(
+    screen.getByText(mapText("ru", "simulation"), { exact: false }),
+  ).not.toBeVisible();
+  fireEvent.click(screen.getByText(mapText("ru", "privacyLabel")));
   expect(
     screen.getByText(mapText("ru", "simulation"), { exact: false }),
   ).toBeVisible();
   fireEvent.click(toggle);
   expect(toggle).toHaveAttribute("aria-pressed", "false");
+  expect(screen.queryByTestId("map-motion-summary")).not.toBeInTheDocument();
   expect(
     screen.queryByText(mapText("ru", "simulation"), { exact: false }),
   ).not.toBeInTheDocument();
 });
+it.each(["ru", "kk", "en"] as const)(
+  "keeps attribution visible and map explanations expandable in %s",
+  async (locale) => {
+    render(<CityMap {...props()} locale={locale} picking={false} />);
+    await loadMap();
+    const about = screen.getByTestId("map-about");
+    expect(about).not.toHaveAttribute("open");
+    expect(screen.getByTestId("map-attribution")).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "© OpenStreetMap" }),
+    ).toHaveAttribute("href", "https://www.openstreetmap.org/copyright");
+    expect(screen.getByRole("link", { name: "OpenFreeMap" })).toBeVisible();
+    expect(screen.getByText(mapText(locale, "heights"))).not.toBeVisible();
+    expect(
+      screen.getByText(mapText(locale, "inspectPrivacy")),
+    ).not.toBeVisible();
+    fireEvent.click(screen.getByText(mapText(locale, "privacyLabel")));
+    expect(about).toHaveAttribute("open");
+    expect(screen.getByText(mapText(locale, "heights"))).toBeVisible();
+    expect(screen.getByText(mapText(locale, "inspectPrivacy"))).toBeVisible();
+    expect(screen.getByText(mapText(locale, "privacy"))).toBeVisible();
+    expect(screen.getByText(mapText(locale, "followHint"))).toBeVisible();
+    expect(
+      screen.getByText(mapText(locale, "simulation"), { exact: false }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByText(mapText(locale, "privacyLabel")));
+    expect(screen.getByText(mapText(locale, "heights"))).not.toBeVisible();
+    expect(screen.getByTestId("map-attribution")).toBeVisible();
+  },
+);
 it("keeps community events distinct, unverified and safe from HTML injection", async () => {
   render(
     <CityMap

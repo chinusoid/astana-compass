@@ -1173,9 +1173,137 @@ export default function CityMap(props: Props) {
           </span>
         )}
       </div>
-      <div className="map-footer">
+      <div className="map-footer map-footer-compact">
+        <div className="map-footer-bar">
+          {props.provider !== "none" && (
+            <span className="map-attribution" data-testid="map-attribution">
+              <a
+                href="https://www.openstreetmap.org/copyright"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                © OpenStreetMap
+              </a>
+              {props.provider === "openfreemap" && (
+                <>
+                  {" "}
+                  ·{" "}
+                  <a
+                    href="https://openfreemap.org/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    OpenFreeMap
+                  </a>
+                </>
+              )}
+              {traffic && (
+                <span className="traffic-attribution">
+                  {" "}
+                  · {traffic.attribution}
+                </span>
+              )}
+            </span>
+          )}
+          {motionEnabled && props.provider === "openfreemap" && (
+            <span
+              className="map-simulation-badge"
+              data-testid="map-motion-summary"
+              title={text("simulation")}
+            >
+              {text("motion")}
+            </span>
+          )}
+          <details className="map-about" data-testid="map-about">
+            <summary>{text("privacyLabel")}</summary>
+            <div className="map-about-content">
+              <span>
+                <b className="map-legend-origin" aria-hidden="true">
+                  S
+                </b>{" "}
+                {props.route?.includes_return
+                  ? text("returnStart")
+                  : picked && !props.picking
+                    ? text("selected")
+                    : text("start")}
+              </span>
+              <span>
+                <b aria-hidden="true">☕ ♧ ▥</b> {text("placesLegend")}
+              </span>
+              {!!stopIds.length && (
+                <span>
+                  <b className="map-legend-stop" aria-hidden="true">
+                    1
+                  </b>{" "}
+                  {text("stopsLegend")}
+                </span>
+              )}
+              {geometry && (
+                <span>
+                  <b
+                    className="map-legend-route"
+                    aria-hidden="true"
+                    style={{ color: journeyColor(0) }}
+                  >
+                    ➜
+                  </b>{" "}
+                  {text("routeLegend")}
+                </span>
+              )}
+              {!props.picking && (
+                <span className="map-inspect-hint">{text("inspectHint")}</span>
+              )}
+              {!props.picking && props.enabled && (
+                <span className="map-inspect-privacy">
+                  {text("inspectPrivacy")}
+                </span>
+              )}
+              {props.route && (
+                <span>
+                  {t(props.locale, geometry ? "routed" : "approximate")}
+                </span>
+              )}
+              {props.provider === "openfreemap" && (
+                <span className="map-height-note">{text("heights")}</span>
+              )}
+              {motionEnabled && props.provider === "openfreemap" && (
+                <span className="map-motion-status" role="status">
+                  <span className="motion-car">{text("cars")}</span> ·{" "}
+                  <span className="motion-walker">{text("walkers")}</span> ·{" "}
+                  {text("simulation")}{" "}
+                  {motionStatus !== "running" &&
+                    text(
+                      motionStatus === "paused"
+                        ? "motionPaused"
+                        : "motionEmpty",
+                    )}
+                </span>
+              )}
+              {traffic && (
+                <div className="map-traffic-details">
+                  <p>{traffic.attribution}</p>
+                  <p>{trafficText(props.locale, "illustration")}</p>
+                  <p>{trafficText(props.locale, "colors")}</p>
+                </div>
+              )}
+              {props.provider !== "none" && (
+                <>
+                  <p>{text("privacy")}</p>
+                  <p>{text("followHint")}</p>
+                  <a
+                    href="https://www.openstreetmap.org/fixthemap"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {text("issue")}
+                  </a>
+                </>
+              )}
+            </div>
+          </details>
+        </div>
         {followState !== "idle" && (
-          <span role="status" aria-live="polite">
+          <span className="map-footer-notice" role="status" aria-live="polite">
             {text(
               followState === "following"
                 ? "following"
@@ -1189,94 +1317,15 @@ export default function CityMap(props: Props) {
         )}
         {trafficNotice && (
           <span
-            className="map-traffic-notice"
+            className="map-footer-notice map-traffic-notice"
             role="status"
             data-testid="map-traffic-notice"
           >
             {trafficText(props.locale, trafficNotice)}
-            {traffic && (
-              <>
-                <span className="traffic-attribution">
-                  {" "}
-                  · {traffic.attribution}
-                </span>
-                <small>{trafficText(props.locale, "illustration")}</small>
-                <small>{trafficText(props.locale, "colors")}</small>
-              </>
-            )}
-          </span>
-        )}
-        <span>
-          <b className="map-legend-origin" aria-hidden="true">
-            S
-          </b>
-          {props.route?.includes_return
-            ? text("returnStart")
-            : picked && !props.picking
-              ? text("selected")
-              : text("start")}
-        </span>
-        <span>
-          <b aria-hidden="true">☕ ♧ ▥</b>
-          {text("placesLegend")}
-        </span>
-        {!!stopIds.length && (
-          <span>
-            <b className="map-legend-stop" aria-hidden="true">
-              1
-            </b>
-            {text("stopsLegend")}
-          </span>
-        )}
-        {geometry && (
-          <span>
-            <b
-              className="map-legend-route"
-              aria-hidden="true"
-              style={{ color: journeyColor(0) }}
-            >
-              ➜
-            </b>
-            {text("routeLegend")}
-          </span>
-        )}
-        {!props.picking && (
-          <span className="map-inspect-hint">{text("inspectHint")}</span>
-        )}
-        {!props.picking && props.enabled && (
-          <span className="map-inspect-privacy">{text("inspectPrivacy")}</span>
-        )}
-        {props.route && (
-          <span>{t(props.locale, geometry ? "routed" : "approximate")}</span>
-        )}
-        {props.provider === "openfreemap" && (
-          <span className="map-height-note">{text("heights")}</span>
-        )}
-        {motionEnabled && props.provider === "openfreemap" && (
-          <span className="map-motion-status" role="status">
-            <span className="motion-car">{text("cars")}</span> ·{" "}
-            <span className="motion-walker">{text("walkers")}</span> ·{" "}
-            {text("simulation")}{" "}
-            {motionStatus !== "running" &&
-              text(motionStatus === "paused" ? "motionPaused" : "motionEmpty")}
           </span>
         )}
         {props.enabled && props.provider === "none" && (
-          <span>{text("offline")}</span>
-        )}
-        {props.provider !== "none" && (
-          <details className="map-privacy">
-            <summary>{text("privacyLabel")}</summary>
-            <p>{text("privacy")}</p>
-            <p>{text("followHint")}</p>
-            <a
-              href="https://www.openstreetmap.org/fixthemap"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {text("issue")}
-            </a>
-          </details>
+          <span className="map-footer-notice">{text("offline")}</span>
         )}
       </div>
     </section>
