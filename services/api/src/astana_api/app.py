@@ -180,13 +180,15 @@ def create_app(settings=None, services=None):
     @asynccontextmanager
     async def lifespan(app):
         async with AsyncExitStack() as stack:
+            progress = StartupProgress()
+            progress.enter("traffic")
             app.state.traffic = TrafficService(os.getenv("TOMTOM_API_KEY", ""))
             stack.push_async_callback(app.state.traffic.aclose)
+            progress.enter("map")
             app.state.map_features = MapFeatureService(enabled=settings.mode == "live" and os.getenv("ASTANA_MAP_LOOKUP_ENABLED", "false").lower() == "true")
             stack.push_async_callback(app.state.map_features.aclose)
             app.state.services = services
             if app.state.services is None:
-                progress = StartupProgress()
                 try:
                     async with asyncio.timeout(settings.request_timeout_seconds):
                         app.state.services = await build_services(settings, stack, progress=progress)
@@ -200,6 +202,7 @@ def create_app(settings=None, services=None):
                     app.state.services = None
             app.state.gate = asyncio.Semaphore(settings.max_concurrent_requests)
             app.state.feedback = deque(maxlen=settings.feedback_capacity)
+            progress.enter("ready" if app.state.services is not None else "unavailable")
             yield
 
     app = FastAPI(title="Astana Compass API", version="0.1.0", lifespan=lifespan,

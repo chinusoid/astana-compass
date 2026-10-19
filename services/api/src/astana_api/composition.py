@@ -1,5 +1,7 @@
 """Only this module loads team implementations; missing live adapters fail closed."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import logging
+import time
 from importlib import import_module
 from inspect import Parameter, isasyncgenfunction, isawaitable, iscoroutinefunction, signature
 from contextlib import AsyncExitStack
@@ -20,6 +22,15 @@ class Services:
 class StartupProgress:
     # Only fixed labels are assigned below; never include factory paths or env.
     stage: str = "services"
+    started: float = field(default_factory=time.monotonic)
+    cpu_started: float = field(default_factory=time.process_time)
+
+    def enter(self, stage):
+        self.stage = stage
+        logging.getLogger("uvicorn.error").info(
+            "Service startup: stage=%s elapsed=%.2fs cpu=%.2fs",
+            stage, time.monotonic() - self.started, time.process_time() - self.cpu_started,
+        )
 
 
 def resolve(path):
@@ -92,13 +103,13 @@ async def build_services(settings, stack, *, progress=None):
     async with AsyncExitStack() as owned:
         # Config contains no secrets; each server-side adapter reads its documented env.
         config = {"timezone": "Asia/Almaty", "mode": settings.mode}
-        progress.stage = "repository"
+        progress.enter("repository")
         if settings.mode == "fixture":
             repository = FixtureRepository()
         else:
             repository = await own(owned, resolve(settings.repository_factory)(config=config))
         validate_port(repository, PlaceRepository)
-        progress.stage = "retriever"
+        progress.enter("retriever")
         if settings.mode == "fixture":
             retriever = FixtureRetriever(repository)
         else:
@@ -106,7 +117,7 @@ async def build_services(settings, stack, *, progress=None):
                 owned, resolve(settings.retriever_factory)(repository=repository, config=config)
             )
         validate_port(retriever, Retriever)
-        progress.stage = "context"
+        progress.enter("context")
         if settings.mode == "fixture":
             context = FixtureContext()
         else:
@@ -115,7 +126,7 @@ async def build_services(settings, stack, *, progress=None):
         generator = None
         llm_budget = None
         if settings.llm_provider != "none":
-            progress.stage = "generator"
+            progress.enter("generator")
             from astana_ai_providers import create_generator
             from astana_ai_providers.budgets import RequestBudget
             # One allowance covers all intent and explanation calls in this API
@@ -128,10 +139,10 @@ async def build_services(settings, stack, *, progress=None):
                 )
             )
             validate_port(generator, ExplanationGenerator)
-        progress.stage = "recommender"
+        progress.enter("recommender")
         recommender = DefaultRecommendationService(repository, retriever, context, generator=generator)
         validate_port(recommender, RecommendationService)
-        progress.stage = "intent"
+        progress.enter("intent")
         from astana_ai_providers.intents import create_intent_analyzer
         intent = await own(owned, create_intent_analyzer(
             provider=settings.llm_provider if settings.llm_provider != "none" else "rules",
