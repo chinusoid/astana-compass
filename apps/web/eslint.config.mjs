@@ -6,6 +6,9 @@ export default defineConfig([
   ...nextTs,
   globalIgnores([
     ".next/**",
+    ".open-next/**",
+    ".wrangler/**",
+    "src/lib/generated/validators.cjs",
     "next-env.d.ts",
     "public/maplibre/**",
     "test-results/**",

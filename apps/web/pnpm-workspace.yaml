@@ -1,4 +1,6 @@
 allowBuilds:
+  esbuild: true
   unrs-resolver: false
+  workerd: true
 minimumReleaseAgeExclude:
   - maplibre-gl@6.15.0

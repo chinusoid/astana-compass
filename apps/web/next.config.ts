@@ -3,6 +3,9 @@ import path from "node:path";
 
 const config: NextConfig = {
   poweredByHeader: false,
+  // OpenNext resolves this independent pnpm project as its package root.
+  // Shared contracts are compiled into the app; no runtime files live outside it.
+  outputFileTracingRoot: path.resolve(import.meta.dirname),
   turbopack: { root: path.resolve(import.meta.dirname, "../..") },
   async headers() {
     return [

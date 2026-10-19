@@ -19,6 +19,10 @@ __pycache__/
 htmlcov/
 node_modules/
 .next/
+.open-next/
+.wrangler/
+.dev.vars
+.dev.vars.*
 dist/
 coverage/
 playwright-report/
