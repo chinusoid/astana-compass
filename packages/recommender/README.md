@@ -16,8 +16,9 @@ Importing the package creates no clients, makes no requests and reads no secrets
   true is not the number 1. Unknown, absent and conflicting required facts exclude
   a place. Unmet preferences remain visible and produce a partial response.
 - Requires valid route mode, return flag and complete travel plus visit time.
-  Alternatives are checked individually. Selected itinerary stops must all fit
-  together and preserve the requested ID order.
+  The selected time is a preference: longer alternatives and complete selected
+  itineraries remain visible with a localized duration/overrun warning and a
+  partial status. Selected stops preserve their requested ID order.
 - Uses an explicit nearby-catalog fallback if retrieval fails. Context failure
   invalidates request-time facts; static facts may still support a partial result.
   Route failure excludes a candidate rather than fabricating a path.
@@ -53,8 +54,10 @@ Keyword-only settings: candidate_limit=24, radius_meters=10000,
 timeout_seconds=8, default_visit_seconds=1200, route_concurrency=4, clock=None.
 The injected clock must return a timezone-aware datetime.
 
-Each external call has its own timeout; route calls run in bounded batches and
-stop once enough valid recommendations are found. The package does not promise
+Each external call has its own timeout; route calls run in bounded batches no
+larger than the number of remaining result slots and stop once enough valid
+recommendations are found. Explanations are generated only for returned places.
+The package does not promise
 an overall HTTP latency SLA. The API layer should impose its own total deadline.
 Cancellation propagates normally.
 

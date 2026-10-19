@@ -2,7 +2,7 @@
 
 TEXT = {
     "ru": {
-        "no_match": "Не удалось подтвердить вариант, который выполняет обязательные условия и укладывается в доступное время.",
+        "no_match": "Не удалось подтвердить вариант по запросу с выполнением всех обязательных условий.",
         "no_model": "Языковая модель не настроена: объяснения составлены по проверяемым шаблонам; семантические возможности зависят от режима поиска.",
         "generation_failed": "Генератор объяснений недоступен или вернул неподтверждённые ссылки. Использовано объяснение по данным.",
         "retrieval_failed": "Поиск недоступен. Использован ограниченный поиск ближайших мест в каталоге; соответствие свободному тексту не гарантируется.",
@@ -15,7 +15,7 @@ TEXT = {
         "visit": "Время посещения — ориентировочная оценка, а не подтверждённая длительность.",
         "selected_missing": "Не удалось подтвердить все выбранные места. Остановки не удалялись и не заменялись.",
         "selected_constraint": "Для выбранных мест не подтверждены все обязательные условия. Измените выбор или условия явно.",
-        "selected_budget": "Все выбранные остановки вместе с дорогой и возвратом не укладываются в доступное время. Выбор не изменён.",
+        "time_exceeded": "Полная расчётная длительность: {minutes} мин; на {over_minutes} мин больше выбранного времени. Все остановки и дорога сохранены.",
         "unsupported": "Этот способ передвижения ещё не поддерживается.",
         "found": "Место найдено в каталоге.",
         "time": "Расчётное время дороги и посещения: {minutes} мин.",
@@ -30,7 +30,7 @@ TEXT = {
         "take_break": "Если обстановка позволяет, сделайте небольшую паузу.",
     },
     "kk": {
-        "no_match": "Міндетті талаптарға сай және берілген уақытқа сыятын нұсқа расталмады.",
+        "no_match": "Сұрауға сәйкес барлық міндетті талаптарды орындайтын нұсқа расталмады.",
         "no_model": "Тілдік модель бапталмаған: түсіндірмелер тексерілетін үлгілермен жасалды; мағыналық іздеу мүмкіндігі іздеу режиміне байланысты.",
         "generation_failed": "Түсіндірме генераторы қолжетімсіз немесе расталмаған сілтемелер қайтарды. Деректерге негізделген түсіндірме қолданылды.",
         "retrieval_failed": "Іздеу қолжетімсіз. Каталогтағы жақын орындар пайдаланылды; еркін мәтінге сәйкестікке кепілдік жоқ.",
@@ -43,7 +43,7 @@ TEXT = {
         "visit": "Баруға кететін уақыт — шамамен алынған баға, расталған ұзақтық емес.",
         "selected_missing": "Таңдалған орындардың бәрін растау мүмкін болмады. Аялдамалар алынбады және алмастырылмады.",
         "selected_constraint": "Таңдалған орындардың міндетті талаптары толық расталмады. Таңдауды немесе талаптарды өзіңіз өзгертіңіз.",
-        "selected_budget": "Барлық таңдалған аялдама, жол және кері қайту берілген уақытқа сыймайды. Таңдау өзгертілген жоқ.",
+        "time_exceeded": "Толық есептік ұзақтық: {minutes} мин; таңдалған уақыттан {over_minutes} мин артық. Барлық аялдамалар мен жол сақталды.",
         "unsupported": "Бұл қозғалу тәсілі әлі қолдау таппайды.",
         "found": "Орын каталогтан табылды.",
         "time": "Жол мен барудың есептік уақыты: {minutes} мин.",
@@ -58,7 +58,7 @@ TEXT = {
         "take_break": "Жағдай мүмкіндік берсе, аздап үзіліс жасаңыз.",
     },
     "en": {
-        "no_match": "No option could be verified to meet all required constraints within the available time.",
+        "no_match": "No option matching the request could be verified to meet all required constraints.",
         "no_model": "No language model is configured: explanations use verifiable templates; semantic capabilities depend on the retrieval mode.",
         "generation_failed": "The explanation generator was unavailable or returned unverified references. A data-based explanation was used.",
         "retrieval_failed": "Retrieval is unavailable. A limited nearby-catalog fallback was used; relevance to free text is not guaranteed.",
@@ -71,7 +71,7 @@ TEXT = {
         "visit": "Visit duration is an estimate, not a confirmed duration.",
         "selected_missing": "Not all selected places could be verified. Stops were not dropped or replaced.",
         "selected_constraint": "Not all required conditions were verified for the selected places. Explicitly change the selection or constraints.",
-        "selected_budget": "All selected stops, travel and any return trip exceed the available time. The selection was not changed.",
+        "time_exceeded": "Full estimated duration: {minutes} min; {over_minutes} min longer than your selected time. All stops and travel are retained.",
         "unsupported": "This transport mode is not supported yet.",
         "found": "The place was found in the catalog.",
         "time": "Estimated travel and visit time: {minutes} min.",

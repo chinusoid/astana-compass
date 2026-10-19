@@ -276,6 +276,15 @@ class DefaultRecommendationService:
                 return fact["value"]
         return self.default_visit_seconds
 
+    @staticmethod
+    def _time_warning(total: int, request: JSON) -> str | None:
+        extra = total - request["available_seconds"]
+        if extra <= 0:
+            return None
+        return TEXT[request["locale"]]["time_exceeded"].format(
+            minutes=math.ceil(total / 60), over_minutes=math.ceil(extra / 60),
+        )
+
     async def _route(self, places: list[JSON], request: JSON) -> JSON | None:
         try:
             route = await asyncio.wait_for(
@@ -405,8 +414,13 @@ class DefaultRecommendationService:
         # Retrieval order breaks ties; scores from unrelated backends are not compared.
         eligible.sort(key=lambda item: (-item[3], item[2]))
         route_failed = False
-        for offset in range(0, len(eligible), self.route_concurrency):
-            batch = eligible[offset : offset + self.route_concurrency]
+        offset = 0
+        while offset < len(eligible) and len(response["recommendations"]) < request["limit"]:
+            # Route only as many candidates as can still be returned. A longer
+            # outing is a visible alternative, not a reason to scan the pool.
+            needed = request["limit"] - len(response["recommendations"])
+            batch = eligible[offset : offset + min(self.route_concurrency, needed)]
+            offset += len(batch)
             routes = await asyncio.gather(*(self._route([item[0]], request) for item in batch))
             for (place, evaluations, _, _), route in zip(batch, routes, strict=True):
                 if route is None:
@@ -414,13 +428,15 @@ class DefaultRecommendationService:
                     continue
                 visit = self._visit_seconds(place)
                 total = route["duration_seconds"] + visit
-                if total > request["available_seconds"]:
-                    continue
                 why, activity, generator_warnings = await self._explain(
                     place, evaluations, request, total
                 )
                 item_warnings = self._route_warnings([place], route, request["locale"])
                 item_warnings.extend(generator_warnings)
+                time_warning = self._time_warning(total, request)
+                if time_warning:
+                    item_warnings.append(time_warning)
+                    degraded = True
                 if not self._preferences_ok(evaluations):
                     item_warnings.append(text["preferences"])
                     degraded = True
@@ -489,9 +505,10 @@ class DefaultRecommendationService:
             return self._finish(response, itinerary=True)
         visits = [self._visit_seconds(place) for place in places]
         total = sum(visits) + route["duration_seconds"]
-        if total > request["available_seconds"]:
-            response["warnings"].append(text["selected_budget"])
-            return self._finish(response, itinerary=True)
+        time_warning = self._time_warning(total, request)
+        if time_warning:
+            response["warnings"].append(time_warning)
+            degraded = True
         response["warnings"].extend(self._route_warnings(places, route, request["locale"]))
         if route["method"] == "approximate":
             degraded = True

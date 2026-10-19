@@ -408,12 +408,55 @@ class RecommendationTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(value["recommendations"][0]["route"]["geometry"])
         self.assertIn("approximate", " ".join(value["warnings"]))
 
-    async def test_budget_checks_complete_travel_and_visit_without_shrinking(self):
+    async def test_selected_time_is_a_preference_without_shrinking_travel_or_visit(self):
         self.setup_service()
         exact = await self.service.recommend(request(available_seconds=1800))
         too_small = await self.service.recommend(request(available_seconds=1799))
         self.assertEqual(len(exact["recommendations"]), 1)
-        self.assertEqual(too_small["status"], "no_match")
+        self.assertEqual(exact["status"], "matched")
+        self.assertFalse(any("longer than" in warning for warning in exact["warnings"]))
+        self.assertEqual(too_small["status"], "partial")
+        self.assertEqual(too_small["recommendations"][0]["total_duration_seconds"], 1800)
+        self.assertEqual(too_small["recommendations"][0]["visit_duration_seconds"], 1200)
+        self.assertEqual(too_small["recommendations"][0]["route"]["duration_seconds"], 600)
+        self.assertTrue(too_small["recommendations"][0]["route"]["includes_return"])
+        self.assertIn("30 min; 1 min longer", " ".join(too_small["warnings"]))
+
+    async def test_100_minutes_can_return_200_and_300_minute_alternatives_in_all_locales(self):
+        for locale, phrase in (("ru", "больше выбранного"), ("kk", "таңдалған уақыттан"), ("en", "longer than")):
+            for minutes in (200, 300):
+                with self.subTest(locale=locale, minutes=minutes):
+                    self.setup_service()
+                    self.context.duration_seconds = minutes * 60 - 1200
+                    value = await self.service.recommend(request(locale=locale, available_seconds=6000))
+                    validate_payload("RecommendationResponse", value)
+                    self.assertEqual(value["status"], "partial")
+                    item = value["recommendations"][0]
+                    self.assertEqual(item["total_duration_seconds"], minutes * 60)
+                    self.assertEqual(value["request"]["available_seconds"], 6000)
+                    warning = next(text for text in item["warnings"] if phrase in text)
+                    self.assertIn(str(minutes), warning)
+                    self.assertIn(str(minutes - 100), warning)
+                    self.assertIn(warning, value["warnings"])
+
+    async def test_long_alternatives_keep_required_constraints_strict(self):
+        places = [place(1, facts=[fact()]), place(2, facts=[fact(status="unknown")]), place(3, facts=[fact(value=False)])]
+        self.setup_service(places)
+        self.context.duration_seconds = 10800
+        value = await self.service.recommend(request(available_seconds=6000, constraints=[constraint()]))
+        self.assertEqual([p["id"] for p in value["places"]], [places[0]["id"]])
+        self.assertEqual(value["recommendations"][0]["total_duration_seconds"], 12000)
+        self.assertEqual(len(self.context.routes), 1)
+
+    async def test_long_alternatives_do_not_route_or_explain_the_unused_candidate_pool(self):
+        generator = Generator()
+        self.setup_service([place(i) for i in range(24)], generator=generator)
+        self.context.duration_seconds = 10800
+        value = await self.service.recommend(request(available_seconds=6000, limit=3))
+        self.assertEqual(len(value["recommendations"]), 3)
+        self.assertEqual(len(self.context.routes), 3)
+        self.assertEqual(len(generator.calls), 3)
+        self.assertEqual([entry["place"]["id"] for entry in generator.calls], [p["id"] for p in value["places"]])
 
     async def test_source_visit_duration_is_used_but_boolean_is_not_a_number(self):
         for duration, expected in [(300, 900), (True, 1800)]:
@@ -524,15 +567,28 @@ class ItineraryTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(value["route"])
         self.assertEqual(value["total_duration_seconds"], 0)
 
-    async def test_itinerary_cannot_drop_stop_to_fit_budget(self):
-        places = [place(1), place(2)]
-        self.setup_service(places)
-        value = await self.service.build_itinerary(
-            request(place_ids=[p["id"] for p in places], available_seconds=2500)
-        )
-        self.assertEqual(value["status"], "no_match")
-        self.assertEqual(value["stops"], [])
-        self.assertEqual(len(self.context.routes[0]["destinations"]), 2)
+    async def test_long_itinerary_keeps_all_three_stops_and_complete_return_route(self):
+        for locale, phrase in (("ru", "больше выбранного"), ("kk", "таңдалған уақыттан"), ("en", "longer than")):
+            with self.subTest(locale=locale):
+                places = [place(1), place(2), place(3)]
+                self.setup_service(places)
+                self.context.duration_seconds = 14400
+                selected = [places[2]["id"], places[0]["id"], places[1]["id"]]
+                value = await self.service.build_itinerary(
+                    request(place_ids=selected, locale=locale, available_seconds=6000)
+                )
+                validate_payload("ItineraryResponse", value)
+                self.assertEqual(value["status"], "partial")
+                self.assertEqual([stop["place_id"] for stop in value["stops"]], selected)
+                self.assertEqual([stop["order"] for stop in value["stops"]], [1, 2, 3])
+                self.assertEqual(value["total_duration_seconds"], 18000)
+                self.assertTrue(value["route"]["includes_return"])
+                self.assertEqual(sum(stop["visit_duration_seconds"] for stop in value["stops"]), 3600)
+                self.assertEqual(self.context.routes[0]["destinations"], [places[2]["location"], places[0]["location"], places[1]["location"]])
+                self.assertEqual(len(self.context.routes), 1)
+                warning = next(text for text in value["warnings"] if phrase in text)
+                self.assertIn("300", warning)
+                self.assertIn("200", warning)
 
     async def test_itinerary_required_unknown_in_any_stop_rejects_whole_trip(self):
         places = [place(1, facts=[fact()]), place(2)]
