@@ -32,7 +32,14 @@ async function proxy(
   const postAllowed =
     request.method === "POST" &&
     path.length === 1 &&
-    ["recommendations", "itineraries", "feedback", "intent", "traffic"].includes(path[0]);
+    [
+      "recommendations",
+      "itineraries",
+      "feedback",
+      "intent",
+      "traffic",
+      "map-features",
+    ].includes(path[0]);
   if (!getAllowed && !postAllowed) return failure(404);
   try {
     const origin = new URL(
@@ -59,7 +66,8 @@ async function proxy(
     }
     const signal = AbortSignal.any([
       request.signal,
-      AbortSignal.timeout(32000),
+      // Render Free can need about a minute to wake. Never replay a POST.
+      AbortSignal.timeout(getAllowed ? 70000 : 32000),
     ]);
     let body: Uint8Array | undefined;
     if (postAllowed) {

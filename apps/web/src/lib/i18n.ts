@@ -426,6 +426,11 @@ const messages = {
   search: ["Найти", "Іздеу", "Search"],
   empty: ["Здесь пока нет мест", "Әзірге орындар жоқ", "No places here yet"],
   loading: ["Загрузка…", "Жүктелуде…", "Loading…"],
+  catalogLoading: [
+    "Загружаем места… После простоя запуск сервера может занять около минуты.",
+    "Орындар жүктелуде… Үзілістен кейін серверді іске қосу бір минуттай уақыт алуы мүмкін.",
+    "Loading places… After inactivity, the server may take about a minute to start.",
+  ],
   close: ["Закрыть", "Жабу", "Close"],
   facts: ["Сведения о месте", "Орын туралы мәлімет", "About this place"],
   known: ["Подтверждено источником", "Дереккөзбен расталған", "Source-backed"],

@@ -2504,6 +2504,147 @@
           ]
         }
       ]
+    },
+    "MapFeatureRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "location",
+        "locale"
+      ],
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "locale": {
+          "enum": [
+            "ru",
+            "kk",
+            "en"
+          ]
+        }
+      }
+    },
+    "MapFeature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "description",
+        "address",
+        "location",
+        "match",
+        "distance_meters",
+        "attributes",
+        "source_url",
+        "source_label"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^osm:(node|way|relation):[0-9]+$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "kind": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 2000
+        },
+        "address": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "match": {
+          "enum": [
+            "contains",
+            "nearby"
+          ]
+        },
+        "distance_meters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "attributes": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "label",
+              "value"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "value": {
+                "type": "string",
+                "maxLength": 500
+              }
+            }
+          }
+        },
+        "source_url": {
+          "type": "string",
+          "pattern": "^https://www\\.openstreetmap\\.org/(node|way|relation)/[0-9]+$"
+        },
+        "source_label": {
+          "type": "string",
+          "maxLength": 100
+        }
+      }
+    },
+    "MapFeatureResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "features",
+        "retrieved_at",
+        "attribution"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "ok",
+            "empty"
+          ]
+        },
+        "features": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/MapFeature"
+          }
+        },
+        "retrieved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "attribution": {
+          "type": "string",
+          "maxLength": 300
+        }
+      }
     }
   }
 }

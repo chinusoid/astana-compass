@@ -567,6 +567,17 @@ export default function CompassApp({
       : itinerary
         ? itinerary.route
         : (activeRecommendation?.route ?? null);
+  const routeStopIds = useMemo(
+    () =>
+      view === "party"
+        ? (sharedItinerary?.stops.map((stop) => stop.place_id) ?? [])
+        : itinerary
+          ? itinerary.stops.map((stop) => stop.place_id)
+          : activeRecommendation
+            ? [activeRecommendation.place_id]
+            : [],
+    [view, sharedItinerary, itinerary, activeRecommendation],
+  );
   function focusPlace(id: string) {
     setActiveId(id);
     setMapEnabled(true);
@@ -855,7 +866,7 @@ export default function CompassApp({
                     {catalog.map((place) => card(place))}
                   </div>
                   {catalogLoading ? (
-                    <p role="status">{t(locale, "loading")}</p>
+                    <p role="status">{t(locale, "catalogLoading")}</p>
                   ) : !catalog.length && !catalogError ? (
                     loadedQuery.trim() ? (
                       <div className="catalog-empty" role="status">
@@ -1655,6 +1666,7 @@ export default function CompassApp({
                 : selectedIds
             }
             route={displayedRoute}
+            routeStopIds={routeStopIds}
             locale={locale}
             picking={
               picking &&
@@ -1668,6 +1680,7 @@ export default function CompassApp({
               setPicking(false);
             }}
             onSelect={focusPlace}
+            onDetails={(id) => void showDetails(id)}
           />
         </div>
       </div>

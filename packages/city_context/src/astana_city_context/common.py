@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import json as jsonlib
 import math
 import re
@@ -14,9 +15,10 @@ import httpx
 class ProviderError(ValueError):
     """Safe error with API-compatible code; original provider text is never copied."""
 
-    def __init__(self, code: str, retryable: bool = False) -> None:
+    def __init__(self, code: str, retryable: bool = False, retry_after_seconds: float = 0) -> None:
         self.code = code
         self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
         super().__init__(code)
 
 
@@ -89,7 +91,12 @@ class JsonHTTP:
                                 timeout=self.timeout_seconds, follow_redirects=False,
                             ) as response:
                                 if response.status_code == 429:
-                                    raise ProviderError("rate_limited", retryable=True)
+                                    retry_after = response.headers.get("retry-after", "60")
+                                    try:
+                                        delay = float(retry_after) if retry_after.isdigit() else (parsedate_to_datetime(retry_after) - utc_now()).total_seconds()
+                                    except (ValueError, TypeError, OverflowError):
+                                        delay = 60
+                                    raise ProviderError("rate_limited", retryable=True, retry_after_seconds=max(60, delay))
                                 if response.status_code in {408, 500, 502, 503, 504}:
                                     raise ProviderError("provider_unavailable", retryable=True)
                                 if not 200 <= response.status_code < 300:

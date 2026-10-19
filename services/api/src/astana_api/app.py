@@ -23,6 +23,8 @@ from .sandbox import sandbox_router
 from .settings import Settings
 from .social import SocialError, SocialStore, social_error_handler, social_router
 from .traffic import TrafficService
+from .map_features import MapFeatureService
+from astana_city_context.common import ProviderError
 
 
 MESSAGES = {
@@ -176,6 +178,8 @@ def create_app(settings=None, services=None):
         async with AsyncExitStack() as stack:
             app.state.traffic = TrafficService(os.getenv("TOMTOM_API_KEY", ""))
             stack.push_async_callback(app.state.traffic.aclose)
+            app.state.map_features = MapFeatureService(enabled=settings.mode == "live" and os.getenv("ASTANA_MAP_LOOKUP_ENABLED", "false").lower() == "true")
+            stack.push_async_callback(app.state.map_features.aclose)
             app.state.services = services
             if app.state.services is None:
                 try:
@@ -331,6 +335,21 @@ def create_app(settings=None, services=None):
         result["request_id"] = request.state.request_id
         return checked("ItineraryResponse", result, settings)
 
+    @app.post("/v1/map-features")
+    async def map_features(request: Request):
+        payload = await read_payload(request, "MapFeatureRequest")
+        await acquire_gate()
+        try:
+            async with asyncio.timeout(min(15, settings.request_timeout_seconds)):
+                result = await app.state.map_features.inspect(payload["location"], payload["locale"])
+        except TimeoutError:
+            raise APIError("provider_unavailable") from None
+        except ProviderError as error:
+            raise APIError(error.code if error.code in STATUS else "provider_unavailable") from None
+        finally:
+            app.state.gate.release()
+        return checked("MapFeatureResponse", result, settings)
+
     @app.post("/v1/feedback", status_code=201)
     async def feedback(request: Request):
         payload = await read_payload(request, "FeedbackRequest")
@@ -359,6 +378,7 @@ def create_app(settings=None, services=None):
             "/v1/recommendations": ("post", "RecommendationRequest", "RecommendationResponse", "200"),
             "/v1/intent": ("post", "IntentRequest", "IntentResponse", "200"),
             "/v1/traffic": ("post", "TrafficRequest", "TrafficResponse", "200"),
+            "/v1/map-features": ("post", "MapFeatureRequest", "MapFeatureResponse", "200"),
             "/v1/social/session": ("post", "SocialSessionRequest", "SocialSessionResponse", "200"),
             "/v1/social/state": ("get", None, "SocialState", "200"),
             "/v1/social/events": ("get", None, "CommunityEvents", "200"),

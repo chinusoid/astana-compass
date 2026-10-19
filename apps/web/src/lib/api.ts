@@ -69,7 +69,10 @@ export function createApi(
         headers:
           body === undefined ? {} : { "Content-Type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.any([signal, AbortSignal.timeout(35000)]),
+        signal: AbortSignal.any([
+          signal,
+          AbortSignal.timeout(body === undefined ? 75000 : 35000),
+        ]),
       });
     } catch (error) {
       if (signal.aborted) throw error;
