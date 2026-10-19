@@ -228,6 +228,14 @@ export function placeText(locale: Locale, key: keyof typeof copy): string {
 }
 export function factLabel(locale: Locale, key: string): string {
   if (labels[key]) return labels[key][locales.indexOf(locale)];
+  if (key.startsWith("official:claim:"))
+    return [
+      "Отдельное утверждение источника",
+      "Дереккөздің жеке мәліметі",
+      "Individual source claim",
+    ][locales.indexOf(locale)];
+  if (key.startsWith("source:prior:"))
+    return `${["Прежние сведения", "Бұрынғы мәлімет", "Previous source record"][locales.indexOf(locale)]}: ${factLabel(locale, key.slice("source:prior:".length))}`;
   if (/^(osm|wikidata|official):description:(ru|kk|en)$/.test(key))
     return `${placeText(locale, "description")} (${key.split(":").at(-1)})`;
   if (
