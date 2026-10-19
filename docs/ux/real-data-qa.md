@@ -42,3 +42,19 @@ pnpm --dir apps/web test:live:local
 Команда `test:live:local` включает `ASTANA_LIVE_LOCAL=true` в конфигурации Playwright. Playwright запускает и завершает собственные процессы: API на `127.0.0.1:18082`, web на `127.0.0.1:43105`; `reuseExistingServer=false` исключает присоединение к уже занятому адресу. Путь snapshot абсолютный и относится к этому checkout. Режим — live, объяснения — локальные, внешние модели/маршрутизация/погода/карта отключены; ключи внешних провайдеров для API обнулены. Сетевого импорта при запуске нет. Не запускайте build одновременно с тестовым webServer в одном checkout.
 
 Без `ASTANA_LIVE_WEB_URL` и без local-флага внешний live-набор пропускается. Ошибка запуска или занятый порт не означает успешный тест. Скриншоты реальных карточек, описания и `no_match` сохраняются в `apps/web/test-results/live/`; failure trace также сохраняется. Результат конкретного запуска, commit и осмотр скриншотов записываются в итоговый отчёт. Само наличие этих сценариев не подтверждает их прохождение, live inference или качество всех городских рекомендаций.
+
+## Фактическая проверка 19 октября 2026
+
+Windows, Chromium из locked Playwright, production build: **6/6 live browser
+сценариев прошли** без подмены ответов API. В мобильном RU/KK/EN Axe не обнаружил
+нарушений проверяемых WCAG A/AA правил в диалоге реальных удобств. Это
+автоматическая проверка ограниченного набора, не сертификация доступности.
+Скриншоты осмотрены; map provider=none специально исключает внешние tiles и не
+демонстрирует качество реальной подложки. Исходные snapshot IDs и язык совпадают
+с таблицей выше. Фиксированные внешние ключи для этих тестов не нужны.
+
+- [Реальные удобства, RU](screenshots/enriched-2026-10-19/real-amenities-ru-mobile.png)
+- [Реальные удобства, KK](screenshots/enriched-2026-10-19/real-amenities-kk-mobile.png)
+- [Реальные удобства, EN](screenshots/enriched-2026-10-19/real-amenities-en-mobile.png)
+- [Описание и Wikidata provenance](screenshots/enriched-2026-10-19/real-source-description.png)
+- [Объяснённый no-match с обязательными розетками](screenshots/enriched-2026-10-19/real-no-match-mobile.png)
