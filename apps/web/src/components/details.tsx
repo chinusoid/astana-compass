@@ -258,11 +258,13 @@ export function Dialog({
   locale,
   close,
   children,
+  placement = "center",
 }: {
   title: string;
   locale: Locale;
   close: () => void;
   children: React.ReactNode;
+  placement?: "center" | "side";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -277,7 +279,7 @@ export function Dialog({
   return (
     <dialog
       ref={ref}
-      className="dialog"
+      className={`dialog${placement === "side" ? " place-drawer" : ""}`}
       aria-labelledby="dialog-title"
       onCancel={close}
       onClick={(event) => {

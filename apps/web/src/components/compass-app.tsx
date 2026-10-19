@@ -21,6 +21,7 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Users,
@@ -31,6 +32,7 @@ import type {
   Constraint,
   DataStatusResponse,
   ItineraryResponse,
+  IntentResponse,
   Place,
   RecommendationRequest,
   RecommendationResponse,
@@ -57,10 +59,16 @@ import {
 import PlaceCard from "./place-card";
 import IntentReview from "./intent-review";
 import OsmAttribution, { isOsmSourceUrl } from "./osm-attribution";
-import { applyIntentConstraints } from "@/lib/intent";
+import { applyIntentConstraints, interpretIntent } from "@/lib/intent";
+import { applyWalkIntent, textRequestsReturn } from "@/lib/walk-intent";
+import { walkText } from "@/lib/walk-copy";
+import { requestLocation } from "@/lib/geolocation";
+import VoiceInput from "./voice-input";
+import WalkCompanion from "./walk-companion";
 import { intentText } from "@/lib/intent-copy";
 import { mapText } from "@/lib/map-copy";
 import { stopTitle } from "@/lib/map-route";
+import { journeyColor } from "@/lib/map-route-segments";
 import { sourceDescription } from "@/lib/place-presentation";
 import TimeBudgetNote from "./time-budget-note";
 import scenarioStyles from "./scenario-feedback.module.css";
@@ -70,14 +78,13 @@ const FAVORITES_KEY = "astana-compass:favorites:v1";
 const walkPresets: {
   label: MessageKey;
   query: MessageKey;
-  preference?: string;
 }[] = [
   { label: "parkWalk", query: "parkWalkQuery" },
   { label: "riversideWalk", query: "riversideWalkQuery" },
   { label: "architectureWalk", query: "architectureWalkQuery" },
   { label: "mixedWalk", query: "mixedWalkQuery" },
-  { label: "indoors", query: "indoorsQuery", preference: "indoor" },
-  { label: "family", query: "familyQuery", preference: "child_friendly" },
+  { label: "indoors", query: "indoorsQuery" },
+  { label: "family", query: "familyQuery" },
 ];
 type Favorite = Pick<Place, "id" | "name" | "is_synthetic">;
 type FormState = {
@@ -133,13 +140,25 @@ export default function CompassApp({
   const [locale, setLocale] = useState<Locale>("ru");
   const [form, setForm] = useState<FormState>({
     query: "",
-    minutes: "60",
+    minutes: "",
     start: initialStart,
     lat: "",
     lon: "",
-    returnToOrigin: true,
+    returnToOrigin: false,
     constraints: {},
   });
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [inferredIntent, setInferredIntent] = useState<IntentResponse | null>(
+    null,
+  );
+  const [intentUnavailable, setIntentUnavailable] = useState(false);
+  const [inferredKey, setInferredKey] = useState("");
+  const parsedIntent = useRef<{
+    query: string;
+    locale: Locale;
+    intent: IntentResponse;
+  } | null>(null);
+  const geoCancel = useRef<(() => void) | null>(null);
   const [mode, setMode] = useState<DataMode>("unknown");
   const api = useMemo(() => createApi(allowFixtures, setMode), [allowFixtures]);
   const [result, setResult] = useState<RecommendationResponse | null>(null);
@@ -204,6 +223,7 @@ export default function CompassApp({
     const controllers = requests.current;
     return () => {
       Object.values(controllers).forEach((c) => c.abort());
+      geoCancel.current?.();
       // Async callback generation counter, intentionally invalidate on unmount.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       geoVersion.current++;
@@ -303,6 +323,7 @@ export default function CompassApp({
     invalidateSearch();
     if ("lat" in patch || "lon" in patch) {
       geoVersion.current++;
+      geoCancel.current?.();
       setGeoState("idle");
     }
     setForm((previous) => ({ ...previous, ...patch }));
@@ -324,11 +345,14 @@ export default function CompassApp({
       !query.trim() ||
       query.length > 2000 ||
       !snapshot.lat.trim() ||
-      !snapshot.lon.trim() ||
-      !snapshot.minutes.trim()
+      !snapshot.lon.trim()
     )
       throw new Error("invalid form");
-    const seconds = Number(snapshot.minutes) * 60;
+    // The wire contract requires a finite budget. The maximum is only an
+    // internal search envelope when the user has not supplied a time target.
+    const seconds = snapshot.minutes.trim()
+      ? Number(snapshot.minutes) * 60
+      : 86400;
     if (!Number.isSafeInteger(seconds) || seconds < 60 || seconds > 86400)
       throw new Error("invalid budget");
     const request: RecommendationRequest = {
@@ -339,20 +363,30 @@ export default function CompassApp({
       timezone: "Asia/Almaty",
       available_seconds: seconds,
       transport: "walking",
-      return_to_origin: snapshot.returnToOrigin,
+      return_to_origin: snapshot.returnToOrigin || textRequestsReturn(query),
       constraints: Object.entries(snapshot.constraints).flatMap(
         ([key, strength]) => (strength ? [{ key, value: true, strength }] : []),
       ),
       limit: 3,
     };
-    if (!valid("RecommendationRequest", request))
+    const resolved = applyWalkIntent(
+      request,
+      parsedIntent.current?.query === query.trim() &&
+        parsedIntent.current.locale === locale
+        ? parsedIntent.current.intent
+        : null,
+    );
+    if (!valid("RecommendationRequest", resolved))
       throw new Error("invalid form");
-    return request;
+    return resolved;
   }
   async function recommend(query = form.query) {
     // The ref also covers repeated Enter presses before React renders busy state.
     if (searchPending.current) return;
     invalidateSearch();
+    parsedIntent.current = null;
+    setInferredIntent(null);
+    setInferredKey("");
     let body: RecommendationRequest;
     try {
       body = requestFromForm(query);
@@ -372,7 +406,27 @@ export default function CompassApp({
       query: body.query,
     });
     setSearching(true);
+    setIntentUnavailable(false);
     try {
+      try {
+        const interpreted = await interpretIntent(
+          body.query,
+          locale,
+          AbortSignal.any([controller.signal, AbortSignal.timeout(9000)]),
+        );
+        if (controller.signal.aborted) return;
+        parsedIntent.current = {
+          query: body.query,
+          locale,
+          intent: interpreted,
+        };
+        setInferredIntent(interpreted);
+        setInferredKey(`${locale}:${body.query}`);
+        body = applyWalkIntent(body, interpreted);
+      } catch {
+        if (controller.signal.aborted) return;
+        setIntentUnavailable(true);
+      }
       const response = await api.recommend(body, controller.signal);
       if (!controller.signal.aborted) {
         setResult(response);
@@ -385,7 +439,6 @@ export default function CompassApp({
         setSelected(stops);
         if (stops.length) void buildItinerary(stops, response.request);
         setAnswer("");
-        resultHeading.current?.focus({ preventScroll: true });
       }
     } catch (error) {
       if (!controller.signal.aborted) setResultError(asApiError(error));
@@ -427,7 +480,6 @@ export default function CompassApp({
       if (!controller.signal.aborted) {
         setItinerary(response);
         if (response.stops.length) showRouteOverview();
-        planHeading.current?.focus({ preventScroll: true });
       }
     } catch (error) {
       if (!controller.signal.aborted) setItineraryError(asApiError(error));
@@ -462,7 +514,9 @@ export default function CompassApp({
     setOverviewRequest((value) => value + 1);
     document.getElementById("map-heading")?.scrollIntoView?.({
       block: "nearest",
-      behavior: "instant",
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth",
     });
   }
   function selectStop(place: Place) {
@@ -550,7 +604,9 @@ export default function CompassApp({
       setGeoState("error");
       return;
     }
-    navigator.geolocation.getCurrentPosition(
+    geoCancel.current?.();
+    geoCancel.current = requestLocation(
+      navigator.geolocation,
       (position) => {
         if (version !== geoVersion.current) return;
         updateForm(
@@ -566,9 +622,9 @@ export default function CompassApp({
       () => {
         if (version === geoVersion.current) setGeoState("error");
       },
-      { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 },
     );
   }
+
   async function feedback(rating: "helpful" | "not_helpful") {
     if (!result) return;
     const controller = begin("feedback");
@@ -629,6 +685,23 @@ export default function CompassApp({
                   ? "scenarioApplied"
                   : "scenarioDraft",
   );
+  const filterCount =
+    Object.values(form.constraints).filter(Boolean).length +
+    Number(Boolean(form.minutes.trim())) +
+    Number(form.returnToOrigin) +
+    Number(form.start !== initialStart);
+  const intentMatches = inferredKey === `${locale}:${form.query.trim()}`;
+  const routeSummary = searching
+    ? walkText(locale, "interpreting")
+    : building
+      ? walkText(locale, "routing")
+      : itineraryError ||
+          itinerary?.status === "no_match" ||
+          itinerary?.status === "needs_clarification"
+        ? walkText(locale, "routeFailed")
+        : itinerary?.route?.method === "routed"
+          ? walkText(locale, "ready")
+          : mapText(locale, "routePointsReady");
   const mapPlaces = useMemo(
     () => [
       ...new Map(
@@ -1029,11 +1102,23 @@ export default function CompassApp({
                     />
                   </label>
                   <p id="query-hint" className="field-hint">
-                    {t(locale, "queryHint")}
+                    {walkText(locale, "queryHint")}
                   </p>
-                  <div className={scenarioStyles.action}>
+                  <VoiceInput
+                    locale={locale}
+                    disabled={searching}
+                    onTranscript={(text) =>
+                      updateForm({
+                        query: [form.query.trim(), text]
+                          .filter(Boolean)
+                          .join(" ")
+                          .slice(0, 2000),
+                      })
+                    }
+                  />
+                  <div className={`${scenarioStyles.action} search-actions`}>
                     <button
-                      className="primary"
+                      className="primary find-button"
                       type="submit"
                       disabled={searching}
                     >
@@ -1045,6 +1130,19 @@ export default function CompassApp({
                       {intentText(
                         locale,
                         searching ? "scenarioFinding" : "scenarioFind",
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      className="filter-toggle"
+                      aria-expanded={filtersOpen}
+                      aria-controls="walk-filters"
+                      onClick={() => setFiltersOpen(!filtersOpen)}
+                    >
+                      <SlidersHorizontal size={18} aria-hidden="true" />
+                      {walkText(locale, "filters")}
+                      {filterCount > 0 && (
+                        <span className="filter-count">{filterCount}</span>
                       )}
                     </button>
                     <p id="scenario-keyboard-hint" className="field-hint">
@@ -1083,192 +1181,279 @@ export default function CompassApp({
                       </button>
                     )}
                   </div>
-                  <IntentReview
-                    query={form.query}
-                    locale={locale}
-                    onApply={(selection) =>
-                      updateForm({
-                        constraints: applyIntentConstraints(
-                          form.constraints,
-                          selection.constraints,
-                        ),
-                        ...(selection.available_seconds !== null
-                          ? {
-                              minutes: String(selection.available_seconds / 60),
-                            }
-                          : {}),
-                      })
-                    }
-                  />
-                  <div className="preset-row">
-                    {walkPresets.map(
-                      ({ label: presetLabel, query, preference }) => (
-                        <button
-                          className="chip"
-                          type="button"
-                          key={presetLabel}
-                          onClick={() =>
-                            updateForm({
-                              query: t(locale, query),
-                              ...(preference
-                                ? {
-                                    constraints: {
-                                      ...form.constraints,
-                                      [preference]:
-                                        form.constraints[preference] ||
-                                        "preferred",
-                                    },
-                                  }
-                                : {}),
-                            })
-                          }
-                        >
-                          <Footprints size={14} aria-hidden="true" />
-                          {t(locale, presetLabel)}
-                        </button>
-                      ),
+                  {intentMatches &&
+                    inferredIntent &&
+                    (inferredIntent.available_seconds !== null ||
+                      inferredIntent.constraints.length > 0) && (
+                      <p className="intent-summary" role="status">
+                        <Sparkles size={15} aria-hidden="true" />
+                        {walkText(locale, "inferred")}:{" "}
+                        {[
+                          ...(inferredIntent.available_seconds !== null
+                            ? [
+                                duration(
+                                  inferredIntent.available_seconds,
+                                  locale,
+                                ),
+                              ]
+                            : []),
+                          ...inferredIntent.constraints.map(({ constraint }) =>
+                            label(locale, constraint.key),
+                          ),
+                        ].join(" · ")}
+                      </p>
                     )}
+                  {intentUnavailable && !scenarioDirty && (
+                    <p className="field-hint">
+                      {walkText(locale, "intentFallback")}
+                    </p>
+                  )}
+                  <div className="preset-row">
+                    {walkPresets.map(({ label: presetLabel, query }) => (
+                      <button
+                        className="chip"
+                        type="button"
+                        key={presetLabel}
+                        onClick={() => updateForm({ query: t(locale, query) })}
+                      >
+                        <Footprints size={14} aria-hidden="true" />
+                        {t(locale, presetLabel)}
+                      </button>
+                    ))}
                   </div>
-                  <div className="time-grid">
-                    <label className="field">
-                      <span>{t(locale, "timeBudget")}</span>
+                  <p className="filter-summary">
+                    {filterCount
+                      ? `${walkText(locale, "filters")}: ${filterCount}`
+                      : walkText(locale, "noFilters")}
+                  </p>
+                  <section
+                    id="walk-filters"
+                    className="walk-filters"
+                    aria-label={walkText(locale, "filters")}
+                    hidden={!filtersOpen}
+                  >
+                    <h3>{walkText(locale, "filters")}</h3>
+                    <p className="field-hint">
+                      {walkText(locale, "filterHint")}
+                    </p>
+                    <div className="time-grid">
+                      <label className="field">
+                        <span>{t(locale, "timeBudget")}</span>
+                        <input
+                          name="minutes"
+                          type="number"
+                          min="1"
+                          max="1440"
+                          step="any"
+                          placeholder={walkText(locale, "noTime")}
+                          value={form.minutes}
+                          onChange={(e) =>
+                            updateForm({ minutes: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>{t(locale, "startTime")}</span>
+                        <input
+                          name="start"
+                          type="datetime-local"
+                          required
+                          value={form.start}
+                          onChange={(e) =>
+                            updateForm({ start: e.target.value })
+                          }
+                        />
+                      </label>
+                    </div>
+                    <p className="field-hint">{t(locale, "timeBudgetHint")}</p>
+                    <label className="return-control">
                       <input
-                        name="minutes"
-                        type="number"
-                        min="1"
-                        max="1440"
-                        step="any"
-                        required
-                        value={form.minutes}
+                        type="checkbox"
+                        name="return"
+                        checked={form.returnToOrigin}
                         onChange={(e) =>
-                          updateForm({ minutes: e.target.value })
+                          updateForm({ returnToOrigin: e.target.checked })
                         }
                       />
+                      <RotateCcw size={18} aria-hidden="true" />
+                      <span>
+                        <strong>{t(locale, "return")}</strong>
+                        <small>{t(locale, "returnHint")}</small>
+                      </span>
                     </label>
-                    <label className="field">
-                      <span>{t(locale, "startTime")}</span>
-                      <input
-                        name="start"
-                        type="datetime-local"
-                        required
-                        value={form.start}
-                        onChange={(e) => updateForm({ start: e.target.value })}
-                      />
-                    </label>
-                  </div>
-                  <p className="field-hint">{t(locale, "timeBudgetHint")}</p>
-                  <label className="return-control">
-                    <input
-                      type="checkbox"
-                      name="return"
-                      checked={form.returnToOrigin}
-                      onChange={(e) =>
-                        updateForm({ returnToOrigin: e.target.checked })
-                      }
-                    />
-                    <RotateCcw size={18} aria-hidden="true" />
-                    <span>
-                      <strong>{t(locale, "return")}</strong>
-                      <small>{t(locale, "returnHint")}</small>
-                    </span>
-                  </label>
-                  <details className="constraint-details" open>
-                    <summary>{t(locale, "constraints")}</summary>
-                    <p className="field-hint">{t(locale, "constraintsHint")}</p>
-                    <div className="constraint-list preference-list">
-                      {constraintKeys.map((key) => (
-                        <label key={key}>
-                          <input
-                            type="checkbox"
-                            aria-label={t(locale, key)}
-                            checked={Boolean(form.constraints[key])}
-                            disabled={form.constraints[key] === "required"}
-                            onChange={(e) =>
-                              updateForm({
-                                constraints: {
-                                  ...form.constraints,
-                                  [key]: e.target.checked ? "preferred" : "",
-                                },
-                              })
-                            }
-                          />
-                          <span>{t(locale, key)}</span>
-                          {form.constraints[key] === "required" && (
-                            <small className="required-badge">
-                              {t(locale, "required")}
-                            </small>
-                          )}
-                        </label>
-                      ))}
-                    </div>
-                    <details className="strict-constraints">
-                      <summary>
-                        {t(locale, "strictConstraints")}
-                        {Object.values(form.constraints).some(
-                          (strength) => strength === "required",
-                        ) && (
-                          <strong className="required-count">
-                            {" "}
-                            ·{" "}
-                            {
-                              Object.values(form.constraints).filter(
-                                (strength) => strength === "required",
-                              ).length
-                            }
-                          </strong>
-                        )}
-                      </summary>
+                    <details className="constraint-details" open>
+                      <summary>{t(locale, "constraints")}</summary>
                       <p className="field-hint">
-                        {t(locale, "strictConstraintsHint")}
+                        {t(locale, "constraintsHint")}
                       </p>
-                      <div className="constraint-list">
+                      <div className="constraint-list preference-list">
                         {constraintKeys.map((key) => (
                           <label key={key}>
-                            <span>{t(locale, key)}</span>
-                            <select
+                            <input
+                              type="checkbox"
                               aria-label={t(locale, key)}
-                              value={form.constraints[key] ?? ""}
+                              checked={Boolean(form.constraints[key])}
+                              disabled={form.constraints[key] === "required"}
                               onChange={(e) =>
                                 updateForm({
                                   constraints: {
                                     ...form.constraints,
-                                    [key]: e.target.value as
-                                      Constraint["strength"] | "",
+                                    [key]: e.target.checked ? "preferred" : "",
                                   },
                                 })
                               }
-                            >
-                              <option value="">
-                                {t(locale, "indifferent")}
-                              </option>
-                              <option value="preferred">
-                                {t(locale, "preferred")}
-                              </option>
-                              <option value="required">
+                            />
+                            <span>{t(locale, key)}</span>
+                            {form.constraints[key] === "required" && (
+                              <small className="required-badge">
                                 {t(locale, "required")}
-                              </option>
-                            </select>
+                              </small>
+                            )}
                           </label>
                         ))}
                       </div>
+                      <details className="strict-constraints">
+                        <summary>
+                          {t(locale, "strictConstraints")}
+                          {Object.values(form.constraints).some(
+                            (strength) => strength === "required",
+                          ) && (
+                            <strong className="required-count">
+                              {" "}
+                              ·{" "}
+                              {
+                                Object.values(form.constraints).filter(
+                                  (strength) => strength === "required",
+                                ).length
+                              }
+                            </strong>
+                          )}
+                        </summary>
+                        <p className="field-hint">
+                          {t(locale, "strictConstraintsHint")}
+                        </p>
+                        <div className="constraint-list">
+                          {constraintKeys.map((key) => (
+                            <label key={key}>
+                              <span>{t(locale, key)}</span>
+                              <select
+                                aria-label={t(locale, key)}
+                                value={form.constraints[key] ?? ""}
+                                onChange={(e) =>
+                                  updateForm({
+                                    constraints: {
+                                      ...form.constraints,
+                                      [key]: e.target.value as
+                                        Constraint["strength"] | "",
+                                    },
+                                  })
+                                }
+                              >
+                                <option value="">
+                                  {t(locale, "indifferent")}
+                                </option>
+                                <option value="preferred">
+                                  {t(locale, "preferred")}
+                                </option>
+                                <option value="required">
+                                  {t(locale, "required")}
+                                </option>
+                              </select>
+                            </label>
+                          ))}
+                        </div>
+                      </details>
                     </details>
-                  </details>
+                    <details className="advanced-intent">
+                      <summary>{walkText(locale, "advancedIntent")}</summary>
+                      <IntentReview
+                        query={form.query}
+                        locale={locale}
+                        onApply={(selection) =>
+                          updateForm({
+                            constraints: applyIntentConstraints(
+                              form.constraints,
+                              selection.constraints,
+                            ),
+                            ...(selection.available_seconds !== null
+                              ? {
+                                  minutes: String(
+                                    selection.available_seconds / 60,
+                                  ),
+                                }
+                              : {}),
+                          })
+                        }
+                      />
+                    </details>
+                    <div className="filter-footer">
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() =>
+                          updateForm({
+                            minutes: "",
+                            start: initialStart,
+                            returnToOrigin: false,
+                            constraints: {},
+                          })
+                        }
+                      >
+                        {walkText(locale, "clearFilters")}
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => setFiltersOpen(false)}
+                      >
+                        {walkText(locale, "done")}
+                      </button>
+                    </div>
+                  </section>
                   {formError && (
                     <p className="notice error" role="alert">
                       {t(locale, "invalidForm")}
                     </p>
                   )}
-                  <button
-                    className="primary find-button"
-                    type="submit"
-                    disabled={searching}
-                  >
-                    <Sparkles size={18} />
-                    {t(locale, searching ? "finding" : "find")}
-                    <ArrowRight size={18} />
-                  </button>
-                  <p className="privacy-note">{t(locale, "privacy")}</p>
+                  <p className="privacy-note">
+                    {walkText(locale, "aiPrivacy")}
+                  </p>
                 </form>
+                <WalkCompanion
+                  locale={locale}
+                  phase={
+                    searching
+                      ? "searching"
+                      : building
+                        ? "routing"
+                        : resultError || itineraryError
+                          ? "error"
+                          : result?.status === "no_match"
+                            ? "empty"
+                            : itinerary?.stops.length
+                              ? "ready"
+                              : "idle"
+                  }
+                  stopCount={selected.length}
+                  overBudgetMinutes={
+                    itinerary && itinerary.request.available_seconds < 86400
+                      ? Math.max(
+                          0,
+                          Math.ceil(
+                            (itinerary.total_duration_seconds -
+                              itinerary.request.available_seconds) /
+                              60,
+                          ),
+                        )
+                      : 0
+                  }
+                  suggestions={[
+                    walkText(locale, "coffeePark"),
+                    walkText(locale, "night"),
+                    walkText(locale, "river"),
+                  ]}
+                  onSuggestion={(query) => updateForm({ query })}
+                />
 
                 <section
                   className="results"
@@ -1512,7 +1697,11 @@ export default function CompassApp({
                         <RotateCcw size={15} />
                         {t(
                           locale,
-                          form.returnToOrigin ? "withReturn" : "oneWay",
+                          (itinerary?.request.return_to_origin ??
+                            (form.returnToOrigin ||
+                              textRequestsReturn(form.query)))
+                            ? "withReturn"
+                            : "oneWay",
                         )}
                       </p>
                       {building ? (
@@ -1837,6 +2026,81 @@ export default function CompassApp({
           </div>
         </main>
         <div className="app-map-stage">
+          {view === "walk" &&
+            (searching || building || selected.length > 0) && (
+              <section
+                className="journey-preview"
+                aria-label={walkText(locale, "plan")}
+                aria-busy={searching || building}
+              >
+                <div className="journey-preview-heading">
+                  <p role="status">
+                    {searching || building ? (
+                      <span className="spinner" aria-hidden="true" />
+                    ) : (
+                      <Footprints size={18} aria-hidden="true" />
+                    )}
+                    {routeSummary}
+                  </p>
+                  {itineraryError && (
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => void buildItinerary()}
+                    >
+                      {t(locale, "retry")}
+                    </button>
+                  )}
+                  {itinerary && (
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={showRouteOverview}
+                    >
+                      {walkText(locale, "viewRoute")}
+                    </button>
+                  )}
+                </div>
+                {selected.length > 0 && (
+                  <ol className="journey-preview-stops">
+                    {selected.map((place, index) => (
+                      <li key={place.id}>
+                        <button
+                          type="button"
+                          className="journey-stop"
+                          onClick={() => void showDetails(place.id)}
+                        >
+                          <span style={{ background: journeyColor(index) }}>
+                            {index + 1}
+                          </span>
+                          <strong>{place.name}</strong>
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`${walkText(locale, "remove")}: ${place.name}`}
+                          onClick={() =>
+                            updateStops(
+                              selected.filter((p) => p.id !== place.id),
+                            )
+                          }
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {itinerary && itinerary.stops.length > 0 && (
+                  <p className="journey-duration">
+                    {duration(itinerary.total_duration_seconds, locale)} ·{" "}
+                    {itinerary.route?.method === "routed"
+                      ? t(locale, "walking")
+                      : t(locale, "approximate")}
+                  </p>
+                )}
+              </section>
+            )}
           <CityMap
             places={mapPlaces}
             communityEvents={communityEvents}
@@ -1880,6 +2144,7 @@ export default function CompassApp({
           title={detail?.name ?? t(locale, "details")}
           locale={locale}
           close={closeDialog}
+          placement="side"
         >
           <>
             <ErrorNotice error={detailError} locale={locale} />
@@ -1890,6 +2155,20 @@ export default function CompassApp({
               <>
                 {detail.is_synthetic && (
                   <p className="notice amber">{t(locale, "fixtureBanner")}</p>
+                )}
+                {selectedIds.includes(detail.id) && (
+                  <button
+                    type="button"
+                    className="secondary drawer-remove"
+                    onClick={() =>
+                      updateStops(
+                        selected.filter((place) => place.id !== detail.id),
+                      )
+                    }
+                  >
+                    <Trash2 size={16} />
+                    {walkText(locale, "remove")}
+                  </button>
                 )}
                 <PlaceFacts place={detail} locale={locale} />
                 <div className="dialog-actions">

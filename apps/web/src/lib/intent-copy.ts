@@ -8,19 +8,19 @@ const copy = {
     "Enter to find places · Shift + Enter for a new line",
   ],
   scenarioDraft: [
-    "Пожелание ещё не применено. Нажмите «Найти места»: поиск учтёт текст, выбранные условия, старт и время.",
+    "Нажмите «Найти места»: учтём описание и покажем прогулку на карте. Фильтры — по желанию.",
     "Қалау әлі қолданылған жоқ. «Орындарды табу» түймесін басыңыз: іздеуде мәтін, таңдалған шарттар, бастау нүктесі мен уақыт ескеріледі.",
     "Your request has not been applied yet. Choose Find places to search with your text, selected settings, start and time budget.",
   ],
   scenarioPending: [
-    "Пожелание отправлено. Подбираем места с выбранными условиями, стартом и временем…",
+    "Учитываем описание и подбираем остановки. Затем соединим их маршрутом на карте…",
     "Қалау жіберілді. Таңдалған шарттар, бастау нүктесі мен уақыт бойынша орындар ізделуде…",
     "Request submitted. Finding places with your selected settings, start and time budget…",
   ],
   scenarioApplied: [
-    "Пожелание применено. Варианты ниже учитывают выбранные условия, старт и время.",
-    "Қалау қолданылды. Төмендегі нұсқаларда таңдалған шарттар, бастау нүктесі мен уақыт ескерілген.",
-    "Request applied. The options below use your selected settings, start and time budget.",
+    "Пожелание учтено. План и все остановки показаны рядом с картой.",
+    "Қалау ескерілді. Жоспар мен барлық аялдамалар картаның жанында көрсетілген.",
+    "Request applied. Your plan and all stops are shown beside the map.",
   ],
   scenarioCount: ["Вариантов", "Нұсқалар саны", "Options"],
   scenarioDirty: [

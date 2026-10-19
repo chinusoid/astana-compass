@@ -40,6 +40,7 @@ async function proxy(
       "traffic",
       "map-features",
       "place-directory",
+      "place-photo",
     ].includes(path[0]);
   if (!getAllowed && !postAllowed) return failure(404);
   try {
