@@ -52,8 +52,8 @@ factory signature validation/resource ownership, real recommender final policy
 and HTTP itinerary endpoint. Data and route ports are explicitly synthetic:
 these tests are not observations of real venues or ORS responses. Unknown dynamic
 required facts become known after enrichment; unknown schedules remain excluded.
-A model-shortcut prompt cannot reorder/drop selected stops. A full trip over the
-budget returns `no_match` without a shortened plan.
+A model-shortcut prompt cannot reorder/drop selected stops. Since the 2026-10-19 duration-policy update, a full trip over the selected
+time target returns `partial`, preserving all stops and the return leg, with an explicit overrun warning.
 
 Started the actual uvicorn app on an unused loopback port with
 `ASTANA_MODE=fixture LLM_PROVIDER=none`, disabled access logs, and ran the current
