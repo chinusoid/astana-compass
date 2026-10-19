@@ -405,3 +405,56 @@ def test_short_name_inside_a_larger_activity_does_not_capture_food_request():
     cafe, restaurant = named("Дәмді", "cafe"), named("Dinner", "restaurant")
     assert ids(search([cafe, restaurant], "Дәмді ас", "kk")) == [restaurant["id"]]
     assert ids(search([cafe, restaurant], "Дәмді", "kk")) == [cafe["id"]]
+
+
+@pytest.mark.parametrize("query,locale", [
+    ("живописные места", "ru"), ("красивые места", "ru"),
+    ("scenic places", "en"), ("әдемі орын", "kk"),
+])
+def test_scenic_discovery_expands_categories_without_claiming_a_scenic_fact(query, locale):
+    places = [place("Park", "park"), place("Garden", "garden"), place("View", "viewpoint"), place("Cafe")]
+    result = search(places, query, locale)
+    assert set(ids(result)) == {"synthetic:Park", "synthetic:Garden", "synthetic:View"}
+    assert all(hit["matched_fact_keys"] == [] for hit in result["hits"])
+
+
+def test_walk_by_river_keeps_discovery_but_discloses_unverified_proximity():
+    result = search([place("Park", "park"), place("Garden", "garden"), place("Cafe")], "хочу гулять у реки", "ru")
+    assert set(ids(result)) == {"synthetic:Park", "synthetic:Garden"}
+    assert any("Близость к упомянутому ориентиру пока не проверена" in warning for warning in result["warnings"])
+    assert all(hit["matched_fact_keys"] == [] for hit in result["hits"])
+
+
+@pytest.mark.parametrize("query", ["не хочу гулять", "гулять не хочу", "не хочу красивые места", "scenic places not needed"])
+def test_negated_discovery_does_not_turn_into_a_park_request(query):
+    assert not ids(search([place("Park", "park"), place("View", "viewpoint")], query))
+
+
+@pytest.mark.parametrize("query", ["живописное кафе", "гулять до кафе", "хочу кофе", "beautiful coffee"])
+def test_discovery_does_not_compete_with_explicit_coffee_category(query):
+    assert ids(search([place("Cafe"), place("Park", "park")], query)) == ["synthetic:Cafe"]
+
+
+def test_scenic_walk_preserves_named_goal_and_category_exclusion():
+    target = named("Astana Opera", "theatre")
+    assert ids(search([target, named("Other", "park")], "scenic walk to Astana Opera")) == [target["id"]]
+    result = search([place("Park", "park"), place("Garden", "garden"), place("View", "viewpoint")], "живописные места, не парк", "ru")
+    assert ids(result) == ["synthetic:View"]
+
+
+def test_category_score_does_not_penalize_more_source_text_or_repeated_category_words():
+    concise = place("Concise", "park", lat=51.101, description="Synthetic park.")
+    rich = place("Rich", "park", lat=51.102, description="Synthetic park with an extended documented history and botanical collection.")
+    result = search([rich, concise], "хочу гулять", "ru")
+    assert ids(result) == ["synthetic:Concise", "synthetic:Rich"]
+    assert result["hits"][0]["score"] == result["hits"][1]["score"]
+
+
+def test_equal_generic_category_relevance_prefers_available_description_then_distance():
+    sparse = place("Sparse", "park", lat=51.101, description=None)
+    described = place("Described", "park", lat=51.102, description="Synthetic historical collection.")
+    result = search([sparse, described], "хочу гулять", "ru")
+    assert ids(result) == ["synthetic:Described", "synthetic:Sparse"]
+    assert result["hits"][0]["score"] == result["hits"][1]["score"]
+    # A literal name remains stronger than the generic description tie-break.
+    assert ids(search([sparse, described], "SYNTHETIC Sparse")) == [sparse["id"]]

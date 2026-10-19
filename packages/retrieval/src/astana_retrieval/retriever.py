@@ -170,6 +170,7 @@ class LexicalRetriever:
         frequencies = Counter(term for _, terms, *_ in corpus for term in terms)
         mean_length = sum(sum(terms.values()) for _, terms, *_ in corpus) / max(1, len(corpus))
         ranked = []
+        category_only = bool(query.terms) and all(term.startswith("category:") for term in query.terms)
         for place, terms, distance, matched, deferred in corpus:
             score = 100.0 if name_mentions[place["id"]] else 0.0
             for term in sorted(query.terms):
@@ -177,6 +178,11 @@ class LexicalRetriever:
                 if not frequency:
                     continue
                 inverse = math.log1p((len(corpus) - frequencies[term] + 0.5) / (frequencies[term] + 0.5))
+                # A structured category matches equally whether its source has a
+                # short label or a richer description. BM25 length applies to words.
+                if term.startswith("category:"):
+                    score += inverse
+                    continue
                 length = sum(terms.values())
                 weight = 0.65 if term in corrections.values() else 1.0
                 score += weight * inverse * frequency * 2.2 / (frequency + 1.2 * (0.25 + 0.75 * length / mean_length))
@@ -185,7 +191,12 @@ class LexicalRetriever:
                 continue
             score += 0.2 * len(matched)
             ranked.append((score, distance, place["id"], place, sorted(matched), deferred))
-        ranked.sort(key=lambda item: (-item[0], item[1], item[2]))
+        # For equal generic-category relevance, a source description makes a
+        # candidate more useful to inspect. Never override a lexical/name score.
+        ranked.sort(key=lambda item: (
+            -item[0], -int(category_only and bool((item[3].get("description") or "").strip())),
+            item[1], item[2],
+        ))
         selected = ranked[:request["candidate_limit"]]
         if any(item[5] for item in selected):
             warnings.append(_text("deferred", locale))

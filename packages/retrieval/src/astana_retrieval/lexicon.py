@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import re
 import unicodedata
 
-LEXICON_VERSION = "ru-kk-en-2"
+LEXICON_VERSION = "ru-kk-en-3"
 CATEGORIES = {
     "cafe": r"кафе(?:ге|де|ден|ні|нің|лер(?:ге|де|ден|і|ін)?)?|кофе\w{0,12}|coffee|caf[eé]s?|cappuccino|капучино|латте",
     "restaurant": r"рестора\w{0,12}|поесть|обед\w{0,12}|ужин\w{0,12}|еда|restaurants?|dining|lunch|dinner|eat|тамақ\w{0,12}|мейрамхана\w{0,12}",
@@ -26,6 +26,8 @@ CATEGORY_GROUPS = {
     "art": frozenset({"art", "gallery", "arts_centre", "artwork"}),
     "park": frozenset({"park", "garden"}),
     "paintings": frozenset({"gallery", "museum"}),
+    # Discovery categories, never an assertion of beauty or proximity to water.
+    "scenic": frozenset({"park", "garden", "viewpoint"}),
 }
 FEATURES = {
     "quiet": r"тих\w{0,12}|тишин\w{0,12}|спокойн\w{0,12}|quiet|peaceful|тыныш\w{0,12}|без\s+шума|not\s+noisy",
@@ -41,11 +43,15 @@ PATTERNS = {
     for key, pattern in {**CATEGORIES, **FEATURES}.items()
 }
 CLAUSE = re.compile(r"[,;.!?\n]|\b(?:но|but|instead|однако|а|бірақ)\b", re.I)
-WALK = re.compile(r"(?<!\w)(?:погулять|прогул\w{0,12}|walk\w{0,8}|серуен\w{0,12})(?!\w)", re.I)
+WALK = re.compile(r"(?<!\w)(?:погулять|гулять|прогул\w{0,12}|walk\w{0,8}|серуен\w{0,12})(?!\w)", re.I)
 ACTIVITIES = {
     "library": re.compile(r"(?<!\w)(?:study|studying|read\s+books?|позаниматься|почитать|оқуға|кітап\s+оқу)(?!\w)", re.I),
     "restaurant": re.compile(r"(?<!\w)дәмді\s+ас(?!\w)", re.I),
     "paintings": re.compile(r"(?<!\w)(?:paintings?|картины|картиналар)(?!\w)", re.I),
+    "scenic": re.compile(
+        r"(?<!\w)(?:живописн\w{0,12}|красив\w{0,12}|scenic|picturesque|beautiful|көркем|әдемі)"
+        r"(?:\s+(?:мест[ао]|places?|spots?|орын(?:дар)?))?(?!\w)", re.I,
+    ),
 }
 ANCHOR_BEFORE = re.compile(
     r"(?<!\w)(?:near|by|beside|around|next\s+to|close\s+to|у|возле|около|от|рядом\s+с|недалеко\s+от)"
