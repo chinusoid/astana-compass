@@ -1,6 +1,6 @@
 {
   "contract_version": "0.1.0",
-  "warning": "All sample places, facts, routes and evidence are synthetic.",
+  "warning": "Sample places, facts, routes and evidence are synthetic. Place-photo examples use attributed Commons metadata; validation never fetches media.",
   "cases": [
     {
       "name": "request_valid",
@@ -2223,6 +2223,70 @@
         ],
         "retrieved_at": "2026-10-19T16:00:00Z",
         "attribution": "2ГИС"
+      },
+      "failure_stage": "schema"
+    },
+    {
+      "name": "place_photo_request_valid",
+      "definition": "PlacePhotoRequest",
+      "valid": true,
+      "instance": {
+        "place_id": "osm:way/1196402246",
+        "locale": "ru"
+      }
+    },
+    {
+      "name": "place_photo_available_valid",
+      "definition": "PlacePhotoResponse",
+      "valid": true,
+      "instance": {
+        "status": "available",
+        "photo": {
+          "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1d/A_view_of_Nur-Sultan%27s_Botanical_Garden.jpg/960px-A_view_of_Nur-Sultan%27s_Botanical_Garden.jpg",
+          "source_url": "https://commons.wikimedia.org/wiki/File:A_view_of_Nur-Sultan%27s_Botanical_Garden.jpg",
+          "author": "Demir Berisha",
+          "license": "CC BY-SA 4.0",
+          "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+          "alt": "Photograph: Astana Botanical Garden"
+        }
+      }
+    },
+    {
+      "name": "place_photo_unavailable_valid",
+      "definition": "PlacePhotoResponse",
+      "valid": true,
+      "instance": {
+        "status": "unavailable",
+        "photo": null
+      }
+    },
+    {
+      "name": "place_photo_rejects_coordinates",
+      "definition": "PlacePhotoRequest",
+      "valid": false,
+      "instance": {
+        "place_id": "osm:way/1196402246",
+        "locale": "ru",
+        "location": {
+          "lat": 51.1,
+          "lon": 71.4
+        }
+      },
+      "failure_stage": "schema"
+    },
+    {
+      "name": "place_photo_requires_attribution",
+      "definition": "PlacePhotoResponse",
+      "valid": false,
+      "instance": {
+        "status": "available",
+        "photo": {
+          "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1d/A_view_of_Nur-Sultan%27s_Botanical_Garden.jpg/960px-A_view_of_Nur-Sultan%27s_Botanical_Garden.jpg",
+          "source_url": "https://commons.wikimedia.org/wiki/File:A_view_of_Nur-Sultan%27s_Botanical_Garden.jpg",
+          "license": "CC BY-SA 4.0",
+          "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+          "alt": "Photograph: Astana Botanical Garden"
+        }
       },
       "failure_stage": "schema"
     }
