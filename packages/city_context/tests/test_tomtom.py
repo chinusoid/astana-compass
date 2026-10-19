@@ -182,8 +182,8 @@ def test_rejects_false_stop_or_return_coverage(problem, caplog):
         route["legs"][0]["points"] = [route["legs"][0]["points"][0]] * 3
         route["summary"] = route["legs"][0]["summary"] = {"lengthInMeters": 0, "travelTimeInSeconds": 0}
         if problem == "shortened":
-            route["legs"][0]["points"] = deepcopy(route["legs"][0]["points"])
-            route["legs"][0]["points"][-1]["longitude"] += .00001
+            route["legs"][0]["points"] = [deepcopy(point) for point in route["legs"][0]["points"]]
+            route["legs"][0]["points"][-1]["longitude"] += .0006
             route["summary"] = route["legs"][0]["summary"] = {"lengthInMeters": 1, "travelTimeInSeconds": 1}
     async def run():
         client = http(lambda request: httpx.Response(200, json=data) if request.url.host == "api.tomtom.com" else httpx.Response(503))
@@ -216,9 +216,59 @@ def test_section_coverage_diagnostic_reports_only_counts_without_relaxing_valida
 
 
 def test_route_diagnostic_never_formats_untrusted_check_or_counts(caplog):
-    tomtom._RouteRejected(SECRET, legs=SECRET, points={"raw": SECRET}, sections=True, covered_points=100_000).log()
+    tomtom._RouteRejected(SECRET, legs=SECRET, points={"raw": SECRET}, sections=True, covered_points=100_000,
+                          max_snap_meters=SECRET, leg_index=True).log()
     assert "check=response_shape legs=None points=None sections=None covered_points=None" in caplog.text
     assert SECRET not in caplog.text
+
+
+def snapped_response(role, meters):
+    returned = role == "return"
+    data = response(returned=returned)
+    parts = [[part[0], part[-1]] for part in paths(returned=returned)]
+    leg_index = len(parts) - 1 if returned else 0
+    point_index = 0 if role == "origin" else -1
+    point = parts[leg_index][point_index]
+    # Synthetic straight network segment, with a measured westward snap.
+    parts[leg_index][point_index] = [point[0] - math.degrees(meters / (6_371_008.8 * math.cos(math.radians(point[1])))), point[1]]
+    route = data["routes"][0]
+    for leg, part in zip(route["legs"], parts):
+        distance = _distance(part[0], part[-1])
+        leg["points"] = [{"longitude": p[0], "latitude": p[1]} for p in part]
+        leg["summary"] = {"lengthInMeters": round(distance), "travelTimeInSeconds": round(distance / 1.25)}
+    route["summary"] = {key: sum(leg["summary"][key] for leg in route["legs"])
+                        for key in ("lengthInMeters", "travelTimeInSeconds")}
+    route["sections"][0]["endPointIndex"] = len(parts) * 2 - 1
+    return data, parts
+
+
+@pytest.mark.parametrize("role,meters,accepted", [("destination", 201, True), ("destination", 299.9, True),
+                                                 ("destination", 300.1, False), ("origin", 99.9, True),
+                                                 ("origin", 100.1, False), ("return", 99.9, True),
+                                                 ("return", 100.1, False)])
+def test_destination_tolerance_discloses_network_offset_but_origin_and_return_remain_tighter(role, meters, accepted, caplog):
+    data, parts = snapped_response(role, meters)
+    async def run():
+        client = http(lambda request: httpx.Response(200, json=data) if request.url.host == "api.tomtom.com" else httpx.Response(503))
+        try:
+            result = await TomTomWalkingRouter(client, api_key=SECRET).estimate_route(**arguments(returned=role == "return"))
+            if accepted:
+                assert result["provider"] == "TomTom Maps" and result["method"] == "routed"
+                assert result["geometry"]["coordinates"] == [p for part in parts for p in part]
+                assert result["distance_meters"] == data["routes"][0]["summary"]["lengthInMeters"]
+                assert result["duration_seconds"] == data["routes"][0]["summary"]["travelTimeInSeconds"]
+                assert any("not verified entrances" in note and "not included" in note for note in result["assumptions"])
+                if meters > 100:
+                    assert any(f"offset: {math.ceil(meters)} m" in note and "not access guarantees" in note for note in result["assumptions"])
+            else:
+                assert result["method"] == "approximate" and result["geometry"] is None
+        finally:
+            await client.aclose()
+    asyncio.run(run())
+    if not accepted:
+        assert "check=endpoint" in caplog.text and f"max_snap_meters={math.ceil(meters)}" in caplog.text
+        assert f"leg_index={1 if role == 'return' else 0}" in caplog.text
+    assert SECRET not in caplog.text and "51.1283" not in caplog.text
 
 
 def test_missing_key_uses_osrm_without_sending_an_empty_key():

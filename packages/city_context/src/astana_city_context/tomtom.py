@@ -30,16 +30,19 @@ _CHECKS = frozenset({
 class _RouteRejected(ValueError):
     """A fixed check name and bounded integer counts, never source text or geometry."""
 
-    def __init__(self, check, *, legs=None, points=None, sections=None, covered_points=None):
+    def __init__(self, check, *, legs=None, points=None, sections=None, covered_points=None,
+                 max_snap_meters=None, leg_index=None):
         self.check = check if type(check) is str and check in _CHECKS else "response_shape"
         self.counts = tuple(value if type(value) is int and 0 <= value <= _MAX_POINTS else None
                             for value in (legs, points, sections, covered_points))
+        self.max_snap_meters = max_snap_meters if type(max_snap_meters) is int and 0 <= max_snap_meters <= 1_000_000 else None
+        self.leg_index = leg_index if type(leg_index) is int and 0 <= leg_index <= 3 else None
         super().__init__(self.check)
 
     def log(self):
         logging.getLogger("uvicorn.error").warning(
-            "TomTom route rejected: check=%s legs=%s points=%s sections=%s covered_points=%s",
-            self.check, *self.counts,
+            "TomTom route rejected: check=%s legs=%s points=%s sections=%s covered_points=%s max_snap_meters=%s leg_index=%s",
+            self.check, *self.counts, self.max_snap_meters, self.leg_index,
         )
 
 
@@ -172,7 +175,7 @@ class TomTomWalkingRouter(ORSWalkingRouter):
         if type(legs) is not list or len(legs) != len(points) - 1:
             raise _RouteRejected("leg_count", legs=len(legs) if type(legs) is list else None)
         coordinates = []
-        distance = duration = 0.0
+        distance = duration = max_snap = 0.0
         for index, leg in enumerate(legs):
             raw = leg["points"]
             if type(raw) is not list or not 2 <= len(raw) <= _MAX_POINTS - len(coordinates):
@@ -182,9 +185,15 @@ class TomTomWalkingRouter(ORSWalkingRouter):
                 validate_payload("RouteGeometry", {"type": "LineString", "coordinates": part})
             except ValueError:
                 raise _RouteRejected("coordinate_schema") from None
-            if (_distance(points[index], part[0]) > 100
-                    or _distance(points[index + 1], part[-1]) > 100):
-                raise _RouteRejected("endpoint")
+            start_snap = _distance(points[index], part[0])
+            end_snap = _distance(points[index + 1], part[-1])
+            max_snap = max(max_snap, start_snap, end_snap)
+            # POI coordinates may be area centres, not entrances. Keep the
+            # user's origin/return tighter; never invent a connector to a POI.
+            start_limit = 100 if index == 0 else 300
+            end_limit = 100 if returned and index == len(legs) - 1 else 300
+            if start_snap > start_limit or end_snap > end_limit:
+                raise _RouteRejected("endpoint", max_snap_meters=math.ceil(max_snap), leg_index=index)
             if coordinates and coordinates[-1] != part[0]:
                 raise _RouteRejected("leg_join")
             # Preserve the provider's point indices, including repeated junctions.
@@ -193,11 +202,12 @@ class TomTomWalkingRouter(ORSWalkingRouter):
             leg_distance = _metric(leg["summary"]["lengthInMeters"], "leg_numeric")
             leg_duration = _metric(leg["summary"]["travelTimeInSeconds"], "leg_numeric")
             requested = _distance(points[index], points[index + 1])
+            network_direct = _distance(part[0], part[-1])
             measured = sum(_distance(a, b) for a, b in zip(part, part[1:]))
             if ((requested > 1 and (leg_distance <= 0 or leg_duration <= 0))
                     or (leg_distance == 0) != (leg_duration == 0)):
                 raise _RouteRejected("leg_time")
-            if leg_distance < requested and not math.isclose(leg_distance, requested, rel_tol=.02, abs_tol=10):
+            if leg_distance < network_direct and not math.isclose(leg_distance, network_direct, rel_tol=.02, abs_tol=10):
                 raise _RouteRejected("leg_shortened")
             if not math.isclose(leg_distance, measured, rel_tol=.03, abs_tol=10):
                 raise _RouteRejected("leg_geometry")
@@ -227,12 +237,15 @@ class TomTomWalkingRouter(ORSWalkingRouter):
                                  covered_points=covered + 1)
         generated = _stamp(self.clock())
         assumptions = [
-            "TomTom Maps pedestrian profile; every ordered leg included; network snapping within 100 m.",
+            "TomTom Maps pedestrian profile; every ordered network leg included; origin/return snapping <=100 m, destinations <=300 m.",
+            "The route ends at network points near places, not verified entrances; walking from the network to place markers is not included.",
             "Current path access, exact entrances, closures and wheelchair accessibility are not verified.",
             "Departure time sent to provider; generated_at records retrieval, not a map survey date.",
             "TomTom route responses are not cached or persisted by this service.",
             "Routing: © TomTom",
         ]
+        if max_snap > 100:
+            assumptions.append(f"Maximum location-to-network offset: {math.ceil(max_snap)} m; snapping limits are application tolerances, not access guarantees.")
         if self.pace_mps is not None:
             duration = distance / self.pace_mps
             assumptions.append(f"Walking time recalculated from routed distance at {self.pace_mps:g} m/s.")

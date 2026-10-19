@@ -103,7 +103,13 @@ No new dependency or public contract is required. This uses the supported
 [TomTom Maps v1 pedestrian profile](https://docs.tomtom.com/routing-api/documentation/tomtom-maps/v1/calculate-route),
 preserving up to three ordered stops and the requested return. Every returned
 travel-mode section must be pedestrian. Incomplete geometry, disconnected legs,
-implausible metrics and stops snapped over 100 m away are rejected. Attribution
+implausible metrics and excessive snapping are rejected: 100 m for the origin
+and return, 300 m for destinations. A POI may mark an area's centre rather than
+an entrance. These are application tolerances, not TomTom access guarantees.
+Offsets exceeding 100 m are disclosed with their actual maximum in route
+assumptions. Geometry and travel time cover the returned pedestrian network;
+unknown segments between network points and POI markers are neither invented
+nor included in duration. Attribution
 `© TomTom` and a credential-free documentation source accompany routed results.
 
 TomTom gets at most 2.5 seconds (half the configured timeout if smaller); OSRM
