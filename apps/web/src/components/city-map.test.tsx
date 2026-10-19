@@ -611,8 +611,9 @@ it("ignores stale object lookups and distinguishes nearby information from an ex
   render(<CityMap {...props()} picking={false} />);
   const map = await loadMap();
   act(() => map.emit("click", { lngLat: { lng: 71.43, lat: 51.12 } }));
-  expect(screen.getByRole("status")).toHaveTextContent(
-    mapText("ru", "inspectLoading"),
+  expect(screen.getByText(mapText("ru", "inspectLoading"))).toHaveAttribute(
+    "role",
+    "status",
   );
   act(() => map.emit("click", { lngLat: { lng: 71.44, lat: 51.13 } }));
   await screen.findByText("Nearby building");
@@ -721,19 +722,19 @@ it("renders only canonical routed geometry and clears the line for approximate r
     "none",
   );
 });
-it("keeps motion optional and explicitly labels it as simulation", async () => {
+it("starts the labelled motion demo by default and lets the user turn it off", async () => {
   render(<CityMap {...props()} />);
   await loadMap();
   const toggle = screen.getByTestId("map-motion-toggle");
-  expect(toggle).toHaveAttribute("aria-pressed", "false");
-  expect(
-    screen.queryByText(mapText("ru", "simulation"), { exact: false }),
-  ).not.toBeInTheDocument();
-  fireEvent.click(toggle);
   expect(toggle).toHaveAttribute("aria-pressed", "true");
   expect(
     screen.getByText(mapText("ru", "simulation"), { exact: false }),
   ).toBeVisible();
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  expect(
+    screen.queryByText(mapText("ru", "simulation"), { exact: false }),
+  ).not.toBeInTheDocument();
 });
 it("keeps community events distinct, unverified and safe from HTML injection", async () => {
   render(

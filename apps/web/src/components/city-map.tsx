@@ -124,7 +124,7 @@ export default function CityMap(props: Props) {
     "idle" | "following" | "paused" | "denied" | "unavailable"
   >("idle");
   const followMode = useRef<"idle" | "following" | "paused">("idle");
-  const [motionEnabled, setMotionEnabled] = useState(false);
+  const [motionEnabled, setMotionEnabled] = useState(true);
   const [motionStatus, setMotionStatus] = useState<MotionStatus>("empty");
   const geometry = useMemo(
     () => validatedRouteGeometry(props.route),
