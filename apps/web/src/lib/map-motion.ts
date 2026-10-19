@@ -3,6 +3,7 @@ import type {
   Map as LibreMap,
   MapGeoJSONFeature,
 } from "maplibre-gl";
+import { modelLayer, modelParts } from "./map-motion-models";
 
 export type MotionKind = "car" | "walker";
 export type MotionPath = {
@@ -53,10 +54,10 @@ export function motionPaths(
       continue;
     const kind: MotionKind | null = CAR_CLASSES.has(props.class)
       ? "car"
-      : (props.class === "path" &&
-            WALK_CLASSES.has(props.subclass ?? "path") &&
-            props.foot !== "no") ||
-          props.class === "pedestrian"
+      : WALK_CLASSES.has(props.class) &&
+          (props.class === "pedestrian" ||
+            WALK_CLASSES.has(props.subclass ?? "path")) &&
+          props.foot !== "no"
         ? "walker"
         : null;
     if (!kind || counts[kind] >= (kind === "car" ? 24 : 16)) continue;
@@ -105,10 +106,7 @@ export function motionPaths(
   return paths;
 }
 
-export function pointOnPath(
-  path: MotionPath,
-  distance: number,
-): [number, number] {
+export function poseOnPath(path: MotionPath, distance: number) {
   const target = ((distance % path.length) + path.length) % path.length;
   let left = 1,
     right = path.cumulative.length - 1;
@@ -122,10 +120,28 @@ export function pointOnPath(
   const segment = path.cumulative[left] - path.cumulative[left - 1];
   const progress =
     segment > 0 ? (target - path.cumulative[left - 1]) / segment : 0;
-  return [
-    start[0] + (end[0] - start[0]) * progress,
-    start[1] + (end[1] - start[1]) * progress,
-  ];
+  return {
+    coordinates: [
+      start[0] + (end[0] - start[0]) * progress,
+      start[1] + (end[1] - start[1]) * progress,
+    ] as [number, number],
+    heading:
+      ((Math.atan2(
+        (end[0] - start[0]) * Math.cos((start[1] * Math.PI) / 180),
+        end[1] - start[1],
+      ) *
+        180) /
+        Math.PI +
+        360) %
+      360,
+  };
+}
+
+export function pointOnPath(
+  path: MotionPath,
+  distance: number,
+): [number, number] {
+  return poseOnPath(path, distance).coordinates;
 }
 
 export function motionPoints(paths: MotionPath[], elapsedSeconds: number) {
@@ -143,6 +159,38 @@ export function motionPoints(paths: MotionPath[], elapsedSeconds: number) {
         ),
       },
     })),
+  };
+}
+
+export function motionModels(
+  paths: MotionPath[],
+  elapsedSeconds: number,
+  zoom: number,
+) {
+  return {
+    type: "FeatureCollection" as const,
+    features: paths.flatMap((path, index) => {
+      const distance =
+        path.length * ((index * 0.381966) % 1) +
+        elapsedSeconds * (path.kind === "car" ? 8 : 1.4);
+      // Walkers turn at a path end instead of jumping back to its other end.
+      const reverse =
+        path.kind === "walker" && Math.floor(distance / path.length) % 2 === 1;
+      const pose = poseOnPath(
+        path,
+        reverse
+          ? Math.max(0, path.length - (distance % path.length) - 0.001)
+          : distance,
+      );
+      return modelParts({
+        actor: `local-${index}`,
+        kind: path.kind,
+        ...pose,
+        heading: (pose.heading + (reverse ? 180 : 0)) % 360,
+        phase: elapsedSeconds * 7 + index * 1.7,
+        zoom,
+      });
+    }),
   };
 }
 
@@ -171,31 +219,17 @@ export function startMapMotion(
   const vectorSource = transport.source;
   map.addSource(SOURCE, {
     type: "geojson",
+    tolerance: 0,
+    maxzoom: 20,
     data: { type: "FeatureCollection", features: [] },
   });
   map.addLayer({
-    id: LAYERS[0],
-    type: "circle",
-    source: SOURCE,
+    ...modelLayer(LAYERS[0], SOURCE),
     filter: ["==", ["get", "kind"], "car"],
-    paint: {
-      "circle-color": "#db8d2e",
-      "circle-radius": 3.5,
-      "circle-stroke-color": "#fff",
-      "circle-stroke-width": 1,
-    },
   });
   map.addLayer({
-    id: LAYERS[1],
-    type: "circle",
-    source: SOURCE,
+    ...modelLayer(LAYERS[1], SOURCE),
     filter: ["==", ["get", "kind"], "walker"],
-    paint: {
-      "circle-color": "#235b85",
-      "circle-radius": 2.5,
-      "circle-stroke-color": "#fff",
-      "circle-stroke-width": 1,
-    },
   });
   const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
   let paths: MotionPath[] = [];
@@ -215,7 +249,7 @@ export function startMapMotion(
   const paused = () => preference.matches || document.hidden;
   const draw = () =>
     (map.getSource(SOURCE) as GeoJSONSource | undefined)?.setData(
-      motionPoints(paths, elapsed),
+      motionModels(paths, elapsed, map.getZoom()),
     );
   const tick = (now: number) => {
     frame = null;
@@ -242,16 +276,19 @@ export function startMapMotion(
     if (disposed) return;
     try {
       const next =
-        map.getZoom() >= 12
+        map.getZoom() >= 14
           ? motionPaths(
               map.querySourceFeatures(vectorSource, {
                 sourceLayer: "transportation",
               }),
             )
           : [];
-      const nextSignature = JSON.stringify(
+      // Zoom changes display scale even while motion is paused. An unchanged
+      // idle event must not call setData again and cause another idle loop.
+      const nextSignature = JSON.stringify([
+        Math.round(map.getZoom() * 10),
         next.map((path) => [path.kind, path.coordinates]),
-      );
+      ]);
       if (nextSignature === signature) return;
       signature = nextSignature;
       paths = next;
@@ -277,7 +314,11 @@ export function startMapMotion(
     map.off("moveend", refresh);
     preference.removeEventListener("change", updateRunning);
     document.removeEventListener("visibilitychange", updateRunning);
-    for (const id of LAYERS) if (map.getLayer(id)) map.removeLayer(id);
-    if (map.getSource(SOURCE)) map.removeSource(SOURCE);
+    try {
+      for (const id of LAYERS) if (map.getLayer(id)) map.removeLayer(id);
+      if (map.getSource(SOURCE)) map.removeSource(SOURCE);
+    } catch {
+      /* The map may already have removed its style during teardown. */
+    }
   };
 }

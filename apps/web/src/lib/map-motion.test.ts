@@ -3,6 +3,8 @@ import type { Map as LibreMap } from "maplibre-gl";
 import {
   motionPaths,
   motionPoints,
+  motionModels,
+  poseOnPath,
   pointOnPath,
   startMapMotion,
 } from "./map-motion";
@@ -32,6 +34,15 @@ it("moves through actual road vertices, not across an invented straight shortcut
   const displayed = motionPoints([path], 10);
   expect(displayed.features[0].geometry.type).toBe("Point");
   expect(displayed.features[0].properties.simulation).toBe(true);
+  expect(poseOnPath(path, path.cumulative[1] / 2).heading).toBeCloseTo(90);
+  expect(
+    poseOnPath(path, (path.cumulative[1] + path.length) / 2).heading,
+  ).toBeCloseTo(0);
+  const model = motionModels([path], 0, 17);
+  expect(model.features.every((part) => part.geometry.type === "Polygon")).toBe(
+    true,
+  );
+  expect(model.features.map((part) => part.properties.part)).toContain("cabin");
 });
 it("separates disconnected lines and distinguishes cars from foot paths", () => {
   const lines = [elbow, elbow.map(([lon, lat]) => [lon + 0.01, lat])];
@@ -52,6 +63,7 @@ it("does not place pedestrians on motorways or use restricted/indoor/tunnel/inva
     road(elbow, { class: "motorway" }),
     road(elbow, { class: "minor", access: "private" }),
     road(elbow, { class: "path", subclass: "footway", foot: "no" }),
+    road(elbow, { class: "pedestrian", foot: "no" }),
     road(elbow, { class: "path", indoor: 1 }),
     road(elbow, { class: "minor", brunnel: "tunnel" }),
     road(elbow, { class: "rail" }),
@@ -74,11 +86,37 @@ it("bounds particle count and vertex cost and honours reverse one-way geometry",
   expect(motionPaths(many)).toHaveLength(24);
   const [reverse] = motionPaths([road(elbow, { class: "minor", oneway: -1 })]);
   expect(reverse.coordinates).toEqual([...elbow].reverse());
+  expect(poseOnPath(reverse, reverse.cumulative[1] / 2).heading).toBeCloseTo(
+    180,
+  );
   const long = Array.from({ length: 1500 }, (_, index) => [
     71 + index * 0.000001,
     51,
   ]);
   expect(motionPaths([road(long)])[0].coordinates).toHaveLength(1000);
+});
+it("turns pedestrians back along the same footpath instead of teleporting at its end", () => {
+  const [path] = motionPaths([road(elbow, { class: "footway" })]);
+  const endTime = path.length / 1.4;
+  const before = motionModels([path], endTime - 0.1, 17);
+  const after = motionModels([path], endTime + 0.1, 17);
+  const center = (model: typeof before) => {
+    const ring = model.features
+      .find((part) => part.properties.part === "torso")!
+      .geometry.coordinates[0].slice(0, -1);
+    return ring.reduce(
+      (sum, point) => [
+        sum[0] + point[0] / ring.length,
+        sum[1] + point[1] / ring.length,
+      ],
+      [0, 0],
+    );
+  };
+  expect(center(before)[0]).toBeCloseTo(center(after)[0], 5);
+  expect(center(before)[1]).toBeCloseTo(center(after)[1], 5);
+  const returned = center(motionModels([path], endTime * 2 - 0.0001, 17));
+  expect(returned[0]).toBeCloseTo(path.coordinates[0][0], 5);
+  expect(returned[1]).toBeCloseTo(path.coordinates[0][1], 5);
 });
 it("pauses for reduced motion and hidden pages, then removes animation and listeners", () => {
   let reduce = true;
@@ -102,7 +140,7 @@ it("pauses for reduced motion and hidden pages, then removes animation and liste
   });
   vi.stubGlobal("cancelAnimationFrame", (key: number) => frames.delete(key));
   const data = { setData: vi.fn() };
-  const layers = new Set<string>();
+  const layers = new Map<string, { id: string; type: string }>();
   const listeners = new Map<string, () => void>();
   let source = false;
   const map = {
@@ -124,7 +162,8 @@ it("pauses for reduced motion and hidden pages, then removes animation and liste
     removeSource: () => {
       source = false;
     },
-    addLayer: (layer: { id: string }) => layers.add(layer.id),
+    addLayer: (layer: { id: string; type: string }) =>
+      layers.set(layer.id, layer),
     getLayer: (id: string) => layers.has(id),
     removeLayer: (id: string) => layers.delete(id),
     getZoom: () => 15.5,
@@ -134,11 +173,18 @@ it("pauses for reduced motion and hidden pages, then removes animation and liste
   };
   const status = vi.fn();
   const stop = startMapMotion(map as unknown as LibreMap, status);
+  expect([...layers.values()].map((layer) => layer.type)).toEqual([
+    "fill-extrusion",
+    "fill-extrusion",
+  ]);
   expect(status).toHaveBeenLastCalledWith("paused");
   expect(frames.size).toBe(0);
   expect(map.querySourceFeatures).toHaveBeenCalledWith("openmaptiles", {
     sourceLayer: "transportation",
   });
+  const writes = data.setData.mock.calls.length;
+  listeners.get("idle")!();
+  expect(data.setData).toHaveBeenCalledTimes(writes);
   reduce = false;
   for (const listener of mediaListeners) listener();
   expect(status).toHaveBeenLastCalledWith("running");
