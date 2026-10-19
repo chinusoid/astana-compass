@@ -1,4 +1,4 @@
-"""TomTom's documented Discover envelope; no API key or network required."""
+"""TomTom Maps Nearby Search envelope; no real key or network required."""
 import asyncio
 from copy import deepcopy
 import json
@@ -7,11 +7,11 @@ import httpx
 import pytest
 
 from astana_api.tomtom_places import (
-    ATTRIBUTES, ENDPOINT, MultiSourceMapService, SOURCE, TomTomPlacesService,
+    ENDPOINT, MultiSourceMapService, SOURCE, TomTomPlacesService,
     create_map_service, normalize_places,
 )
 from astana_city_context.common import JsonHTTP, ProviderError
-from astana_contracts import validate_payload
+from astana_contracts import ContractValidationError, validate_payload
 
 LOCATION = {"lat": 51.1283, "lon": 71.4305}
 STAMP = "2026-10-19T10:00:00Z"
@@ -19,12 +19,16 @@ STAMP = "2026-10-19T10:00:00Z"
 
 def response():
     return {"results": [{
-        "id": "sample-123", "type": "poi", "title": "Test cafe",
-        "position": {"type": "Point", "coordinates": [71.4305, 51.1283]},
-        "poiTypes": [{"name": "Cafe"}],
-        "address": {"street": "Test street", "houseNumber": "12", "countryCodeIso2": "KZ"},
-        "contacts": [{"phones": ["+7 example"], "websites": ["https://example.org"]}],
-        "openingHours": [{"date": "2026-10-19", "timeRanges": [{"start": "09:00", "end": "18:00", "utcOffsetSeconds": 18000}]}],
+        "id": "sample-123", "type": "POI",
+        "position": {"lon": 71.4305, "lat": 51.1283},
+        "poi": {
+            "name": "Test cafe", "phone": "+7 example", "url": "https://example.org",
+            "classifications": [{"names": [{"nameLocale": "en-US", "name": "Cafe"}]}],
+            "openingHours": {"mode": "nextSevenDays", "timeRanges": [
+                {"startTime": {"date": "2026-10-19", "hour": 9, "minute": 0},
+                 "endTime": {"date": "2026-10-19", "hour": 18, "minute": 0}}]},
+        },
+        "address": {"streetName": "Test street", "streetNumber": "12", "countryCode": "KZ"},
     }]}
 
 
@@ -35,7 +39,7 @@ def test_provider_facts_are_separate_nearby_pois_with_dated_hours_not_invented_a
     assert feature["match"] == "nearby"  # coincident point does not prove containment
     assert feature["source_url"] == SOURCE and result["retrieved_at"] == STAMP
     assert feature["description"] is None
-    assert feature["attributes"][-1]["value"] == "2026-10-19: 09:00–18:00 (UTC+05:00)"
+    assert feature["attributes"][-1]["value"] == "2026-10-19 09:00 – 2026-10-19 18:00"
     assert "wifi" not in json.dumps(result).lower() and "toilet" not in json.dumps(result).lower()
 
 
@@ -44,54 +48,53 @@ def test_unrelated_or_invalid_results_are_not_shown(problem):
     data = response()
     item = data["results"][0]
     if problem == "distant":
-        item["position"]["coordinates"][0] += .1
+        item["position"]["lon"] += .1
     elif problem == "foreign":
-        item["address"]["countryCodeIso2"] = "DE"
+        item["address"]["countryCode"] = "DE"
     elif problem == "boolean-coordinate":
-        item["position"]["coordinates"][0] = True
+        item["position"]["lon"] = True
     elif problem == "unsafe-id":
         item["id"] = "../key?secret=bad"
     elif problem == "no-name":
-        item["title"] = []
+        item["poi"]["name"] = []
     else:
         item["type"] = "discoverAction"
     assert normalize_places(data, LOCATION, "en", STAMP)["status"] == "empty"
 
 
-@pytest.mark.parametrize("hours", [None, [], [{"date": "not-a-date", "timeRanges": []}],
-                                   [{"date": "2026-10-19", "timeRanges": []}],
-                                   [{"date": "2026-10-19", "timeRanges": [{"start": "99:99", "end": "18:00", "utcOffsetSeconds": True}]}]])
+@pytest.mark.parametrize("hours", [None, {}, [], {"mode": "nextSevenDays", "timeRanges": []},
+                                   {"mode": "other", "timeRanges": []},
+                                   {"mode": "nextSevenDays", "timeRanges": [{"startTime": None}]}])
 def test_missing_malformed_or_empty_hours_do_not_prove_open_or_closed(hours):
     data = response()
-    data["results"][0]["openingHours"] = hours
+    data["results"][0]["poi"]["openingHours"] = hours
     feature = normalize_places(data, LOCATION, "en", STAMP)["features"][0]
     assert all("Hours" not in attr["label"] for attr in feature["attributes"])
 
 
-def test_wire_request_is_bounded_server_authenticated_and_locale_aware():
+@pytest.mark.parametrize("locale,language", [("ru", "ru-RU"), ("kk", "kk-KZ"), ("en", "en-GB")])
+def test_wire_request_is_query_free_bounded_server_authenticated_and_locale_aware(locale, language):
     seen = []
 
     def handler(request):
         seen.append(request)
-        assert str(request.url) == ENDPOINT and "fake-key" not in str(request.url)
-        assert request.headers["TomTom-Api-Key"] == "fake-key"
-        assert request.headers["TomTom-Api-Version"] == "3"
-        assert request.headers["Attributes"] == ATTRIBUTES
-        assert request.headers["Accept-Language"].startswith("kk-KZ")
-        body = json.loads(request.content)
-        assert body["maxResults"] == 8 and body["query"] == ""
-        assert body["origin"]["coordinates"] == [71.4305, 51.1283]
-        assert body["filters"]["types"] == ["poi"] and body["filters"]["countryCodesIso2"] == ["KZ"]
-        assert body["filters"]["geometry"]["type"] == "rectangle"
+        assert request.method == "GET" and str(request.url).split("?")[0] == ENDPOINT
+        assert request.content == b""
+        assert not any(name in request.headers for name in ("Attributes", "TomTom-Api-Version", "TomTom-Api-Key"))
+        assert dict(request.url.params) == {
+            "key": "fake-key", "lat": "51.1283", "lon": "71.4305", "radius": "250", "limit": "8",
+            "countrySet": "KZ", "language": language, "openingHours": "nextSevenDays",
+        }
+        assert request.headers["Accept-Encoding"] == "identity"
         return httpx.Response(200, json=response())
 
     async def check():
         http = JsonHTTP(client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), retries=0)
         service = TomTomPlacesService(enabled=True, api_key="fake-key", http=http)
         try:
-            assert (await service.inspect(LOCATION, "kk"))["features"]
+            assert (await service.inspect(LOCATION, locale))["features"]
             with pytest.raises(ProviderError, match="rate_limited"):
-                await service.inspect(LOCATION, "kk")
+                await service.inspect(LOCATION, locale)
         finally:
             await service.aclose()
     asyncio.run(check())
@@ -224,3 +227,145 @@ def test_normalization_exception_text_is_not_logged(monkeypatch, caplog):
     asyncio.run(check())
     assert "service=places reason=invalid_schema" in caplog.text
     assert "secret-token" not in caplog.text and "private" not in caplog.text
+
+
+def test_overnight_hours_keep_both_dates_and_do_not_invent_utc_offset():
+    data = response()
+    data["results"][0]["poi"]["openingHours"]["timeRanges"] = [{
+        "startTime": {"date": "2026-10-19", "hour": 22, "minute": 30},
+        "endTime": {"date": "2026-10-20", "hour": 2, "minute": 0},
+    }]
+    feature = normalize_places(data, LOCATION, "en", STAMP)["features"][0]
+    assert feature["attributes"][-1] == {
+        "label": "Hours on stated dates (local time, TomTom)",
+        "value": "2026-10-19 22:30 – 2026-10-20 02:00",
+    }
+
+
+@pytest.mark.parametrize("field,value", [("hour", True), ("hour", 24), ("minute", 60),
+                                        ("date", "2026-02-31"), ("date", "20261019")])
+def test_invalid_local_hours_are_not_displayed(field, value):
+    data = response()
+    data["results"][0]["poi"]["openingHours"]["timeRanges"][0]["startTime"][field] = value
+    feature = normalize_places(data, LOCATION, "en", STAMP)["features"][0]
+    assert all("Hours" not in attr["label"] for attr in feature["attributes"])
+
+
+def test_invalid_reverse_hours_and_oversized_range_are_not_displayed():
+    for end in ({"date": "2026-10-19", "hour": 8, "minute": 0},
+                {"date": "2026-11-19", "hour": 18, "minute": 0}):
+        data = response()
+        data["results"][0]["poi"]["openingHours"]["timeRanges"][0]["endTime"] = end
+        feature = normalize_places(data, LOCATION, "en", STAMP)["features"][0]
+        assert len(feature["attributes"]) == 2
+
+
+def test_only_eight_unique_nearby_pois_are_kept_and_provider_distance_is_not_trusted():
+    data = response()
+    template = data["results"][0]
+    data["results"] = [{**deepcopy(template), "id": f"place-{index}", "dist": 1}
+                       for index in range(10)]
+    far = deepcopy(template)
+    far["id"] = "lying-distance"
+    far["dist"] = 0
+    far["position"]["lat"] += .01
+    data["results"].extend([deepcopy(data["results"][0]), far])
+    result = normalize_places(data, LOCATION, "en", STAMP)
+    assert len(result["features"]) == 8
+    assert len({item["id"] for item in result["features"]}) == 8
+    assert all(item["distance_meters"] <= 250 for item in result["features"])
+    assert "lying-distance" not in str(result)
+    assert "Orbis" not in result["attribution"] and "Maps" in result["attribution"]
+
+
+def test_timeout_cancels_one_call_without_retry_and_includes_queue_wait(monkeypatch, caplog):
+    import astana_api.tomtom_places as module
+    monkeypatch.setattr(module, "_TIMEOUT_SECONDS", .01)
+
+    class StalledHTTP:
+        calls = 0
+        cancelled = False
+
+        async def request(self, *args, **kwargs):
+            self.calls += 1
+            try:
+                await asyncio.sleep(60)
+            finally:
+                self.cancelled = True
+
+    async def check():
+        http = StalledHTTP()
+        service = TomTomPlacesService(enabled=True, api_key="private-secret", http=http)
+        with pytest.raises(ProviderError, match="provider_unavailable"):
+            await service.inspect(LOCATION, "en")
+        assert http.calls == 1 and http.cancelled
+        queued = TomTomPlacesService(enabled=True, api_key="private-secret", http=http)
+        await queued.gate.acquire()
+        try:
+            with pytest.raises(ProviderError, match="provider_unavailable"):
+                await queued.inspect(LOCATION, "en")
+        finally:
+            queued.gate.release()
+        assert http.calls == 1 and not queued.calls
+    asyncio.run(check())
+    assert "reason=timeout" in caplog.text and "private-secret" not in caplog.text
+
+
+def test_no_second_tomtom_request_on_bad_request_and_no_cache_after_success():
+    calls = []
+    clock = [100.0]
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(400, json={"detailedError": {"target": "query"}}) if len(calls) == 1 else httpx.Response(200, json=response())
+
+    async def check():
+        http = JsonHTTP(client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), retries=0)
+        service = TomTomPlacesService(enabled=True, api_key="fake-key", http=http, clock=lambda: clock[0])
+        try:
+            with pytest.raises(ProviderError):
+                await service.inspect(LOCATION, "ru")
+            assert len(calls) == 1
+            for moment in (106, 112):
+                clock[0] = moment
+                assert (await service.inspect(LOCATION, "ru"))["features"]
+            assert len(calls) == 3
+        finally:
+            await service.aclose()
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("stamps", [[70, 75, 80, 85, 90, 95], list(range(-1000, -900))])
+def test_minute_and_daily_budgets_reject_before_request(stamps):
+    class HTTP:
+        async def request(self, *args, **kwargs):
+            pytest.fail("budget must reject before provider")
+    service = TomTomPlacesService(enabled=True, api_key="fake", http=HTTP(), clock=lambda: 100.0)
+    service.calls.extend(stamps)
+    with pytest.raises(ProviderError, match="rate_limited"):
+        asyncio.run(service.inspect(LOCATION, "en"))
+
+
+def test_default_transport_has_four_second_timeout_and_no_retries():
+    async def check():
+        service = TomTomPlacesService(enabled=False, api_key="")
+        try:
+            assert service.http.timeout_seconds == 4 and service.http.retries == 0
+        finally:
+            await service.aclose()
+    asyncio.run(check())
+    class RetryingHTTP:
+        retries = 1
+    with pytest.raises(ValueError, match="zero HTTP retries"):
+        TomTomPlacesService(enabled=True, api_key="fake", http=RetryingHTTP())
+
+
+def test_source_whitelist_keeps_discover_compatibility_and_rejects_credential_urls():
+    result = normalize_places(response(), LOCATION, "en", STAMP)
+    feature = result["features"][0]
+    feature["source_url"] = "https://docs.tomtom.com/places-search-api/documentation/places-search/discover"
+    validate_payload("MapFeatureResponse", result)
+    for url in (SOURCE + "?key=private", "https://docs.tomtom.com/other", "https://evil.example/nearby-search"):
+        feature["source_url"] = url
+        with pytest.raises(ContractValidationError):
+            validate_payload("MapFeatureResponse", result)

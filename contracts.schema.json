@@ -2605,7 +2605,7 @@
         },
         "source_url": {
           "type": "string",
-          "pattern": "^https://(www\\.openstreetmap\\.org/(node|way|relation)/[0-9]+|docs\\.tomtom\\.com/places-search-api/documentation/places-search/discover)$"
+          "pattern": "^https://(www\\.openstreetmap\\.org/(node|way|relation)/[0-9]+|docs\\.tomtom\\.com/(places-search-api/documentation/places-search/discover|search-api/documentation/search-service/nearby-search))$"
         },
         "source_label": {
           "type": "string",
