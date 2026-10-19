@@ -230,6 +230,14 @@ class HostedExplanationGenerator:
             }, "required": ["why", "suggested_activity"],
         }
 
+    def _openai_model_options(self) -> dict[str, Any]:
+        # Luna defaults to medium reasoning. These small, strictly validated
+        # extraction/selection tasks retain their short latency and output caps.
+        # https://developers.openai.com/api/docs/models/gpt-6-luna
+        if self.provider == "openai" and self.model == "gpt-6-luna":
+            return {"reasoning": {"effort": "none"}}
+        return {}
+
     def _payload(self, data: dict[str, Any], allowed: dict[str, _AllowedReason]) -> dict[str, Any]:
         content = json.dumps(data, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
         if self.provider == "openai":
@@ -241,6 +249,7 @@ class HostedExplanationGenerator:
                     "strict": True, "schema": self._schema(allowed),
                 }},
                 "max_output_tokens": self.max_output_tokens, "store": False,
+                **self._openai_model_options(),
             }
         # Hosted NVIDIA models differ in response_format support. Plain JSON is
         # requested in messages and always validated locally; no capability claim.

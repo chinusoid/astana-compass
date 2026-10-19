@@ -378,6 +378,7 @@ class IntentAnalyzer:
                 "input": [{"role": "user", "content": data}],
                 "max_output_tokens": 1536,
                 "text": {"format": {"type": "json_schema", "name": "city_intent", "strict": True, "schema": _schema()}},
+                **self._hosted._openai_model_options(),
             }
         # Hosted NVIDIA model support for constrained decoding varies. Do not
         # send self-hosted NIM guided_json or assume universal response_format.

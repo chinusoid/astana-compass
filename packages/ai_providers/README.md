@@ -53,6 +53,12 @@ environment proxies are not used (`trust_env=False`).
   Only completed responses with exactly one output-text item are accepted;
   refusals, tools, failed/incomplete output and malformed envelopes are rejected.
   The selected model must support Responses structured outputs.
+  For the exact configured ID `gpt-6-luna`, both explanations and intent
+  extraction explicitly use `reasoning: {"effort": "none"}` to retain the
+  short deadline and small JSON output limits. This is an application latency
+  choice: [GPT-6 Luna supports `none` and otherwise defaults to `medium`](https://developers.openai.com/api/docs/models/gpt-6-luna).
+  Other model IDs retain their previous settings; no sampling or Chat
+  Completions token parameters are added to OpenAI requests.
 - NVIDIA hosted: `POST https://integrate.api.nvidia.com/v1/chat/completions`,
   configured model, system/user messages, `stream: false`, bounded `max_tokens`.
   The default asks for plain JSON in the prompt and **does not send

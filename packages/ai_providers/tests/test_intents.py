@@ -45,10 +45,10 @@ def envelope(provider, text):
     return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": text}}]}
 
 
-def hosted(provider, handler, query=QUERY, **config):
+def hosted(provider, handler, query=QUERY, *, model="configured/model", **config):
     async def execute():
         async with create_intent_analyzer(
-            provider, "configured/model", SECRET, transport=httpx.MockTransport(handler), **config
+            provider, model, SECRET, transport=httpx.MockTransport(handler), **config
         ) as analyzer:
             return await analyzer.analyze(query, "ru")
 
@@ -249,6 +249,36 @@ def test_hosted_payload_and_grounded_response(provider):
     assert result["available_seconds"] == 2700
     assert keys(result) == {"quiet", "has_power_outlets"}
     assert result["constraints"][0]["source_quote"] == "тихое"
+    validate_payload("IntentResponse", result)
+
+
+@pytest.mark.parametrize("provider,model,reasoning", [
+    ("openai", "gpt-6-luna", {"effort": "none"}),
+    ("openai", "configured/model", None),
+    ("nvidia", "gpt-6-luna", None),
+])
+def test_luna_intent_uses_same_scoped_responses_options(provider, model, reasoning):
+    def handle(request):
+        payload = json.loads(request.content)
+        assert payload["model"] == model
+        assert payload.get("reasoning") == reasoning
+        assert not {"temperature", "top_p", "max_completion_tokens", "reasoning_effort"} & payload.keys()
+        if provider == "openai":
+            assert str(request.url) == "https://api.openai.com/v1/responses"
+            assert "max_tokens" not in payload
+            assert payload["max_output_tokens"] == 1536
+            assert payload["store"] is False
+            assert payload["text"]["format"]["strict"] is True
+        else:
+            assert str(request.url) == "https://integrate.api.nvidia.com/v1/chat/completions"
+            assert payload["max_tokens"] == 1536
+            assert "max_output_tokens" not in payload
+        return httpx.Response(200, json=envelope(provider, json.dumps(extracted())))
+
+    result = hosted(provider, handle, model=model)
+    assert result["provider"] == provider
+    assert result["available_seconds"] == 2700
+    assert keys(result) == {"quiet", "has_power_outlets"}
     validate_payload("IntentResponse", result)
 
 

@@ -55,10 +55,10 @@ def envelope(provider, text=None):
     }}]}
 
 
-def run(provider, handler, *, place=None, **config):
+def run(provider, handler, *, place=None, model="configured/model-id", **config):
     async def execute():
         async with create_generator(
-            provider, "configured/model-id", SECRET,
+            provider, model, SECRET,
             transport=httpx.MockTransport(handler), **config,
         ) as generator:
             return await generator.generate(
@@ -107,6 +107,33 @@ def test_payload_privacy_and_grounded_mapping(provider):
     assert result == GroundedExplanation((GroundedReason("indoor", ("source:1", "source:2")),), "explore")
     assert len(captured) == 1
     assert PLACE == original
+
+
+@pytest.mark.parametrize("provider,model,reasoning", [
+    ("openai", "gpt-6-luna", {"effort": "none"}),
+    ("openai", "configured/model-id", None),
+    ("nvidia", "gpt-6-luna", None),
+])
+def test_luna_responses_reasoning_is_scoped_and_keeps_grounded_output(provider, model, reasoning):
+    def handler(request):
+        payload = json.loads(request.content)
+        assert payload["model"] == model
+        assert payload.get("reasoning") == reasoning
+        assert not {"temperature", "top_p", "max_completion_tokens", "reasoning_effort"} & payload.keys()
+        if provider == "openai":
+            assert str(request.url) == "https://api.openai.com/v1/responses"
+            assert "max_tokens" not in payload
+            assert payload["max_output_tokens"] == 512
+            assert payload["store"] is False
+            assert payload["text"]["format"]["strict"] is True
+        else:
+            assert str(request.url) == "https://integrate.api.nvidia.com/v1/chat/completions"
+            assert payload["max_tokens"] == 512
+            assert "max_output_tokens" not in payload
+        return httpx.Response(200, json=envelope(provider))
+
+    result = run(provider, handler, model=model)
+    assert result == GroundedExplanation((GroundedReason("indoor", ("source:1", "source:2")),), "explore")
 
 
 @pytest.mark.parametrize("provider", ["openai", "nvidia"])
