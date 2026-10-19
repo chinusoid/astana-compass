@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type {
   IntentResponse,
   ItineraryRequest,
@@ -23,8 +23,19 @@ import { locales, t } from "@/lib/i18n";
 import { intentText } from "@/lib/intent-copy";
 import { mapText } from "@/lib/map-copy";
 import { useSharedPlanner } from "@/lib/shared-planner";
+import { walkText } from "@/lib/walk-copy";
 
 const navigation = vi.hoisted(() => ({ pathname: "/walk" }));
+const intentMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/intent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/intent")>()),
+  interpretIntent: intentMock,
+}));
+beforeEach(() => {
+  intentMock
+    .mockReset()
+    .mockRejectedValue(new Error("Interpretation unavailable in this test"));
+});
 vi.mock("next/navigation", () => ({ usePathname: () => navigation.pathname }));
 // Exercise the planner/map boundary without a WebGL renderer in jsdom.
 vi.mock("next/dynamic", () => ({
@@ -147,19 +158,7 @@ it("automatically connects all three recommendations and keeps the whole path wh
         });
       }
       submitted.push(request);
-      return Response.json({
-        ...seed,
-        request,
-        places: places.slice(0, 3),
-        stops: places.slice(0, 3).map((place, index) => ({
-          ...seed.stops[0],
-          place_id: place.id,
-          order: index + 1,
-          visit_duration_seconds: 60,
-          constraint_evaluations: [],
-        })),
-        total_duration_seconds: seed.route!.duration_seconds + 180,
-      });
+      return Response.json(orderedJourneyResponse(request, places));
     }),
   );
   const user = userEvent.setup();
@@ -215,10 +214,27 @@ it("automatically connects all three recommendations and keeps the whole path wh
   );
   expect(map).toHaveAttribute("data-route", fullRoute);
   const overview = Number(map.getAttribute("data-overview"));
+  const visiblePlan = container.querySelector<HTMLElement>(".journey-preview")!;
   await user.click(
-    screen.getByRole("button", { name: mapText("ru", "overview") }),
+    within(visiblePlan).getByRole("button", {
+      name: walkText("ru", "viewRoute"),
+    }),
   );
   expect(map).toHaveAttribute("data-overview", String(overview + 1));
+  expect(visiblePlan).toBeVisible();
+  await user.click(
+    within(visiblePlan).getByRole("button", {
+      name: `${walkText("ru", "remove")}: ${places[1].name}`,
+    }),
+  );
+  await waitFor(() => expect(submitted).toHaveLength(2));
+  expect(submitted[1].place_ids).toEqual([places[0].id, places[2].id]);
+  await waitFor(() =>
+    expect(map).toHaveAttribute(
+      "data-stops",
+      [places[0].id, places[2].id].join(","),
+    ),
+  );
 });
 
 function orderedJourneyResponse(
@@ -256,6 +272,160 @@ function journeyPlaces() {
     name: `SYNTHETIC ${name}`,
   }));
 }
+
+it("starts without active filters, a time target or a return journey", async () => {
+  const requests: RecommendationRequest[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/places?"))
+        return Response.json({ places: [], next_cursor: null });
+      const request = JSON.parse(String(init?.body)) as RecommendationRequest;
+      requests.push(request);
+      return Response.json(scenarioResponse(request));
+    }),
+  );
+  const user = userEvent.setup();
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  expect(screen.getByText(walkText("ru", "noFilters"))).toBeVisible();
+  expect(
+    screen.queryByRole("spinbutton", { name: t("ru", "timeBudget") }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: walkText("ru", "filters") }),
+  ).toHaveAttribute("aria-expanded", "false");
+  await user.click(
+    screen.getByRole("button", { name: walkText("ru", "filters") }),
+  );
+  const filters = screen.getByRole("region", {
+    name: walkText("ru", "filters"),
+  });
+  expect(
+    within(filters).getByRole("spinbutton", { name: t("ru", "timeBudget") }),
+  ).toHaveValue(null);
+  expect(
+    within(filters).getByRole("checkbox", {
+      name: new RegExp(t("ru", "return")),
+    }),
+  ).not.toBeChecked();
+  for (const checkbox of within(filters).getAllByRole("checkbox"))
+    expect(checkbox).not.toBeChecked();
+  await user.click(
+    within(filters).getByRole("button", { name: walkText("ru", "done") }),
+  );
+  expect(filters).not.toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  await user.type(
+    screen.getByRole("textbox", { name: t("ru", "query") }),
+    "Парки{Enter}",
+  );
+  await screen.findByText(intentText("ru", "scenarioNoMatch"));
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({
+    available_seconds: 86400,
+    return_to_origin: false,
+    constraints: [],
+  });
+});
+
+it("automatically interprets two hours and preferences without rewriting manual filters or weakening must-haves", async () => {
+  const { interpretIntent } =
+    await vi.importActual<typeof import("@/lib/intent")>("@/lib/intent");
+  intentMock.mockImplementation(interpretIntent);
+  const query = "Хочу погулять два часа, в помещении с Wi-Fi";
+  const intent: IntentResponse = {
+    provider: "rules",
+    locale: "ru",
+    available_seconds: 7200,
+    time_evidence: "два часа",
+    anchor_text: null,
+    categories: ["cafe"],
+    constraints: [
+      {
+        constraint: { key: "indoor", value: true, strength: "preferred" },
+        source_quote: "в помещении",
+      },
+      {
+        constraint: { key: "has_wifi", value: true, strength: "required" },
+        source_quote: "Wi-Fi",
+      },
+    ],
+    clarification_questions: [],
+    warnings: [],
+  };
+  const requests: RecommendationRequest[] = [];
+  const intentRequests: unknown[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/places?"))
+        return Response.json({ places: [], next_cursor: null });
+      if (url === "/api/v1/intent") {
+        intentRequests.push(JSON.parse(String(init?.body)));
+        return Response.json(intent);
+      }
+      const request = JSON.parse(String(init?.body)) as RecommendationRequest;
+      requests.push(request);
+      return Response.json(scenarioResponse(request));
+    }),
+  );
+  const user = userEvent.setup();
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  await user.click(
+    screen.getByRole("button", { name: walkText("ru", "filters") }),
+  );
+  const time = screen.getByRole("spinbutton", { name: t("ru", "timeBudget") });
+  await user.type(time, "45");
+  await user.click(screen.getByText(t("ru", "strictConstraints")));
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: t("ru", "wheelchair_accessible") }),
+    "required",
+  );
+  await user.type(
+    screen.getByRole("textbox", { name: t("ru", "query") }),
+    query,
+  );
+  await user.click(
+    screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
+  );
+  await screen.findByText(intentText("ru", "scenarioNoMatch"));
+  expect(intentRequests).toEqual([{ query, locale: "ru" }]);
+  expect(requests).toHaveLength(1);
+  expect(requests[0].available_seconds).toBe(7200);
+  expect(requests[0].constraints).toEqual([
+    { key: "wheelchair_accessible", value: true, strength: "required" },
+    { key: "indoor", value: true, strength: "preferred" },
+    { key: "has_wifi", value: true, strength: "preferred" },
+  ]);
+  expect(time).toHaveValue(45);
+  expect(
+    screen.getByRole("combobox", { name: t("ru", "wheelchair_accessible") }),
+  ).toHaveValue("required");
+  expect(
+    screen.getByRole("checkbox", { name: t("ru", "indoor") }),
+  ).not.toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "Wi-Fi" })).not.toBeChecked();
+  expect(
+    screen.getByText(new RegExp(walkText("ru", "inferred"))),
+  ).toBeVisible();
+  expect(screen.getByTestId("map")).toHaveAttribute(
+    "data-origin",
+    JSON.stringify({ lat: 51.09, lon: 71.42 }),
+  );
+});
 
 it("shows every ordered stop while connecting and never substitutes a single-place path on failure", async () => {
   const places = journeyPlaces().slice(0, 2);
@@ -401,15 +571,18 @@ for (const locale of locales)
       ),
     );
     await user.click(
+      screen.getByRole("button", { name: walkText(locale, "filters") }),
+    );
+    await user.click(
       screen.getByRole("checkbox", { name: new RegExp(t(locale, "return")) }),
     );
     await waitFor(() => expect(submitted).toHaveLength(2));
-    expect(submitted[1].return_to_origin).toBe(false);
+    expect(submitted[1].return_to_origin).toBe(true);
     expect(submitted[1].place_ids).toEqual(submitted[0].place_ids);
     await waitFor(() =>
       expect(
         JSON.parse(screen.getByTestId("map").getAttribute("data-route")!),
-      ).toMatchObject({ includes_return: false }),
+      ).toMatchObject({ includes_return: true }),
     );
   });
 
@@ -550,9 +723,11 @@ it("submits the wishlist with Enter, shows progress immediately, and prevents du
   ).toBeDisabled();
   expect(screen.getByText(intentText("ru", "scenarioPending"))).toBeVisible();
   fireEvent.keyDown(input, { key: "Enter" });
-  expect(
-    fetcher.mock.calls.filter(([url]) => url === "/api/v1/recommendations"),
-  ).toHaveLength(1);
+  await waitFor(() =>
+    expect(
+      fetcher.mock.calls.filter(([url]) => url === "/api/v1/recommendations"),
+    ).toHaveLength(1),
+  );
   expect(submitted.query).toBe("Хочу самые красивые места\nИ парк");
   expect(submitted.constraints).toEqual([]);
   await act(async () => resolve(Response.json(scenarioResponse(submitted))));
@@ -633,6 +808,9 @@ it("marks text, time, constraints, start and return edits as unapplied until the
   await user.click(screen.getByRole("button", { name: "Map pick" }));
   const input = screen.getByRole("textbox", { name: t("ru", "query") });
   await user.type(input, "Красивые места");
+  await user.click(
+    screen.getByRole("button", { name: walkText("ru", "filters") }),
+  );
   async function search() {
     await user.click(
       screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
@@ -682,7 +860,7 @@ it("marks text, time, constraints, start and return edits as unapplied until the
     query: "Красивые места и парк",
     available_seconds: 5400,
     origin: { lat: 51.12, lon: 71.42 },
-    return_to_origin: false,
+    return_to_origin: true,
     constraints: [{ key: "has_wifi", value: true, strength: "preferred" }],
   });
 });
@@ -907,6 +1085,9 @@ it("submits explicit Wi-Fi and toilets requirements without weakening them", asy
     screen.getByRole("textbox", { name: t("ru", "query") }),
     "Кафе",
   );
+  await user.click(
+    screen.getByRole("button", { name: walkText("ru", "filters") }),
+  );
   await user.click(screen.getByText(t("ru", "strictConstraints")));
   await user.selectOptions(
     screen.getByRole("combobox", { name: "Wi-Fi" }),
@@ -914,7 +1095,9 @@ it("submits explicit Wi-Fi and toilets requirements without weakening them", asy
   );
   await user.click(screen.getByRole("checkbox", { name: t("ru", "toilets") }));
   await user.click(screen.getByRole("button", { name: "Map pick" }));
-  await user.click(screen.getByRole("button", { name: t("ru", "find") }));
+  await user.click(
+    screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
+  );
   await waitFor(() => expect(submitted).toBeDefined());
   expect(submitted?.constraints).toEqual(
     expect.arrayContaining([
@@ -960,6 +1143,9 @@ for (const [key, preset] of [
           mapProvider="none"
         />,
       );
+      await user.click(
+        screen.getByRole("button", { name: walkText("ru", "filters") }),
+      );
       await user.click(screen.getByText(t("ru", "strictConstraints")));
       const constraint = screen.getByRole("combobox", { name: t("ru", key) });
       await user.selectOptions(constraint, strength);
@@ -970,13 +1156,15 @@ for (const [key, preset] of [
         "required",
       );
       await user.click(screen.getByRole("button", { name: t("ru", preset) }));
-      expect(constraint).toHaveValue(strength || "preferred");
+      expect(constraint).toHaveValue(strength);
       await user.click(screen.getByRole("button", { name: "Map pick" }));
-      await user.click(screen.getByRole("button", { name: t("ru", "find") }));
+      await user.click(
+        screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
+      );
       await waitFor(() => expect(submitted).toBeDefined());
       expect(submitted?.constraints).toEqual(
         expect.arrayContaining([
-          { key, value: true, strength: strength || "preferred" },
+          ...(strength ? [{ key, value: true, strength }] : []),
           { key: "wheelchair_accessible", value: true, strength: "required" },
         ]),
       );
@@ -1007,7 +1195,15 @@ it("keeps the wishlist intact and sends ordinary amenities only as removable pre
   );
   const strict = container.querySelector(".strict-constraints")!;
   expect(strict).not.toHaveAttribute("open");
-  expect(screen.getByRole("combobox", { name: "Wi-Fi" })).not.toBeVisible();
+  expect(
+    screen.queryByRole("combobox", { name: "Wi-Fi" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("checkbox", { name: "Wi-Fi" }),
+  ).not.toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: walkText("ru", "filters") }),
+  );
   const query = "Хочу прогулку по живописным местам, а по пути кофе";
   await user.type(
     screen.getByRole("textbox", { name: t("ru", "query") }),
@@ -1016,7 +1212,9 @@ it("keeps the wishlist intact and sends ordinary amenities only as removable pre
   await user.click(screen.getByRole("checkbox", { name: "Wi-Fi" }));
   await user.click(screen.getByRole("checkbox", { name: t("ru", "indoor") }));
   await user.click(screen.getByRole("button", { name: "Map pick" }));
-  await user.click(screen.getByRole("button", { name: t("ru", "find") }));
+  await user.click(
+    screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
+  );
   await screen.findByText(intentText("ru", "scenarioNoMatch"));
   expect(submitted[0].query).toBe(query);
   expect(submitted[0].constraints).toEqual(
@@ -1028,7 +1226,9 @@ it("keeps the wishlist intact and sends ordinary amenities only as removable pre
   expect(submitted[0].constraints).toHaveLength(2);
   await user.click(screen.getByRole("checkbox", { name: "Wi-Fi" }));
   await user.click(screen.getByRole("checkbox", { name: t("ru", "indoor") }));
-  await user.click(screen.getByRole("button", { name: t("ru", "find") }));
+  await user.click(
+    screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
+  );
   await screen.findByText(intentText("ru", "scenarioNoMatch"));
   expect(submitted[1].query).toBe(query);
   expect(submitted[1].constraints).toEqual([]);
@@ -1052,6 +1252,9 @@ for (const locale of locales) {
     await user.selectOptions(
       screen.getByRole("combobox", { name: t("ru", "language") }),
       locale,
+    );
+    await user.click(
+      screen.getByRole("button", { name: walkText(locale, "filters") }),
     );
     const strict = container.querySelector(".strict-constraints")!;
     expect(strict).not.toHaveAttribute("open");
@@ -1143,6 +1346,7 @@ for (const locale of locales) {
           ...seed,
           status: "partial",
           request,
+          route: { ...seed.route!, includes_return: request.return_to_origin },
           places,
           stops: places.map((place, index) => ({
             ...seed.stops[0],
@@ -1217,6 +1421,9 @@ for (const locale of locales) {
     await user.type(
       screen.getByRole("spinbutton", { name: t(locale, "longitude") }),
       "71.42",
+    );
+    await user.click(
+      screen.getByRole("button", { name: walkText(locale, "filters") }),
     );
     await user.click(
       screen.getByRole("checkbox", { name: t(locale, "indoor") }),
@@ -1327,6 +1534,9 @@ it("keeps the planner in memory across pages and isolates a group's map route", 
     screen.getByRole("textbox", { name: t("ru", "query") }),
     "Тихая прогулка",
   );
+  await user.click(
+    screen.getByRole("button", { name: walkText("ru", "filters") }),
+  );
   await user.clear(
     screen.getByRole("spinbutton", { name: t("ru", "timeBudget") }),
   );
@@ -1426,6 +1636,7 @@ it("applies reviewed intent without lowering must-haves or moving the origin", a
       ? Response.json(intent)
       : Response.json({ places: [], next_cursor: null }),
   );
+  intentMock.mockResolvedValue(intent);
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
   render(
@@ -1440,18 +1651,22 @@ it("applies reviewed intent without lowering must-haves or moving the origin", a
     screen.getByRole("textbox", { name: t("ru", "query") }),
     query,
   );
+  await user.click(
+    screen.getByRole("button", { name: walkText("ru", "filters") }),
+  );
   await user.click(screen.getByText(t("ru", "strictConstraints")));
   await user.selectOptions(
     screen.getByRole("combobox", { name: t("ru", "indoor") }),
     "required",
   );
+  await user.click(screen.getByText(walkText("ru", "advancedIntent")));
   await user.click(
     screen.getByRole("button", { name: intentText("ru", "analyze") }),
   );
   await screen.findByRole("button", { name: intentText("ru", "apply") });
   expect(
     screen.getByRole("spinbutton", { name: t("ru", "timeBudget") }),
-  ).toHaveValue(60);
+  ).toHaveValue(null);
   expect(
     screen.getByRole("combobox", { name: t("ru", "has_power_outlets") }),
   ).toHaveValue("");
