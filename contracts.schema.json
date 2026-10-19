@@ -2544,7 +2544,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^osm:(node|way|relation):[0-9]+$"
+          "pattern": "^(osm:(node|way|relation):[0-9]+|tomtom:poi:[A-Za-z0-9_-]{1,200})$"
         },
         "name": {
           "type": "string",
@@ -2605,7 +2605,7 @@
         },
         "source_url": {
           "type": "string",
-          "pattern": "^https://www\\.openstreetmap\\.org/(node|way|relation)/[0-9]+$"
+          "pattern": "^https://(www\\.openstreetmap\\.org/(node|way|relation)/[0-9]+|docs\\.tomtom\\.com/places-search-api/documentation/places-search/discover)$"
         },
         "source_label": {
           "type": "string",

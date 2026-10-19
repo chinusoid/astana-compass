@@ -126,7 +126,7 @@ def test_unspecified_real_internet_never_satisfies_required_wifi(offline_live):
 
 @pytest.mark.parametrize(("query", "locale", "categories"), [
     ("кофе", "ru", {"cafe"}), ("мұражай", "kk", {"museum"}),
-    ("library", "en", {"library"}), ("серуен", "kk", {"park", "garden"}),
+    ("library", "en", {"library"}), ("серуен", "kk", {"park", "garden", "theatre", "attraction", "viewpoint", "artwork"}),
 ])
 def test_real_recommendations_and_itinerary_without_keys(offline_live, query, locale, categories):
     payload = request(query, locale)
@@ -136,6 +136,9 @@ def test_real_recommendations_and_itinerary_without_keys(offline_live, query, lo
     validate_payload("RecommendationResponse", result)
     assert 1 <= len(result["recommendations"]) <= 3
     assert all(categories.intersection(place["categories"]) and not place["is_synthetic"] for place in result["places"])
+    if query == "серуен":
+        assert any({"park", "garden"}.intersection(place["categories"]) for place in result["places"])
+        assert any({"theatre", "attraction", "viewpoint", "artwork"}.intersection(place["categories"]) for place in result["places"])
     assert result["warnings"]  # Local search and unavailable model remain disclosed.
     for item in result["recommendations"]:
         assert item["route"]["method"] == "approximate"

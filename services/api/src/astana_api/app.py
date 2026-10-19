@@ -24,7 +24,7 @@ from .sandbox import sandbox_router
 from .settings import Settings
 from .social import SocialError, SocialStore, social_error_handler, social_router
 from .traffic import TrafficService
-from .map_features import MapFeatureService
+from .tomtom_places import create_map_service
 from astana_city_context.common import ProviderError
 
 
@@ -185,7 +185,7 @@ def create_app(settings=None, services=None):
             app.state.traffic = TrafficService(os.getenv("TOMTOM_API_KEY", ""))
             stack.push_async_callback(app.state.traffic.aclose)
             progress.enter("map")
-            app.state.map_features = MapFeatureService(enabled=settings.mode == "live" and os.getenv("ASTANA_MAP_LOOKUP_ENABLED", "false").lower() == "true")
+            app.state.map_features = create_map_service(enabled=settings.mode == "live" and os.getenv("ASTANA_MAP_LOOKUP_ENABLED", "false").lower() == "true")
             stack.push_async_callback(app.state.map_features.aclose)
             app.state.services = services
             if app.state.services is None:
