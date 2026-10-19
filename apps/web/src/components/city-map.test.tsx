@@ -194,6 +194,10 @@ beforeEach(() => {
   fake.markers.length = 0;
   fake.geolocates.length = 0;
   vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => ({ matches: true })),
+  );
+  vi.stubGlobal(
     "ResizeObserver",
     class {
       observe() {}
@@ -460,7 +464,7 @@ it.each(["missing", "empty", "invalid", "throws", "flat"])(
   },
 );
 
-it("opens numbered stop details on click and keyboard and retains the popup when activeId updates", async () => {
+it("opens full numbered stop details immediately on click and keyboard, with a compact map preview", async () => {
   const place = structuredClone(
     examples.cases.find((entry) => entry.name === "place_valid")!.instance,
   ) as Place;
@@ -482,6 +486,7 @@ it("opens numbered stop details on click and keyboard and retains the popup when
   const marker = fake.markers.find((entry) => entry.element === button)!;
   expect(marker.togglePopup).toHaveBeenCalledOnce();
   expect(config.onSelect).toHaveBeenCalledWith(place.id);
+  expect(config.onDetails).toHaveBeenCalledExactlyOnceWith(place.id);
   const popup = marker.popup!.content!;
   expect(popup.textContent).toContain(mapText("ru", "firstStop"));
   expect(popup.textContent).toContain(place.name);
@@ -494,6 +499,7 @@ it("opens numbered stop details on click and keyboard and retains the popup when
   expect(button).toHaveAttribute("aria-pressed", "true");
   fireEvent.keyDown(button, { key: "Enter" });
   expect(marker.togglePopup).toHaveBeenCalledTimes(2);
+  expect(config.onDetails).toHaveBeenCalledTimes(3);
 });
 
 it.each(["click", "Enter"] as const)(
@@ -537,13 +543,15 @@ it.each(["click", "Enter"] as const)(
       );
     }
     const view = render(<Parent />);
-    await loadMap();
+    const map = await loadMap();
     const markerButton = () =>
       screen.getByRole("button", {
         name: new RegExp(`: ${second.name}$`),
       });
     await waitFor(() => expect(markerButton()).toBeVisible());
     const original = markerButton();
+    const routePaints = map.getSource("journey")!.setData.mock.calls.length;
+    const routeOverviews = map.fitBounds.mock.calls.length;
     expect(original).toHaveAttribute("aria-pressed", "false");
     if (activation === "click") fireEvent.click(original);
     else fireEvent.keyDown(original, { key: "Enter" });
@@ -554,6 +562,10 @@ it.each(["click", "Enter"] as const)(
     expect(selected).toHaveAttribute("aria-pressed", "true");
     expect(marker.popup?.isOpen()).toBe(true);
     expect(marker.popup?.content).toHaveTextContent(second.name);
+    expect(map.getSource("journey")!.setData).toHaveBeenCalledTimes(
+      routePaints,
+    );
+    expect(map.fitBounds).toHaveBeenCalledTimes(routeOverviews);
     expect(fake.markers.filter((entry) => entry.popup?.isOpen())).toEqual([
       marker,
     ]);

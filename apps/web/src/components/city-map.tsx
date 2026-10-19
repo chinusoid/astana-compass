@@ -38,13 +38,14 @@ import { startMapMotion, type MotionStatus } from "@/lib/map-motion";
 import { valid } from "@/lib/contracts";
 import {
   bindMarkerPopup,
+  animateJourney,
   categorySymbol,
   fitJourney,
   installJourney,
   placePopup,
   stopTitle,
-  updateJourney,
 } from "@/lib/map-route";
+import { journeyColor } from "@/lib/map-route-segments";
 import {
   fetchMapFeatures,
   MapFeatureError,
@@ -100,6 +101,7 @@ export default function CityMap(props: Props) {
   const inspectionPoint = inspection?.point;
   const mode = useRef(true);
   const stopMotion = useRef<(() => void) | null>(null);
+  const stopJourney = useRef<(() => void) | null>(null);
   const stopTraffic = useRef<(() => void) | null>(null);
   const trafficRequest = useRef<AbortController | null>(null);
   const lastTrafficRequest = useRef(0);
@@ -126,9 +128,13 @@ export default function CityMap(props: Props) {
   const followMode = useRef<"idle" | "following" | "paused">("idle");
   const [motionEnabled, setMotionEnabled] = useState(true);
   const [motionStatus, setMotionStatus] = useState<MotionStatus>("empty");
+  const [revealingRoute, setRevealingRoute] = useState(false);
+  // An inspection can recreate its parent's route object. Compare coordinates
+  // so it never restarts the reveal or recentres a route the user is browsing.
+  const geometryKey = JSON.stringify(validatedRouteGeometry(props.route));
   const geometry = useMemo(
-    () => validatedRouteGeometry(props.route),
-    [props.route],
+    () => JSON.parse(geometryKey) as ReturnType<typeof validatedRouteGeometry>,
+    [geometryKey],
   );
   const stopIdKey = JSON.stringify(props.routeStopIds ?? props.selectedIds);
   const stopIds: string[] = useMemo(() => JSON.parse(stopIdKey), [stopIdKey]);
@@ -142,6 +148,16 @@ export default function CityMap(props: Props) {
   const journeyPoints: Location[] = useMemo(
     () => JSON.parse(journeyPointKey),
     [journeyPointKey],
+  );
+  const destinationKey = JSON.stringify(
+    stopIds.flatMap((id) => {
+      const place = props.places.find((item) => item.id === id);
+      return place ? [place.location] : [];
+    }),
+  );
+  const destinations: Location[] = useMemo(
+    () => JSON.parse(destinationKey),
+    [destinationKey],
   );
   const hasJourney =
     props.route !== null && (geometry !== null || stopIds.length > 0);
@@ -357,6 +373,8 @@ export default function CityMap(props: Props) {
       observer?.disconnect();
       stopMotion.current?.();
       stopMotion.current = null;
+      stopJourney.current?.();
+      stopJourney.current = null;
       trafficRequest.current?.abort();
       featureRequest.current?.abort();
       stopTraffic.current?.();
@@ -404,6 +422,8 @@ export default function CityMap(props: Props) {
           button.append(symbol);
           button.title = `${index >= 0 ? `${stopTitle(props.locale, index)} · ` : ""}${place.name}`;
           if (index >= 0) {
+            button.style.backgroundColor = journeyColor(index);
+            button.style.outlineColor = journeyColor(index);
             const caption = document.createElement("span");
             caption.className = "map-marker-caption";
             caption.textContent = `${place.name}${geometry && !props.route?.includes_return && index === stopIds.length - 1 ? ` · ${mapText(props.locale, "endRoute")}` : ""}`;
@@ -439,6 +459,7 @@ export default function CityMap(props: Props) {
             for (const other of markers.current)
               if (other !== marker) other.getPopup()?.remove();
             current.current.onSelect(place.id);
+            current.current.onDetails?.(place.id);
           });
           if (place.id === openPlaceId) marker.togglePopup();
           next.push(marker);
@@ -521,7 +542,6 @@ export default function CityMap(props: Props) {
           );
         }
         markers.current = next;
-        updateJourney(map, geometry);
       })
       .catch(() => {
         if (!disposed) setTransient(true);
@@ -653,8 +673,26 @@ export default function CityMap(props: Props) {
 
   useEffect(() => {
     if (!ready || !mapRef.current || !hasJourney) return;
-    fitJourney(mapRef.current, geometry, journeyPoints);
+    fitJourney(mapRef.current, geometry, journeyPoints, true);
   }, [ready, geometry, hasJourney, journeyPoints, props.overviewRequest]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    setRevealingRoute(geometry !== null);
+    const stop = animateJourney(
+      map,
+      geometry,
+      destinations,
+      props.route?.includes_return,
+      () => setRevealingRoute(false),
+    );
+    stopJourney.current = stop;
+    return () => {
+      stop();
+      if (stopJourney.current === stop) stopJourney.current = null;
+    };
+  }, [ready, geometry, destinations, props.route?.includes_return]);
 
   function closeInspection() {
     featureRequest.current?.abort();
@@ -763,6 +801,7 @@ export default function CityMap(props: Props) {
       aria-labelledby="map-heading"
       data-testid="map-panel"
       data-route-geometry={geometry ? "routed" : "none"}
+      data-route-revealing={revealingRoute}
       data-map-mode={is3D ? "3d" : "2d"}
       data-map-status={status}
     >
@@ -780,6 +819,47 @@ export default function CityMap(props: Props) {
           role="region"
           aria-label={text("title")}
         />
+        {props.enabled && ready && hasJourney && !props.picking && (
+          <div
+            className="map-journey-summary"
+            data-testid="map-journey-summary"
+          >
+            <p role="status" aria-live="polite">
+              <Route size={17} aria-hidden="true" />
+              {text(
+                revealingRoute
+                  ? "routeAppearing"
+                  : geometry
+                    ? "routeReady"
+                    : "routePointsReady",
+              )}
+            </p>
+            {geometry && (
+              <ol className="map-journey-legs" aria-label={text("routeLegs")}>
+                {stopIds.map((id, index) => {
+                  const name = props.places.find(
+                    (place) => place.id === id,
+                  )?.name;
+                  return (
+                    <li
+                      key={id}
+                      style={{ color: journeyColor(index) }}
+                      title={name}
+                    >
+                      <span aria-hidden="true">●</span> {index ? index : "S"} →{" "}
+                      {index + 1}
+                    </li>
+                  );
+                })}
+                {props.route?.includes_return && (
+                  <li style={{ color: journeyColor(stopIds.length, true) }}>
+                    <span aria-hidden="true">●</span> {stopIds.length} → S
+                  </li>
+                )}
+              </ol>
+            )}
+          </div>
+        )}
         {props.enabled && (
           <div
             className="map-toolbar"
@@ -1150,7 +1230,11 @@ export default function CityMap(props: Props) {
         )}
         {geometry && (
           <span>
-            <b className="map-legend-route" aria-hidden="true">
+            <b
+              className="map-legend-route"
+              aria-hidden="true"
+              style={{ color: journeyColor(0) }}
+            >
               ➜
             </b>
             {text("routeLegend")}

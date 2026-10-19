@@ -2,13 +2,12 @@ import type { Location, Place, RouteGeometry } from "@astana/api-client";
 import type { GeoJSONSource, Map as LibreMap, Marker } from "maplibre-gl";
 import { label, type Locale } from "./i18n";
 import { mapText } from "./map-copy";
+import { sourcedFact } from "./place-presentation";
 import {
-  factLabel,
-  factValue,
-  overviewKeys,
-  sourceDescription,
-  sourcedFact,
-} from "./place-presentation";
+  journeyLegs,
+  revealedLegs,
+  type JourneyLeg,
+} from "./map-route-segments";
 
 export const JOURNEY_SOURCE = "journey";
 export const JOURNEY_ARROWS = "journey-arrows";
@@ -103,7 +102,11 @@ export function installJourney(map: LibreMap) {
     id: "journey-line",
     type: "line",
     source: JOURNEY_SOURCE,
-    paint: { "line-color": "#156d60", "line-width": 6, "line-opacity": 1 },
+    paint: {
+      "line-color": ["get", "color"],
+      "line-width": 6,
+      "line-opacity": 1,
+    },
     layout: { "line-cap": "round", "line-join": "round" },
   });
   // A local raster icon avoids depending on a remote font or external asset.
@@ -134,20 +137,93 @@ export function installJourney(map: LibreMap) {
   });
 }
 
-export function updateJourney(map: LibreMap, geometry: RouteGeometry | null) {
+function paintJourney(map: LibreMap, legs: JourneyLeg[]) {
   (map.getSource(JOURNEY_SOURCE) as GeoJSONSource | undefined)?.setData({
     type: "FeatureCollection",
-    features: geometry ? [{ type: "Feature", properties: {}, geometry }] : [],
+    features: legs,
   });
-  (map.getSource(JOURNEY_ARROWS) as GeoJSONSource | undefined)?.setData(
-    routeArrows(geometry),
+  (map.getSource(JOURNEY_ARROWS) as GeoJSONSource | undefined)?.setData({
+    type: "FeatureCollection",
+    features: legs.flatMap((leg) => routeArrows(leg.geometry).features),
+  });
+}
+
+export function updateJourney(
+  map: LibreMap,
+  geometry: RouteGeometry | null,
+  destinations: Location[] = [],
+  includesReturn = false,
+) {
+  paintJourney(map, journeyLegs(geometry, destinations, includesReturn));
+}
+
+export function reducedMapMotion() {
+  return (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
+}
+
+/** A one-shot reveal, cancelled when a new route replaces it or the map unmounts. */
+export function animateJourney(
+  map: LibreMap,
+  geometry: RouteGeometry | null,
+  destinations: Location[] = [],
+  includesReturn = false,
+  complete: () => void = () => {},
+) {
+  const legs = journeyLegs(geometry, destinations, includesReturn);
+  const preference =
+    typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)")
+      : null;
+  let frame = 0;
+  let cancelled = false;
+  let finished = false;
+  let started: number | null = null;
+  const finish = () => {
+    if (cancelled || finished) return;
+    finished = true;
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
+    preference?.removeEventListener?.("change", preferenceChanged);
+    paintJourney(map, legs);
+    complete();
+  };
+  const preferenceChanged = () => {
+    if (preference?.matches) finish();
+  };
+  if (
+    !geometry ||
+    preference?.matches ||
+    typeof requestAnimationFrame !== "function"
+  )
+    finish();
+  else {
+    paintJourney(map, []);
+    const tick = (now: number) => {
+      if (cancelled || finished) return;
+      started ??= now;
+      const progress = Math.min(1, (now - started) / 950);
+      // Smooth arrival without delaying the clear start of the route.
+      paintJourney(map, revealedLegs(legs, 1 - (1 - progress) ** 3));
+      if (progress < 1) frame = requestAnimationFrame(tick);
+      else finish();
+    };
+    frame = requestAnimationFrame(tick);
+    preference?.addEventListener?.("change", preferenceChanged);
+  }
+  return () => {
+    cancelled = true;
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
+    preference?.removeEventListener?.("change", preferenceChanged);
+  };
 }
 
 export function fitJourney(
   map: LibreMap,
   geometry: RouteGeometry | null,
   stops: Location[] = [],
+  animate = false,
 ) {
   // Include the actual POIs even if the routing provider snapped to a road.
   // With an approximate estimate, fit the stops without inventing a path.
@@ -166,7 +242,7 @@ export function fitJourney(
     {
       padding: { top: 100, right: 65, bottom: 70, left: 65 },
       maxZoom: 16,
-      duration: 0,
+      duration: animate && !reducedMapMotion() ? 750 : 0,
     },
   );
 }
@@ -222,40 +298,6 @@ export function placePopup(
     .filter(Boolean)
     .join(", ");
   add("p", address || mapText(locale, "addressUnknown"));
-  const description = sourceDescription(place, locale);
-  add("p", description?.text ?? mapText(locale, "descriptionUnknown"));
-  const facts = place.facts.filter(
-    (fact) =>
-      fact.status === "known" &&
-      overviewKeys.includes(fact.key) &&
-      sourcedFact(place, fact.key),
-  );
-  if (facts.length) {
-    const list = document.createElement("dl");
-    for (const fact of facts) {
-      const term = document.createElement("dt");
-      term.textContent = factLabel(locale, fact.key);
-      const detail = document.createElement("dd");
-      detail.textContent = factValue(locale, fact);
-      list.append(term, detail);
-    }
-    content.append(list);
-  }
-  for (const source of description?.evidence ?? place.evidence.slice(0, 2)) {
-    let url: URL;
-    try {
-      url = new URL(source.source_url);
-    } catch {
-      continue;
-    }
-    if (!/^https?:$/.test(url.protocol) || url.username || url.password)
-      continue;
-    const link = add("a", source.source_name) as HTMLAnchorElement;
-    link.href = url.href;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-  }
-  add("small", mapText(locale, "sourceClaim"));
   const button = add(
     "button",
     mapText(locale, "fullDetails"),

@@ -73,7 +73,7 @@ it("keeps arrow work bounded for long routes and skips repeated vertices", () =>
   ).toHaveLength(0);
 });
 
-it("renders real stop details as text and only links safe source URLs", () => {
+it("keeps map previews compact and opens the full card for descriptions", () => {
   const place = structuredClone(
     examples.cases.find((entry) => entry.name === "place_valid")!.instance,
   ) as Place;
@@ -84,9 +84,10 @@ it("renders real stop details as text and only links safe source URLs", () => {
   const popup = placePopup(place, "en", 0, open);
   expect(popup.querySelector("img")).toBeNull();
   expect(popup.textContent).toContain(place.name);
-  expect(popup.textContent).toContain(place.description);
+  expect(popup.textContent).not.toContain(place.description);
   expect(popup.textContent).toContain("This is your first destination");
   expect(popup.querySelector('a[href^="javascript:"]')).toBeNull();
+  expect(popup.querySelector("dl")).toBeNull();
   popup.querySelector("button")!.click();
   expect(open).toHaveBeenCalledOnce();
 });

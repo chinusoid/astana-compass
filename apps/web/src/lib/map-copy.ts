@@ -1,6 +1,26 @@
 import type { Locale } from "./i18n";
 
 const copy = {
+  routeAppearing: [
+    "Показываем ваш маршрут…",
+    "Маршрутыңыз көрсетілуде…",
+    "Revealing your route…",
+  ],
+  routeReady: [
+    "Маршрут готов — все остановки на карте",
+    "Маршрут дайын — барлық аялдамалар картада",
+    "Your route is ready — every stop is on the map",
+  ],
+  routePointsReady: [
+    "Все остановки на карте · путь пока не подтверждён",
+    "Барлық аялдамалар картада · жол әлі расталмаған",
+    "Every stop is on the map · the path is not confirmed yet",
+  ],
+  routeLegs: [
+    "Цвета участков маршрута",
+    "Маршрут бөліктерінің түстері",
+    "Route leg colours",
+  ],
   privacyLabel: ["О карте", "Карта туралы", "About map"],
   title: ["Карта Астаны", "Астана картасы", "Astana map"],
   hint: [
