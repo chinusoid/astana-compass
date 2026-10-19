@@ -344,6 +344,94 @@ jobs:
           assert.equal(typeof payload.request_id, "string");
           console.log("Cloudflare workerd passed: SSR page, public icon and safe 503 without a backend.");
           NODE
+      - name: Verify successful upstream proxying and redirect rejection in workerd
+        working-directory: apps/web
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          # Wrangler's local outbound-service mock receives every fetch from
+          # workerd. No real API, provider, credentials or external network.
+          timeout --signal=TERM --kill-after=5s 120s node - <<'NODE'
+          const assert = require("node:assert/strict");
+          const path = require("node:path");
+          const { unstable_startWorker } = require("wrangler");
+          const origin = "https://backend.test";
+          const token = "a".repeat(43);
+          const state = {
+            profile: { id: "guest", name: "Guest" }, friend_code: "invite",
+            friends: [], friend_requests: [], party_invites: [], parties: [],
+            expires_at: "2026-10-20T00:00:00Z",
+          };
+          const calls = [];
+          let worker;
+          (async () => {
+            try {
+              worker = await unstable_startWorker({
+                config: path.join(process.env.RUNNER_TEMP, "cloudflare-release/wrangler.jsonc"),
+                bindings: {
+                  ASTANA_API_URL: { type: "plain_text", value: origin },
+                  ASTANA_MAP_PROVIDER: { type: "plain_text", value: "none" },
+                  ASTANA_ALLOW_FIXTURES: { type: "plain_text", value: "false" },
+                },
+                dev: {
+                  remote: false, watch: false, persist: false, inspector: false,
+                  server: { hostname: "127.0.0.1", port: 0 },
+                  outboundService: async (request) => {
+                    const url = new URL(request.url);
+                    assert.equal(url.origin, origin, "Unexpected outbound host or followed redirect");
+                    calls.push(url.pathname);
+                    if (url.pathname === "/v1/places" || url.pathname === "/v1/social/events") {
+                      return new Response("Do not expose this redirect body", {
+                        status: url.pathname === "/v1/places" ? 302 : 307,
+                        headers: { Location: "https://redirect.invalid/private" },
+                      });
+                    }
+                    if (url.pathname === "/v1/social/state") {
+                      assert.equal(request.headers.get("Authorization"), `Bearer ${token}`);
+                      return Response.json(state);
+                    }
+                    assert.ok(["/v1/data-status", "/v1/intent"].includes(url.pathname));
+                    if (url.pathname === "/v1/intent") {
+                      assert.equal(request.method, "POST");
+                      assert.deepEqual(await request.json(), { query: "CI example", locale: "en" });
+                    }
+                    return Response.json({ ci: "upstream-ok" }, {
+                      headers: { "X-Astana-Data-Mode": "live", "Set-Cookie": "not-for-the-browser=1" },
+                    });
+                  },
+                },
+              });
+              const catalog = await worker.fetch("http://localhost/api/v1/data-status");
+              assert.equal(catalog.status, 200);
+              assert.deepEqual(await catalog.json(), { ci: "upstream-ok" });
+              assert.equal(catalog.headers.get("X-Astana-Data-Mode"), "live");
+              assert.equal(catalog.headers.get("Set-Cookie"), null);
+              const intent = await worker.fetch("http://localhost/api/v1/intent", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query: "CI example", locale: "en" }),
+              });
+              assert.equal(intent.status, 200);
+              assert.deepEqual(await intent.json(), { ci: "upstream-ok" });
+              const guest = await worker.fetch("http://localhost/api/v1/social/state", {
+                headers: { Cookie: `astana_guest=${token}` },
+              });
+              assert.equal(guest.status, 200);
+              assert.deepEqual(await guest.json(), state);
+              for (const resource of ["places", "social/events"]) {
+                const response = await worker.fetch(`http://localhost/api/v1/${resource}`);
+                assert.equal(response.status, 503);
+                assert.equal((await response.json()).error.code, "provider_unavailable");
+                assert.equal(response.headers.get("Location"), null);
+              }
+              assert.deepEqual(calls, [
+                "/v1/data-status", "/v1/intent", "/v1/social/state", "/v1/places", "/v1/social/events",
+              ]);
+              console.log("Cloudflare upstream smoke passed: GET/POST/social 200, redirect rejection, no external requests.");
+            } finally {
+              await worker?.dispose();
+            }
+          })().catch((error) => { console.error(error); process.exitCode = 1; });
+          NODE
       - name: Upload the verified portable Cloudflare Worker
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

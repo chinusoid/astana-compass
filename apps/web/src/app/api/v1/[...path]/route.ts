@@ -110,8 +110,14 @@ async function proxy(
       body: body as BodyInit | undefined,
       cache: "no-store",
       signal,
-      redirect: "error",
+      // Workers supports manual/follow; reject redirects ourselves without
+      // forwarding a request body or credentials to another origin.
+      redirect: "manual",
     });
+    if (upstream.status >= 300 && upstream.status < 400) {
+      await upstream.body?.cancel();
+      return failure(503);
+    }
     const headers = new Headers({
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
