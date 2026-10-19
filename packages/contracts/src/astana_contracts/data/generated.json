@@ -1,6 +1,6 @@
 {
   "generated_by": "scripts/generate_contracts.py",
   "do_not_edit": true,
-  "schema_sha256": "9c154579420c6ddc043b6618313a9a9fc262480fcbadb245c66693f74a669744",
-  "examples_sha256": "9868cc24dc829c2ae4b1e82409c3df00633dcd25d440fda7ef49e639fd896936"
+  "schema_sha256": "642d0d279c8c80a758e399536c5640756b6b8a5d7c7734a2b15ca51553c7d080",
+  "examples_sha256": "82f81f1ec11fdb4cda3ea6bb0b9bd24458824d93d2545886a077be548e366f61"
 }

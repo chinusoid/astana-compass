@@ -2128,6 +2128,103 @@
           }
         ]
       }
+    },
+    {
+      "name": "place_directory_request_valid",
+      "definition": "PlaceDirectoryRequest",
+      "valid": true,
+      "instance": {
+        "place_id": "synthetic:place:directory-demo",
+        "locale": "ru"
+      }
+    },
+    {
+      "name": "place_directory_no_credentials",
+      "definition": "PlaceDirectoryRequest",
+      "valid": false,
+      "instance": {
+        "place_id": "synthetic:place:directory-demo",
+        "locale": "ru",
+        "key": "synthetic-not-a-key"
+      },
+      "failure_stage": "schema"
+    },
+    {
+      "name": "place_directory_requires_id",
+      "definition": "PlaceDirectoryRequest",
+      "valid": false,
+      "instance": {
+        "place_id": "",
+        "locale": "ru"
+      },
+      "failure_stage": "schema"
+    },
+    {
+      "name": "twogis_map_feature_valid",
+      "definition": "MapFeatureResponse",
+      "valid": true,
+      "instance": {
+        "status": "ok",
+        "features": [
+          {
+            "id": "twogis:branch:999999999999990001",
+            "name": "SYNTHETIC directory cafe",
+            "kind": "Cafe",
+            "description": "Synthetic directory description; no real organization.",
+            "address": "Synthetic address",
+            "location": {
+              "lat": 51.1283,
+              "lon": 71.4305
+            },
+            "match": "nearby",
+            "distance_meters": 10,
+            "attributes": [
+              {
+                "label": "Synthetic hours",
+                "value": "Mon 09:00–18:00"
+              }
+            ],
+            "source_url": "https://2gis.kz/astana/firm/999999999999990001",
+            "source_label": "2ГИС"
+          }
+        ],
+        "retrieved_at": "2026-10-19T16:00:00Z",
+        "attribution": "2ГИС"
+      }
+    },
+    {
+      "name": "twogis_source_url_rejects_query_credentials",
+      "definition": "MapFeatureResponse",
+      "valid": false,
+      "instance": {
+        "status": "ok",
+        "features": [
+          {
+            "id": "twogis:branch:999999999999990001",
+            "name": "SYNTHETIC directory cafe",
+            "kind": "Cafe",
+            "description": "Synthetic directory description; no real organization.",
+            "address": "Synthetic address",
+            "location": {
+              "lat": 51.1283,
+              "lon": 71.4305
+            },
+            "match": "nearby",
+            "distance_meters": 10,
+            "attributes": [
+              {
+                "label": "Synthetic hours",
+                "value": "Mon 09:00–18:00"
+              }
+            ],
+            "source_url": "https://2gis.kz/astana/firm/999999999999990001?key=synthetic-not-a-key",
+            "source_label": "2ГИС"
+          }
+        ],
+        "retrieved_at": "2026-10-19T16:00:00Z",
+        "attribution": "2ГИС"
+      },
+      "failure_stage": "schema"
     }
   ]
 }

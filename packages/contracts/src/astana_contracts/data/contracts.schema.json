@@ -2525,6 +2525,28 @@
         }
       }
     },
+    "PlaceDirectoryRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "place_id",
+        "locale"
+      ],
+      "properties": {
+        "place_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "locale": {
+          "enum": [
+            "ru",
+            "kk",
+            "en"
+          ]
+        }
+      }
+    },
     "MapFeature": {
       "type": "object",
       "additionalProperties": false,
@@ -2544,7 +2566,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^(osm:(node|way|relation):[0-9]+|tomtom:poi:[A-Za-z0-9_-]{1,200})$"
+          "pattern": "^(osm:(node|way|relation):[0-9]+|tomtom:poi:[A-Za-z0-9_-]{1,200}|twogis:branch:[0-9]{1,30})$"
         },
         "name": {
           "type": "string",
@@ -2605,7 +2627,7 @@
         },
         "source_url": {
           "type": "string",
-          "pattern": "^https://(www\\.openstreetmap\\.org/(node|way|relation)/[0-9]+|docs\\.tomtom\\.com/(places-search-api/documentation/places-search/discover|search-api/documentation/search-service/nearby-search))$"
+          "pattern": "^https://(www\\.openstreetmap\\.org/(node|way|relation)/[0-9]+|docs\\.tomtom\\.com/(places-search-api/documentation/places-search/discover|search-api/documentation/search-service/nearby-search)|2gis\\.kz/astana/firm/[0-9]{1,30})$"
         },
         "source_label": {
           "type": "string",
