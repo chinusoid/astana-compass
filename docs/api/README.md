@@ -8,7 +8,7 @@ The API composes shared validated contracts and `DefaultRecommendationService` w
 
 From repository root, `uv sync --locked`, then `uv run uvicorn astana_api.app:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log`. `ASTANA_MODE=fixture` is the default. It serves **three synthetic places only**, distance-based candidate selection (query intent is ignored), and an explicitly approximate route with no geometry. These adapters are integration tooling, not a second implementation of team modules.
 
-`ASTANA_MODE=live` loads the team factories below. Missing imports/configuration result in liveness 200 and readiness/API 503. It never substitutes fixture data. All returned place payloads reject synthetic markers in live mode. In live mode readiness requires a populated source with a successful import (ready or explicitly stale), a positive total count, and a valid non-synthetic sample place. It does not probe the retrieval index. Essential readiness probes repository data status; it does not guarantee every external provider is up. Optional generation failures produce a clearly reported deterministic fallback. This is not a deployed public service.
+`ASTANA_MODE=live` loads the team factories below. Missing imports/configuration result in liveness 200 and readiness/API 503. It never substitutes fixture data. All returned place payloads reject synthetic markers in live mode. In live mode readiness requires a populated source with a successful import (ready or explicitly stale), a positive total count, and a valid non-synthetic sample place. It does not probe the retrieval index. Essential readiness probes repository data status; it does not guarantee every external provider is up. Optional generation failures produce a clearly reported deterministic fallback. See the [project README](../../README.md) for the published demo and deployment context; availability of individual providers requires separate live checks.
 
 ## Factory contract for teams
 
@@ -26,9 +26,9 @@ Default imports are `astana_city_data`, `astana_retrieval`, `astana_city_context
 
 ## Data and retrieval configuration
 
-Set server-side `ASTANA_POI_PATH` to a valid snapshot, for example the committed `data/samples/astana-osm.json` with 300 real OSM POI. The repository validates the snapshot, loads it once and returns independent records; missing/corrupt data fails closed. A separate bounded Overpass importer creates/replaces the snapshot and manifest. It is never called by a user HTTP request. Restart the API after importing a replacement. Source attribution and ODbL terms are in [the data documentation](../data/README.md).
+Set server-side `ASTANA_POI_PATH` to a valid snapshot, for example the committed `data/samples/astana-osm.json`. The repository validates the snapshot, loads it once and returns independent records; missing/corrupt data fails closed. A separate bounded Overpass importer creates/replaces the snapshot and manifest. It is never called by a user HTTP request. Restart the API after importing a replacement. `GET /v1/data-status` reports the currently loaded place count and source status. Snapshot provenance, coverage and ODbL terms are in [the data documentation](../data/README.md).
 
-`ASTANA_POI_STALE_SECONDS` defaults to 604800 (seven days). `data-status` distinguishes ready/stale/unavailable/not_configured and reports import time; no status certifies current opening or accessibility. The sample has 86 opening-hours values and one source description. Unknown required facts cannot pass the recommender's final constraint check.
+`ASTANA_POI_STALE_SECONDS` defaults to 604800 (seven days). `data-status` distinguishes ready/stale/unavailable/not_configured and reports import time; no status certifies current opening or accessibility. Description and opening-hours coverage varies by source and snapshot; consult the actual attributed place records rather than treating a missing field as a negative fact. Unknown required facts cannot pass the recommender's final constraint check.
 
 The retriever uses local BM25 and a versioned RU/KK/EN lexicon, with `score_kind=lexical` and explicit warnings. It makes one bounded nearby call, preserves evidence, and defers unknown/dynamic conditions for final context checks. `ASTANA_RETRIEVAL_POOL_LIMIT` defaults to 500; `ASTANA_RETRIEVAL_TIMEOUT_SECONDS` defaults to 5. There are no embeddings, vector index, network retrieval or paid inference in this adapter. [Ranking and configuration](../../packages/retrieval/README.md), [separate synthetic evaluation and snapshot smoke](../retrieval/QUALITY.md).
 
@@ -60,6 +60,34 @@ button in a full place card. Responses have `Cache-Control: no-store`; no provid
 payload is retained in a catalog, response cache, browser storage, room or model
 prompt. See [limits, attribution and access](../operations/twogis.md).
 
+## Optional place photographs
+
+`POST /v1/place-photo` accepts canonical `PlacePhotoRequest`: only `place_id`
+and `locale`. The server resolves the catalogue record; callers cannot supply
+a photo URL, coordinates, a search name or a Wikidata ID. An unknown catalogue ID
+returns 404 before any provider request. Synthetic places, unsupported identities
+and places without linked OSM Wikidata evidence return an unavailable cover without
+network access.
+
+Canonical `PlacePhotoResponse` is `{status: "available" | "unavailable", photo}`.
+For `available`, `photo` requires `url`, `source_url`, `author`, `license`,
+`license_url` and `alt`; for `unavailable`, it must be `null`. The optional
+Wikimedia adapter follows existing Wikidata P18 statements to Commons metadata,
+uses a finite seven-place identity allowlist, and requires complete attribution.
+A live metadata check on 2026-10-20 returned photographs for five linked places;
+this is not a guarantee of complete or permanent coverage. Missing images use an
+explicitly labelled category illustration. There is no stock-photo or name-search
+substitution.
+
+The frontend requests metadata when the cover approaches the visible viewport.
+Cancellation, provider failure and image errors leave the card and its route
+actions usable. API responses and the client fetch use `no-store`; the backend
+keeps a bounded 24-hour in-memory Commons metadata cache. This is separate from
+2GIS, whose responses remain uncached. Images are loaded directly from bounded
+Wikimedia thumbnail URLs with visible author, licence and original-file links;
+the API does not proxy or store image bytes. See [identity, limits, attribution
+and fallback behavior](../operations/place-photos.md).
+
 ## Operational boundaries
 
 - 32 KiB request body cap including chunked requests; 10-second receive deadline.
@@ -76,7 +104,21 @@ Run `uv run --locked pytest tests/integration` for API tests; use `scripts/check
 
 ## Intent, traffic and social endpoints
 
-`POST /v1/intent` accepts canonical `IntentRequest` (`query`, `locale`) and returns `IntentResponse`: proposed time, categories, literal quoted evidence for preferred constraints and clarification questions. Only explicit review applies these proposals; required conditions are never inferred or weakened automatically. The selected LLM provider receives raw request text and locale for this endpoint. With `LLM_PROVIDER=none` or invalid/unavailable inference, local rules run with an explicit warning. See [intent behavior and tests](../ai/intent.md).
+`POST /v1/intent` accepts canonical `IntentRequest` (`query`, `locale`) and returns
+`IntentResponse`: proposed time, categories, literal quoted evidence for preferred
+constraints and clarification questions. In the Walk interface, pressing Search
+automatically interprets the current text before requesting recommendations.
+The description supplies its stated time and additional **preferred** conditions;
+existing explicitly selected conditions retain their strength. Required conditions
+are never inferred from prose or weakened automatically. Explicit manual review
+remains available as an optional way to inspect and apply proposals. The time
+target remains soft: longer walks stay visible with their actual duration and an
+overrun notice. The selected LLM provider receives raw request text and locale for
+this endpoint. With `LLM_PROVIDER=none` or invalid/unavailable inference, local
+rules run with an explicit warning. If the intent request itself fails, search
+continues using the description and current form with a visible notice. See
+[intent behavior and tests](../ai/intent.md); the Walk automatic-application policy
+is implemented in `apps/web/src/lib/walk-intent.ts`.
 
 `POST /v1/traffic` accepts up to six public road points inside Astana. It queries the fixed TomTom flow endpoint using backend-only `TOMTOM_API_KEY`, rounds request points to 3 decimals, caches for 60 seconds and limits provider requests to 12/minute per process. It returns validated geometry/speeds/confidence and timestamp, or `not_configured` / `unavailable`; missing data never means empty roads. No caller's personal location is required. The UI expires flow after 90 seconds and distinguishes symbolic animation from vehicle counts.
 
