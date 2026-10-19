@@ -102,18 +102,30 @@ test("the description supplies 90 minutes and the whole walk appears beside the 
     (request) =>
       request.url().endsWith("/itineraries") && request.method() === "POST",
   );
+  const itineraryResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/itineraries") &&
+      response.request().method() === "POST",
+  );
   await page.locator('textarea[name="query"]').press("Enter");
   const request = (await sent).postDataJSON() as RecommendationRequest;
   expect(request.available_seconds).toBe(5400);
   expect(request.return_to_origin).toBe(false);
   expect((await itinerary).postDataJSON().place_ids).toHaveLength(3);
+  const plan = (await (await itineraryResponse).json()) as ItineraryResponse;
+  expect(plan.route?.method).toBe("approximate");
+  expect(plan.stops).toHaveLength(3);
   await expect(cards(page)).toHaveCount(3);
   await expect(page.locator('input[name="minutes"]')).toHaveValue("");
   await expect(page.locator(".intent-summary")).toContainText("90 мин");
   await expect(page.locator("#walk-filters")).toBeHidden();
   await expect(page.locator(".journey-preview .journey-stop")).toHaveCount(3);
+  await expect(page.locator(".journey-preview")).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
   await expect(page.locator(".journey-preview-heading")).toContainText(
-    "Ваша прогулка на карте",
+    "Все остановки на карте · путь пока не подтверждён",
   );
   await expect(page.getByTestId("map-journey-summary")).toBeVisible();
   await expect(page.getByTestId("map-panel")).toBeInViewport();
@@ -127,10 +139,22 @@ test("the map-side plan opens a readable side card and removes its middle destin
     (request) =>
       request.url().endsWith("/itineraries") && request.method() === "POST",
   );
+  const itineraryResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/itineraries") &&
+      response.request().method() === "POST",
+  );
   await search(page);
   const originalIds = (await itinerary).postDataJSON().place_ids as string[];
+  const plan = (await (await itineraryResponse).json()) as ItineraryResponse;
+  expect(plan.route?.method).toBe("approximate");
+  expect(plan.stops).toHaveLength(3);
+  await expect(page.locator(".journey-preview")).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
   await expect(page.locator(".journey-preview-heading")).toContainText(
-    "Ваша прогулка на карте",
+    "Все остановки на карте · путь пока не подтверждён",
   );
   const stopNames = await page
     .locator(".journey-preview .journey-stop strong")
@@ -152,6 +176,12 @@ test("the map-side plan opens a readable side card and removes its middle destin
       request.method() === "POST" &&
       request.postDataJSON().place_ids.length === 2,
   );
+  const recalculatedResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/itineraries") &&
+      response.request().method() === "POST" &&
+      response.request().postDataJSON().place_ids.length === 2,
+  );
   await drawer
     .getByRole("button", { name: "Убрать остановку", exact: true })
     .click();
@@ -159,6 +189,11 @@ test("the map-side plan opens a readable side card and removes its middle destin
     originalIds[0],
     originalIds[2],
   ]);
+  const newPlan = (await (
+    await recalculatedResponse
+  ).json()) as ItineraryResponse;
+  expect(newPlan.route?.method).toBe("approximate");
+  expect(newPlan.stops).toHaveLength(2);
   await page.keyboard.press("Escape");
   await expect(
     page.locator(".journey-preview .journey-stop strong"),
@@ -167,8 +202,12 @@ test("the map-side plan opens a readable side card and removes its middle destin
     page.getByTestId("selected-stops").locator("li strong"),
   ).toHaveText([stopNames[0], stopNames[2]]);
   await expect(page.locator(".map-marker.selected")).toHaveCount(2);
+  await expect(page.locator(".journey-preview")).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
   await expect(page.locator(".journey-preview-heading")).toContainText(
-    "Ваша прогулка на карте",
+    "Все остановки на карте · путь пока не подтверждён",
   );
 });
 
