@@ -1,4 +1,4 @@
-import type { Place, RouteGeometry } from "@astana/api-client";
+import type { Location, Place, RouteGeometry } from "@astana/api-client";
 import type { GeoJSONSource, Map as LibreMap, Marker } from "maplibre-gl";
 import { label, type Locale } from "./i18n";
 import { mapText } from "./map-copy";
@@ -144,9 +144,20 @@ export function updateJourney(map: LibreMap, geometry: RouteGeometry | null) {
   );
 }
 
-export function fitJourney(map: LibreMap, geometry: RouteGeometry) {
-  const longitude = geometry.coordinates.map((point) => point[0]);
-  const latitude = geometry.coordinates.map((point) => point[1]);
+export function fitJourney(
+  map: LibreMap,
+  geometry: RouteGeometry | null,
+  stops: Location[] = [],
+) {
+  // Include the actual POIs even if the routing provider snapped to a road.
+  // With an approximate estimate, fit the stops without inventing a path.
+  const points = [
+    ...(geometry?.coordinates ?? []),
+    ...stops.map(({ lon, lat }) => [lon, lat]),
+  ];
+  if (!points.length) return;
+  const longitude = points.map((point) => point[0]);
+  const latitude = points.map((point) => point[1]);
   map.fitBounds(
     [
       [Math.min(...longitude), Math.min(...latitude)],
@@ -237,7 +248,8 @@ export function placePopup(
     } catch {
       continue;
     }
-    if (!/^https?:$/.test(url.protocol) || url.username || url.password) continue;
+    if (!/^https?:$/.test(url.protocol) || url.username || url.password)
+      continue;
     const link = add("a", source.source_name) as HTMLAnchorElement;
     link.href = url.href;
     link.target = "_blank";

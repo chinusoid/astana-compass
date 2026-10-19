@@ -21,6 +21,7 @@ import examples from "../../../../contracts.examples.json";
 import CompassApp from "./compass-app";
 import { locales, t } from "@/lib/i18n";
 import { intentText } from "@/lib/intent-copy";
+import { mapText } from "@/lib/map-copy";
 import { useSharedPlanner } from "@/lib/shared-planner";
 
 const navigation = vi.hoisted(() => ({ pathname: "/walk" }));
@@ -33,9 +34,13 @@ vi.mock("next/dynamic", () => ({
       provider: string;
       picking: boolean;
       selectedIds: string[];
+      routeStopIds: string[];
+      overviewRequest: number;
+      places: Place[];
       origin: { lat: number; lon: number } | null;
       route: unknown;
       onPick: (point: { lat: number; lon: number }) => void;
+      onSelect: (id: string) => void;
     }) {
       return (
         <div
@@ -46,6 +51,8 @@ vi.mock("next/dynamic", () => ({
           data-selected={props.selectedIds.join(",")}
           data-origin={JSON.stringify(props.origin)}
           data-route={JSON.stringify(props.route)}
+          data-stops={props.routeStopIds.join(",")}
+          data-overview={props.overviewRequest}
         >
           <button
             type="button"
@@ -53,6 +60,15 @@ vi.mock("next/dynamic", () => ({
           >
             Map pick
           </button>
+          {props.places.map((place) => (
+            <button
+              key={place.id}
+              type="button"
+              onClick={() => props.onSelect(place.id)}
+            >
+              Map select {place.id}
+            </button>
+          ))}
         </div>
       );
     },
@@ -100,6 +116,120 @@ function scenarioResponse(
     })),
   };
 }
+
+it("keeps the path while browsing and builds all three recommendations as one visible itinerary", async () => {
+  const seed = structuredClone(
+    examples.cases.find((entry) => entry.name === "itinerary_valid")!.instance,
+  ) as ItineraryResponse;
+  const places = [1, 2, 3, 4].map((number) => ({
+    ...structuredClone(seed.places[0]),
+    id: `synthetic:place:route-${number}`,
+    name: `SYNTHETIC route place ${number}`,
+    description: `Source description for stop ${number}`,
+  }));
+  const submitted: ItineraryRequest[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/places?"))
+        return Response.json({ places, next_cursor: null });
+      const request = JSON.parse(String(init?.body));
+      if (url.endsWith("/recommendations")) {
+        const response = scenarioResponse(request, "matched");
+        return Response.json({
+          ...response,
+          places: places.slice(0, 3),
+          recommendations: places.slice(0, 3).map((place, index) => ({
+            ...response.recommendations[0],
+            place_id: place.id,
+            rank: index + 1,
+          })),
+        });
+      }
+      submitted.push(request);
+      return Response.json({
+        ...seed,
+        request,
+        places: places.slice(0, 3),
+        stops: places.slice(0, 3).map((place, index) => ({
+          ...seed.stops[0],
+          place_id: place.id,
+          order: index + 1,
+          visit_duration_seconds: 60,
+          constraint_evaluations: [],
+        })),
+        total_duration_seconds: seed.route!.duration_seconds + 180,
+      });
+    }),
+  );
+  const user = userEvent.setup();
+  const { container } = render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  await user.click(screen.getByText(t("ru", "manualOrigin")));
+  await user.type(
+    screen.getByRole("spinbutton", { name: t("ru", "latitude") }),
+    "51.09",
+  );
+  await user.type(
+    screen.getByRole("spinbutton", { name: t("ru", "longitude") }),
+    "71.42",
+  );
+  await user.type(
+    screen.getByRole("textbox", { name: t("ru", "query") }),
+    "Красивые места",
+  );
+  await user.click(
+    screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
+  );
+  const build = await screen.findByRole("button", {
+    name: mapText("ru", "buildAllStops").replace("{count}", "3"),
+  });
+  const map = screen.getByTestId("map");
+  expect(map).toHaveAttribute("data-picking", "false");
+  const preview = map.getAttribute("data-route");
+  expect(preview).not.toBe("null");
+  await user.click(
+    screen.getByRole("button", { name: `Map select ${places[3].id}` }),
+  );
+  expect(map).toHaveAttribute("data-route", preview);
+  await user.click(build);
+  await waitFor(() =>
+    expect(container.querySelectorAll(".itinerary-visits > li")).toHaveLength(
+      3,
+    ),
+  );
+  expect(submitted).toHaveLength(1);
+  expect(submitted[0].place_ids).toEqual(
+    places.slice(0, 3).map((place) => place.id),
+  );
+  expect(map).toHaveAttribute("data-stops", submitted[0].place_ids.join(","));
+  expect(map).toHaveAttribute("data-picking", "false");
+  const fullRoute = map.getAttribute("data-route");
+  for (const [index, stop] of Array.from(
+    container.querySelectorAll<HTMLElement>(".itinerary-visits > li"),
+  ).entries()) {
+    expect(
+      within(stop).getByText(`Source description for stop ${index + 1}`),
+    ).toBeVisible();
+    expect(
+      within(stop).getByRole("button", { name: t("ru", "details") }),
+    ).toBeVisible();
+  }
+  await user.click(
+    screen.getByRole("button", { name: `Map select ${places[3].id}` }),
+  );
+  expect(map).toHaveAttribute("data-route", fullRoute);
+  const overview = Number(map.getAttribute("data-overview"));
+  await user.click(
+    screen.getByRole("button", { name: mapText("ru", "overview") }),
+  );
+  expect(map).toHaveAttribute("data-overview", String(overview + 1));
+});
 
 it("submits the wishlist with Enter, shows progress immediately, and prevents duplicate requests", async () => {
   let resolve!: (response: Response) => void;

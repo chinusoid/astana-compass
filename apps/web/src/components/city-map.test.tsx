@@ -17,6 +17,7 @@ import CityMap from "./city-map";
 const fake = vi.hoisted(() => ({
   maps: [] as MockMap[],
   markers: [] as MockMarker[],
+  geolocates: [] as MockGeolocate[],
 }));
 type Listener = (event?: unknown) => void;
 class MockMap {
@@ -116,6 +117,19 @@ class MockPopup {
     return this;
   }
 }
+class MockGeolocate {
+  events = new Map<string, Listener>();
+  onRemove = vi.fn();
+  constructor(readonly options: Record<string, unknown>) {
+    fake.geolocates.push(this);
+  }
+  on(name: string, listener: Listener) {
+    this.events.set(name, listener);
+  }
+  emit(name: string, event?: unknown) {
+    this.events.get(name)?.(event);
+  }
+}
 class MockMarker {
   element: HTMLElement;
   popup: MockPopup | null = null;
@@ -167,11 +181,17 @@ vi.mock("maplibre-gl", () => ({
   NavigationControl: class {},
   ScaleControl: class {},
   AttributionControl: class {},
+  GeolocateControl: class {
+    constructor(options: Record<string, unknown>) {
+      return new MockGeolocate(options);
+    }
+  },
   setWorkerUrl: vi.fn(),
 }));
 beforeEach(() => {
   fake.maps.length = 0;
   fake.markers.length = 0;
+  fake.geolocates.length = 0;
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -208,6 +228,85 @@ async function loadMap() {
   return map;
 }
 
+it("adds user-controlled camera following without changing the route or starting point", async () => {
+  const config = props();
+  const watch = vi.fn();
+  vi.stubGlobal("navigator", { geolocation: { watchPosition: watch } });
+  const view = render(<CityMap {...config} picking={false} />);
+  const map = await loadMap();
+  const control = fake.geolocates[0];
+  expect(control.options).toMatchObject({
+    trackUserLocation: true,
+    showUserLocation: true,
+    showAccuracyCircle: true,
+    positionOptions: { enableHighAccuracy: false, timeout: 10000 },
+  });
+  expect(map.addControl).toHaveBeenCalledWith(control, "top-right");
+  expect(
+    (map.options.locale as Record<string, string>)[
+      "GeolocateControl.FindMyLocation"
+    ],
+  ).toBe(mapText("ru", "followLocation"));
+  expect(watch).not.toHaveBeenCalled();
+  act(() => control.emit("trackuserlocationstart"));
+  expect(screen.getByText(mapText("ru", "following"))).toBeVisible();
+  act(() => control.emit("trackuserlocationend"));
+  expect(screen.getByText(mapText("ru", "followPaused"))).toBeVisible();
+  act(() => control.emit("trackuserlocationstart"));
+  act(() => control.emit("error", { code: 1 }));
+  expect(screen.getByText(mapText("ru", "followDenied"))).toBeVisible();
+  act(() => control.emit("error", { code: 2 }));
+  expect(screen.getByText(mapText("ru", "followUnavailable"))).toBeVisible();
+  expect(config.onPick).not.toHaveBeenCalled();
+  expect(config.onSelect).not.toHaveBeenCalled();
+  view.unmount();
+  // MapLibre's map.remove calls each native control's onRemove, which clears
+  // its geolocation watch. The integration must always remove that map.
+  expect(map.remove).toHaveBeenCalledOnce();
+});
+
+it("fits all three stops and origin without inventing a line for approximate routes", async () => {
+  const seed = structuredClone(
+    examples.cases.find((entry) => entry.name === "place_valid")!.instance,
+  ) as Place;
+  const places = [
+    { ...seed, id: "synthetic:one", location: { lon: 71.43, lat: 51.13 } },
+    { ...seed, id: "synthetic:two", location: { lon: 71.44, lat: 51.14 } },
+    { ...seed, id: "synthetic:three", location: { lon: 71.45, lat: 51.15 } },
+  ];
+  const route = (
+    examples.cases.find((entry) => entry.name === "recommendations_valid")!
+      .instance as { recommendations: { route: RouteEstimate }[] }
+  ).recommendations[0].route;
+  const config = {
+    ...props(),
+    picking: false,
+    places,
+    route,
+    origin: { lon: 71.42, lat: 51.12 },
+    routeStopIds: places.map((place) => place.id),
+  };
+  const view = render(<CityMap {...config} overviewRequest={0} />);
+  const map = await loadMap();
+  const bounds = [
+    [71.42, 51.12],
+    [71.45, 51.15],
+  ];
+  await waitFor(() =>
+    expect(map.fitBounds).toHaveBeenLastCalledWith(bounds, expect.anything()),
+  );
+  expect(screen.getByTestId("map-route-overview")).toBeEnabled();
+  expect(screen.getByTestId("map-panel")).toHaveAttribute(
+    "data-route-geometry",
+    "none",
+  );
+  const count = map.fitBounds.mock.calls.length;
+  view.rerender(<CityMap {...config} overviewRequest={1} />);
+  expect(map.fitBounds).toHaveBeenCalledTimes(count + 1);
+  fireEvent.click(screen.getByTestId("map-route-overview"));
+  expect(map.fitBounds).toHaveBeenCalledTimes(count + 2);
+});
+
 it("starts with real vector 3D and switches to genuinely flat footprints", async () => {
   render(<CityMap {...props()} />);
   const map = await loadMap();
@@ -216,7 +315,7 @@ it("starts with real vector 3D and switches to genuinely flat footprints", async
     zoom: 15.5,
     pitch: 50,
   });
-  expect(map.addControl).toHaveBeenCalledTimes(3);
+  expect(map.addControl).toHaveBeenCalledTimes(4);
   expect(screen.getByTestId("map-panel")).toHaveAttribute(
     "data-map-mode",
     "3d",

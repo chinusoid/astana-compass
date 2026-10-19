@@ -1,7 +1,35 @@
 import { expect, it, vi } from "vitest";
 import type { Place } from "@astana/api-client";
 import examples from "../../../../contracts.examples.json";
-import { placePopup, routeArrows } from "./map-route";
+import type { Map as LibreMap } from "maplibre-gl";
+import { fitJourney, placePopup, routeArrows } from "./map-route";
+
+it("includes stops outside the routed road in the full route overview", () => {
+  const map = { fitBounds: vi.fn() };
+  fitJourney(
+    map as unknown as LibreMap,
+    {
+      type: "LineString",
+      coordinates: [
+        [71.43, 51.12],
+        [71.44, 51.13],
+      ],
+    },
+    [
+      { lon: 71.45, lat: 51.14 },
+      { lon: 71.42, lat: 51.11 },
+    ],
+  );
+  expect(map.fitBounds).toHaveBeenCalledWith(
+    [
+      [71.42, 51.11],
+      [71.45, 51.14],
+    ],
+    expect.objectContaining({ duration: 0 }),
+  );
+  fitJourney(map as unknown as LibreMap, null);
+  expect(map.fitBounds).toHaveBeenCalledOnce();
+});
 
 it("follows a bend in the provider route with arrows facing each segment", () => {
   const route = {

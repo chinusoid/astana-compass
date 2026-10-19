@@ -66,6 +66,7 @@ type Props = {
   activeId: string | null;
   selectedIds: string[];
   routeStopIds?: string[];
+  overviewRequest?: number;
   route: RouteEstimate | null;
   locale: Locale;
   picking: boolean;
@@ -118,6 +119,9 @@ export default function CityMap(props: Props) {
   const [threeD, setThreeD] = useState(true);
   const [attempt, setAttempt] = useState(0);
   const [picked, setPicked] = useState(false);
+  const [followState, setFollowState] = useState<
+    "idle" | "following" | "paused" | "denied" | "unavailable"
+  >("idle");
   const [motionEnabled, setMotionEnabled] = useState(false);
   const [motionStatus, setMotionStatus] = useState<MotionStatus>("empty");
   const geometry = useMemo(
@@ -126,6 +130,19 @@ export default function CityMap(props: Props) {
   );
   const stopIdKey = JSON.stringify(props.routeStopIds ?? props.selectedIds);
   const stopIds: string[] = useMemo(() => JSON.parse(stopIdKey), [stopIdKey]);
+  const journeyPointKey = JSON.stringify([
+    ...(props.origin ? [props.origin] : []),
+    ...stopIds.flatMap((id) => {
+      const place = props.places.find((item) => item.id === id);
+      return place ? [place.location] : [];
+    }),
+  ]);
+  const journeyPoints: Location[] = useMemo(
+    () => JSON.parse(journeyPointKey),
+    [journeyPointKey],
+  );
+  const hasJourney =
+    props.route !== null && (geometry !== null || stopIds.length > 0);
   const ready = status === "ready";
   const has3D = props.provider === "openfreemap" && buildings;
   const is3D = has3D && threeD;
@@ -154,6 +171,7 @@ export default function CityMap(props: Props) {
           setStatus("loading");
           setTransient(false);
           setBuildings(false);
+          setFollowState("idle");
           lib.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
           const map = new lib.Map({
             container: host,
@@ -178,6 +196,14 @@ export default function CityMap(props: Props) {
                 "attribution",
               ),
               "Popup.Close": mapText(props.locale, "closePopup"),
+              "GeolocateControl.FindMyLocation": mapText(
+                props.locale,
+                "followLocation",
+              ),
+              "GeolocateControl.LocationNotAvailable": mapText(
+                props.locale,
+                "followUnavailable",
+              ),
             },
           });
           localMap = map;
@@ -195,6 +221,39 @@ export default function CityMap(props: Props) {
             }),
             "top-right",
           );
+          // Native control requests location only on its own button press. It
+          // follows the camera without touching the planner's origin/route,
+          // pauses following on pan, and clears its watch when map.remove runs.
+          const geolocate = new lib.GeolocateControl({
+            positionOptions: {
+              enableHighAccuracy: false,
+              timeout: 10000,
+              maximumAge: 30000,
+            },
+            trackUserLocation: true,
+            showUserLocation: true,
+            showAccuracyCircle: true,
+            fitBoundsOptions: { maxZoom: 16 },
+          });
+          geolocate.on("trackuserlocationstart", () => {
+            if (!disposed) setFollowState("following");
+          });
+          geolocate.on("trackuserlocationend", () => {
+            if (!disposed) setFollowState("paused");
+          });
+          geolocate.on("geolocate", () => {
+            if (!disposed)
+              setFollowState((state) =>
+                state === "denied" || state === "unavailable"
+                  ? "following"
+                  : state,
+              );
+          });
+          geolocate.on("error", (event) => {
+            if (!disposed)
+              setFollowState(event.code === 1 ? "denied" : "unavailable");
+          });
+          map.addControl(geolocate, "top-right");
           map.addControl(
             new lib.ScaleControl({ maxWidth: 100, unit: "metric" }),
             "bottom-left",
@@ -570,7 +629,7 @@ export default function CityMap(props: Props) {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!ready || !map || geometry) return;
+    if (!ready || !map || props.route) return;
     const point =
       props.places.find((place) => place.id === props.activeId)?.location ??
       props.origin;
@@ -580,12 +639,12 @@ export default function CityMap(props: Props) {
         zoom: Math.max(map.getZoom(), ASTANA_VIEW.zoom),
         duration: 0,
       });
-  }, [ready, props.activeId, props.origin, props.places, geometry]);
+  }, [ready, props.activeId, props.origin, props.places, props.route]);
 
   useEffect(() => {
-    if (!ready || !mapRef.current || !geometry) return;
-    fitJourney(mapRef.current, geometry);
-  }, [ready, geometry]);
+    if (!ready || !mapRef.current || !hasJourney) return;
+    fitJourney(mapRef.current, geometry, journeyPoints);
+  }, [ready, geometry, hasJourney, journeyPoints, props.overviewRequest]);
 
   function closeInspection() {
     featureRequest.current?.abort();
@@ -757,14 +816,15 @@ export default function CityMap(props: Props) {
             >
               <LocateFixed size={20} aria-hidden="true" />
             </button>
-            {geometry && (
+            {hasJourney && (
               <button
                 type="button"
                 className="map-tool"
                 data-testid="map-route-overview"
                 disabled={!ready}
                 onClick={() => {
-                  if (mapRef.current) fitJourney(mapRef.current, geometry);
+                  if (mapRef.current)
+                    fitJourney(mapRef.current, geometry, journeyPoints);
                 }}
               >
                 <Route size={18} aria-hidden="true" />
@@ -1024,6 +1084,19 @@ export default function CityMap(props: Props) {
         )}
       </div>
       <div className="map-footer">
+        {followState !== "idle" && (
+          <span role="status" aria-live="polite">
+            {text(
+              followState === "following"
+                ? "following"
+                : followState === "paused"
+                  ? "followPaused"
+                  : followState === "denied"
+                    ? "followDenied"
+                    : "followUnavailable",
+            )}
+          </span>
+        )}
         {trafficNotice && (
           <span
             className="map-traffic-notice"
@@ -1101,6 +1174,7 @@ export default function CityMap(props: Props) {
           <details className="map-privacy">
             <summary>{text("privacyLabel")}</summary>
             <p>{text("privacy")}</p>
+            <p>{text("followHint")}</p>
             <a
               href="https://www.openstreetmap.org/fixthemap"
               target="_blank"

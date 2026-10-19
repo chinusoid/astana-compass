@@ -67,6 +67,56 @@ const copy = {
     "Line and arrows follow the roads",
   ],
   overview: ["Весь маршрут", "Бүкіл маршрут", "Route overview"],
+  buildAllStops: [
+    "Собрать один маршрут · мест: {count}",
+    "Бір маршрут құру · орындар: {count}",
+    "Build one route · places: {count}",
+  ],
+  buildAllHint: [
+    "Объединим предложенные места в одну прогулку. Карта покажет все остановки и доступный маршрут; порядок можно изменить ниже.",
+    "Ұсынылған орындарды бір серуенге біріктіреміз. Карта барлық аялдамалар мен қолжетімді маршрутты көрсетеді; ретін төменде өзгертуге болады.",
+    "Combine the suggested places into one walk. See every stop and the available route on the map; change their order below.",
+  ],
+  fewerStops: [
+    "Пока найдено меньше трёх подходящих мест. Можно добавить другие из каталога или изменить запрос.",
+    "Әзірге үштен аз сәйкес орын табылды. Каталогтан басқа орын қосуға немесе сұрауды өзгертуге болады.",
+    "Fewer than three matching places were found. Add others from the catalog or change your request.",
+  ],
+  routePersists: [
+    "Все остановки и старт показаны вместе. Нажимайте на места и здания: маршрут останется на карте.",
+    "Барлық аялдамалар мен бастау нүктесі бірге көрсетілген. Орындар мен ғимараттарды басыңыз: маршрут картада сақталады.",
+    "All stops and the start appear together. Select places and buildings: your route stays on the map.",
+  ],
+  followLocation: [
+    "Моё местоположение — вернуть камеру и следовать за мной",
+    "Менің орным — камераны қайтару және соңымнан жүру",
+    "My location — return the camera and follow me",
+  ],
+  followHint: [
+    "Кнопка местоположения справа привязывает камеру к вам. Переместите карту для свободного обзора; нажмите кнопку снова, чтобы вернуться.",
+    "Оң жақтағы орын түймесі камераны сізге бекітеді. Еркін қарау үшін картаны жылжытыңыз; оралу үшін түймені қайта басыңыз.",
+    "The location button on the right follows you. Pan to browse freely; press it again to return.",
+  ],
+  following: [
+    "Камера следует за вашим местоположением. Старт маршрута не изменён.",
+    "Камера сіздің орныңызды бақылайды. Маршруттың басы өзгермеді.",
+    "The camera follows your location. Your route start is unchanged.",
+  ],
+  followPaused: [
+    "Свободный обзор. Кнопка местоположения снова вернёт камеру к вам.",
+    "Еркін қарау. Орын түймесі камераны сізге қайтарады.",
+    "Free browsing. Press the location button to follow yourself again.",
+  ],
+  followDenied: [
+    "Доступ к местоположению запрещён. Разрешите его в настройках браузера, чтобы вернуть камеру к себе. Маршрут сохранён.",
+    "Геолокацияға рұқсат жоқ. Камераны өзіңізге қайтару үшін браузер баптауларында рұқсат беріңіз. Маршрут сақталды.",
+    "Location access is denied. Allow it in your browser settings to return the camera to yourself. Your route is kept.",
+  ],
+  followUnavailable: [
+    "Местоположение недоступно. Повторите запрос кнопкой справа. Маршрут сохранён.",
+    "Геолокация қолжетімсіз. Оң жақтағы түймемен қайталаңыз. Маршрут сақталды.",
+    "Location is unavailable. Try the button on the right again. Your route is kept.",
+  ],
   firstStop: [
     "Это первый пункт назначения",
     "Бұл — бірінші баратын орын",

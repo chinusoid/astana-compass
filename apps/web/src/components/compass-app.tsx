@@ -52,6 +52,10 @@ import IntentReview from "./intent-review";
 import OsmAttribution, { isOsmSourceUrl } from "./osm-attribution";
 import { applyIntentConstraints } from "@/lib/intent";
 import { intentText } from "@/lib/intent-copy";
+import { mapText } from "@/lib/map-copy";
+import { stopTitle } from "@/lib/map-route";
+import { sourceDescription } from "@/lib/place-presentation";
+import TimeBudgetNote from "./time-budget-note";
 import scenarioStyles from "./scenario-feedback.module.css";
 
 const CityMap = dynamic(() => import("./city-map"), { ssr: false });
@@ -143,6 +147,9 @@ export default function CompassApp({
   const [catalogError, setCatalogError] = useState<ApiError | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Browsing a marker must not replace the route explicitly chosen for the map.
+  const [previewRouteId, setPreviewRouteId] = useState<string | null>(null);
+  const [overviewRequest, setOverviewRequest] = useState(0);
   const [mapEnabled, setMapEnabled] = useState(true);
   const [picking, setPicking] = useState(true);
   const [geoState, setGeoState] = useState<"idle" | "loading" | "error">(
@@ -263,6 +270,7 @@ export default function CompassApp({
     setSearching(false);
     searchPending.current = false;
     setResult(null);
+    setPreviewRouteId(null);
     setResultError(null);
     setFormError(false);
     setFeedbackState("idle");
@@ -329,6 +337,7 @@ export default function CompassApp({
       return;
     }
     const controller = begin("recommendation");
+    setPicking(false);
     searchPending.current = true;
     setSubmittedScenario({
       key: scenarioKey({ ...form, query }, locale),
@@ -339,6 +348,7 @@ export default function CompassApp({
       const response = await api.recommend(body, controller.signal);
       if (!controller.signal.aborted) {
         setResult(response);
+        setPreviewRouteId(response.recommendations[0]?.place_id ?? null);
         setAnswer("");
         resultHeading.current?.focus({ preventScroll: true });
       }
@@ -351,11 +361,15 @@ export default function CompassApp({
       }
     }
   }
-  async function buildItinerary() {
+  async function buildItinerary(
+    stops = selected,
+    request?: RecommendationRequest,
+  ) {
+    if (!stops.length || building) return;
     invalidatePlan();
     let body: RecommendationRequest;
     try {
-      body = requestFromForm();
+      body = request ?? requestFromForm();
     } catch {
       setFormError(true);
       document
@@ -364,14 +378,16 @@ export default function CompassApp({
       return;
     }
     const controller = begin("itinerary");
+    setPicking(false);
     setBuilding(true);
     try {
       const response = await api.itinerary(
-        { ...body, place_ids: selected.map((place) => place.id) },
+        { ...body, place_ids: stops.map((place) => place.id) },
         controller.signal,
       );
       if (!controller.signal.aborted) {
         setItinerary(response);
+        if (response.stops.length) showRouteOverview();
         planHeading.current?.focus({ preventScroll: true });
       }
     } catch (error) {
@@ -379,6 +395,24 @@ export default function CompassApp({
     } finally {
       if (!controller.signal.aborted) setBuilding(false);
     }
+  }
+  function buildRecommendedItinerary() {
+    if (!result || building) return;
+    const stops = result.recommendations.flatMap((recommendation) => {
+      const place = result.places.find((p) => p.id === recommendation.place_id);
+      return place ? [place] : [];
+    });
+    if (!stops.length) return;
+    setSelected(stops);
+    void buildItinerary(stops, result.request);
+  }
+  function showRouteOverview() {
+    setMapEnabled(true);
+    setOverviewRequest((value) => value + 1);
+    document.getElementById("map-heading")?.scrollIntoView?.({
+      block: "nearest",
+      behavior: "instant",
+    });
   }
   function selectStop(place: Place) {
     if (selected.length >= 3 || selected.some((p) => p.id === place.id)) return;
@@ -548,35 +582,36 @@ export default function CompassApp({
       ...new Map(
         [
           ...catalog,
-          ...(result?.places ?? []),
           ...selected,
+          ...(result?.places ?? []),
+          ...(itinerary?.places ?? []),
           ...(detail ? [detail] : []),
           ...(view === "party" ? (sharedItinerary?.places ?? []) : []),
         ].map((p) => [p.id, p]),
       ).values(),
     ],
-    [catalog, result, selected, detail, view, sharedItinerary],
+    [catalog, result, itinerary, selected, detail, view, sharedItinerary],
   );
   const selectedIds = useMemo(() => selected.map((p) => p.id), [selected]);
-  const activeRecommendation = result?.recommendations.find(
-    (r) => r.place_id === activeId,
+  const previewRecommendation = result?.recommendations.find(
+    (r) => r.place_id === previewRouteId,
   );
   const displayedRoute =
     view === "party"
       ? (sharedItinerary?.route ?? null)
       : itinerary
         ? itinerary.route
-        : (activeRecommendation?.route ?? null);
+        : (previewRecommendation?.route ?? null);
   const routeStopIds = useMemo(
     () =>
       view === "party"
         ? (sharedItinerary?.stops.map((stop) => stop.place_id) ?? [])
         : itinerary
           ? itinerary.stops.map((stop) => stop.place_id)
-          : activeRecommendation
-            ? [activeRecommendation.place_id]
+          : previewRecommendation
+            ? [previewRecommendation.place_id]
             : [],
-    [view, sharedItinerary, itinerary, activeRecommendation],
+    [view, sharedItinerary, itinerary, previewRecommendation],
   );
   function focusPlace(id: string) {
     setActiveId(id);
@@ -594,12 +629,18 @@ export default function CompassApp({
       key={place.id}
       place={place}
       recommendation={recommendation}
+      budgetSeconds={
+        recommendation ? result?.request.available_seconds : undefined
+      }
       locale={locale}
       active={activeId === place.id}
       selected={selectedIds.includes(place.id)}
       full={selected.length >= 3}
       saved={favorites.some((p) => p.id === place.id)}
-      onSelect={() => focusPlace(place.id)}
+      onSelect={() => {
+        if (recommendation) setPreviewRouteId(place.id);
+        focusPlace(place.id);
+      }}
       onDetails={() => void showDetails(place.id)}
       onAdd={() => selectStop(place)}
       onSave={() => toggleFavorite(place)}
@@ -1075,7 +1116,7 @@ export default function CompassApp({
                       />
                     </label>
                   </div>
-
+                  <p className="field-hint">{t(locale, "timeBudgetHint")}</p>
                   <label className="return-control">
                     <input
                       type="checkbox"
@@ -1202,6 +1243,28 @@ export default function CompassApp({
                           <p className="field-hint alternatives">
                             {t(locale, "alternatives")}
                           </p>
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={building}
+                            onClick={buildRecommendedItinerary}
+                          >
+                            <Footprints size={18} aria-hidden="true" />
+                            {building
+                              ? t(locale, "building")
+                              : mapText(locale, "buildAllStops").replace(
+                                  "{count}",
+                                  String(result.recommendations.length),
+                                )}
+                          </button>
+                          <p className="field-hint">
+                            {mapText(locale, "buildAllHint")}
+                          </p>
+                          {result.recommendations.length < 3 && (
+                            <p className="field-hint">
+                              {mapText(locale, "fewerStops")}
+                            </p>
+                          )}
                         </>
                       )}
                       {result.status === "no_match" && (
@@ -1411,6 +1474,22 @@ export default function CompassApp({
                               )}
                             </strong>
                           </div>
+                          <TimeBudgetNote
+                            totalSeconds={itinerary.total_duration_seconds}
+                            budgetSeconds={itinerary.request.available_seconds}
+                            locale={locale}
+                          />
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={showRouteOverview}
+                          >
+                            <MapPin size={18} aria-hidden="true" />
+                            {mapText(locale, "overview")}
+                          </button>
+                          <p className="field-hint">
+                            {mapText(locale, "routePersists")}
+                          </p>
                           <p>
                             {t(
                               locale,
@@ -1420,10 +1499,12 @@ export default function CompassApp({
                             )}
                           </p>
                           <ol className="itinerary-visits">
-                            {itinerary.stops.map((stop) => {
+                            {itinerary.stops.map((stop, index) => {
                               const place = itinerary.places.find(
                                 (p) => p.id === stop.place_id,
                               );
+                              const description =
+                                place && sourceDescription(place, locale);
                               const compromises =
                                 stop.constraint_evaluations.filter(
                                   (evaluation) =>
@@ -1432,7 +1513,9 @@ export default function CompassApp({
                                 );
                               return (
                                 <li key={stop.place_id}>
+                                  <small>{stopTitle(locale, index)}</small>
                                   <b>{place?.name}</b>
+                                  {description && <p>{description.text}</p>}
                                   <span>
                                     {t(locale, "visit")}{" "}
                                     {duration(
@@ -1459,7 +1542,7 @@ export default function CompassApp({
                                       <p>{evaluation.explanation}</p>
                                     </div>
                                   ))}
-                                  {compromises.length > 0 && (
+                                  {place && (
                                     <button
                                       type="button"
                                       className="text-button"
@@ -1667,6 +1750,7 @@ export default function CompassApp({
             }
             route={displayedRoute}
             routeStopIds={routeStopIds}
+            overviewRequest={overviewRequest}
             locale={locale}
             picking={
               picking &&
