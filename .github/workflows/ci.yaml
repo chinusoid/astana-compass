@@ -245,6 +245,70 @@ jobs:
           test -s .open-next/assets/maplibre/maplibre-gl-worker.mjs
           test -s .open-next/assets/maplibre/maplibre-gl-shared.mjs
           pnpm exec wrangler deploy --dry-run --outdir "$RUNNER_TEMP/cloudflare-dry-run"
+      - name: Serve the built Worker in workerd and check HTTP behavior
+        working-directory: apps/web
+        timeout-minutes: 4
+        shell: bash
+        run: |
+          worker_log="$RUNNER_TEMP/cloudflare-worker.log"
+          # Only the GitHub runner starts this local runtime; no Cloudflare login.
+          # The upstream points at a closed local port, never a real API/provider.
+          setsid node node_modules/wrangler/bin/wrangler.js dev --local \
+            --ip 127.0.0.1 --port 8787 --inspector-port 9231 \
+            --var ASTANA_API_URL:http://127.0.0.1:9 \
+            --var ASTANA_ALLOW_FIXTURES:false --var ASTANA_MAP_PROVIDER:none \
+            >"$worker_log" 2>&1 &
+          worker_pid=$!
+          cleanup() {
+            result=$?
+            trap - EXIT
+            # Terminate Wrangler and its workerd children as one process group.
+            kill -- "-$worker_pid" 2>/dev/null || true
+            sleep 1
+            kill -KILL -- "-$worker_pid" 2>/dev/null || true
+            wait "$worker_pid" 2>/dev/null || true
+            if [ "$result" -ne 0 ]; then
+              tail -n 100 "$worker_log"
+            fi
+            exit "$result"
+          }
+          trap cleanup EXIT
+          ready=false
+          for ((attempt = 0; attempt < 60; attempt++)); do
+            if ! kill -0 "$worker_pid" 2>/dev/null; then
+              echo "Cloudflare Worker exited before serving the page."
+              exit 1
+            fi
+            if status=$(curl --silent --max-time 2 --output "$RUNNER_TEMP/cloudflare-home.html" \
+              --write-out '%{http_code}' http://127.0.0.1:8787/) && [ "$status" = 200 ]; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            echo "Cloudflare Worker did not serve the page within the readiness window."
+            exit 1
+          fi
+          grep -q 'Astana Compass' "$RUNNER_TEMP/cloudflare-home.html"
+          curl --fail --silent --show-error --max-time 10 \
+            --output "$RUNNER_TEMP/cloudflare-icon.svg" http://127.0.0.1:8787/icon.svg
+          grep -q '<svg' "$RUNNER_TEMP/cloudflare-icon.svg"
+          status=$(curl --silent --show-error --max-time 15 \
+            --dump-header "$RUNNER_TEMP/cloudflare-api.headers" \
+            --output "$RUNNER_TEMP/cloudflare-api.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api/v1/data-status)
+          test "$status" = 503
+          grep -qi '^cache-control: no-store' "$RUNNER_TEMP/cloudflare-api.headers"
+          node - "$RUNNER_TEMP/cloudflare-api.json" <<'NODE'
+          const assert = require("node:assert/strict");
+          const fs = require("node:fs");
+          const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          assert.equal(payload.error.code, "provider_unavailable");
+          assert.equal(payload.error.retryable, true);
+          assert.equal(typeof payload.request_id, "string");
+          console.log("Cloudflare workerd passed: SSR page, public icon and safe 503 without a backend.");
+          NODE
 
   render-container:
     runs-on: ubuntu-24.04
