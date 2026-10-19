@@ -37,7 +37,14 @@ import type {
 } from "@astana/api-client";
 import { ApiError, asApiError, createApi, type DataMode } from "@/lib/api";
 import { astanaInstant, dateTime, duration, safeUrl } from "@/lib/format";
-import { constraintKeys, label, locales, t, type Locale } from "@/lib/i18n";
+import {
+  constraintKeys,
+  label,
+  locales,
+  t,
+  type Locale,
+  type MessageKey,
+} from "@/lib/i18n";
 import { valid } from "@/lib/contracts";
 import { SocialPlannerContext } from "@/lib/shared-planner";
 import {
@@ -60,6 +67,18 @@ import scenarioStyles from "./scenario-feedback.module.css";
 
 const CityMap = dynamic(() => import("./city-map"), { ssr: false });
 const FAVORITES_KEY = "astana-compass:favorites:v1";
+const walkPresets: {
+  label: MessageKey;
+  query: MessageKey;
+  preference?: string;
+}[] = [
+  { label: "parkWalk", query: "parkWalkQuery" },
+  { label: "riversideWalk", query: "riversideWalkQuery" },
+  { label: "architectureWalk", query: "architectureWalkQuery" },
+  { label: "mixedWalk", query: "mixedWalkQuery" },
+  { label: "indoors", query: "indoorsQuery", preference: "indoor" },
+  { label: "family", query: "familyQuery", preference: "child_friendly" },
+];
 type Favorite = Pick<Place, "id" | "name" | "is_synthetic">;
 type FormState = {
   query: string;
@@ -1056,35 +1075,30 @@ export default function CompassApp({
                     }
                   />
                   <div className="preset-row">
-                    {(["relaxed", "indoors", "family"] as const).map(
-                      (key, i) => (
+                    {walkPresets.map(
+                      ({ label: presetLabel, query, preference }) => (
                         <button
                           className="chip"
                           type="button"
-                          key={key}
+                          key={presetLabel}
                           onClick={() =>
                             updateForm({
-                              query: t(locale, key),
-                              ...(i
+                              query: t(locale, query),
+                              ...(preference
                                 ? {
                                     constraints: {
                                       ...form.constraints,
-                                      [i === 1 ? "indoor" : "child_friendly"]:
-                                        form.constraints[
-                                          i === 1 ? "indoor" : "child_friendly"
-                                        ] || "preferred",
+                                      [preference]:
+                                        form.constraints[preference] ||
+                                        "preferred",
                                     },
                                   }
                                 : {}),
                             })
                           }
                         >
-                          {i === 0 ? (
-                            <Footprints size={14} />
-                          ) : (
-                            <Plus size={14} />
-                          )}
-                          {t(locale, key)}
+                          <Footprints size={14} aria-hidden="true" />
+                          {t(locale, presetLabel)}
                         </button>
                       ),
                     )}
@@ -1135,34 +1149,83 @@ export default function CompassApp({
                   <details className="constraint-details" open>
                     <summary>{t(locale, "constraints")}</summary>
                     <p className="field-hint">{t(locale, "constraintsHint")}</p>
-                    <div className="constraint-list">
+                    <div className="constraint-list preference-list">
                       {constraintKeys.map((key) => (
                         <label key={key}>
-                          <span>{t(locale, key)}</span>
-                          <select
+                          <input
+                            type="checkbox"
                             aria-label={t(locale, key)}
-                            value={form.constraints[key] ?? ""}
+                            checked={Boolean(form.constraints[key])}
+                            disabled={form.constraints[key] === "required"}
                             onChange={(e) =>
                               updateForm({
                                 constraints: {
                                   ...form.constraints,
-                                  [key]: e.target.value as
-                                    Constraint["strength"] | "",
+                                  [key]: e.target.checked ? "preferred" : "",
                                 },
                               })
                             }
-                          >
-                            <option value="">{t(locale, "indifferent")}</option>
-                            <option value="preferred">
-                              {t(locale, "preferred")}
-                            </option>
-                            <option value="required">
+                          />
+                          <span>{t(locale, key)}</span>
+                          {form.constraints[key] === "required" && (
+                            <small className="required-badge">
                               {t(locale, "required")}
-                            </option>
-                          </select>
+                            </small>
+                          )}
                         </label>
                       ))}
                     </div>
+                    <details className="strict-constraints">
+                      <summary>
+                        {t(locale, "strictConstraints")}
+                        {Object.values(form.constraints).some(
+                          (strength) => strength === "required",
+                        ) && (
+                          <strong className="required-count">
+                            {" "}
+                            ·{" "}
+                            {
+                              Object.values(form.constraints).filter(
+                                (strength) => strength === "required",
+                              ).length
+                            }
+                          </strong>
+                        )}
+                      </summary>
+                      <p className="field-hint">
+                        {t(locale, "strictConstraintsHint")}
+                      </p>
+                      <div className="constraint-list">
+                        {constraintKeys.map((key) => (
+                          <label key={key}>
+                            <span>{t(locale, key)}</span>
+                            <select
+                              aria-label={t(locale, key)}
+                              value={form.constraints[key] ?? ""}
+                              onChange={(e) =>
+                                updateForm({
+                                  constraints: {
+                                    ...form.constraints,
+                                    [key]: e.target.value as
+                                      Constraint["strength"] | "",
+                                  },
+                                })
+                              }
+                            >
+                              <option value="">
+                                {t(locale, "indifferent")}
+                              </option>
+                              <option value="preferred">
+                                {t(locale, "preferred")}
+                              </option>
+                              <option value="required">
+                                {t(locale, "required")}
+                              </option>
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+                    </details>
                   </details>
                   {formError && (
                     <p className="notice error" role="alert">

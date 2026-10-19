@@ -189,6 +189,7 @@ test("real Wi-Fi requirement is honored and unknown outlets produce an explained
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await fillWalk(page, place, "Estet Coffee");
+  await page.locator(".strict-constraints > summary").click();
   await page
     .getByRole("combobox", { name: "Wi-Fi", exact: true })
     .selectOption("required");

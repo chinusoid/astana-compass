@@ -155,9 +155,9 @@ const copy = {
     "Click a building or map point to inspect it",
   ],
   inspectPrivacy: [
-    "При нажатии координаты выбранной точки отправляются сервису OpenStreetMap для поиска сведений.",
-    "Басқанда таңдалған нүкте координаттары мәлімет іздеу үшін OpenStreetMap қызметіне жіберіледі.",
-    "Clicking sends the selected point's coordinates to the OpenStreetMap service to look up information.",
+    "При нажатии координаты выбранной точки отправляются настроенным сервисам карты для поиска сведений: OpenStreetMap и, если подключён, TomTom.",
+    "Басқанда таңдалған нүкте координаттары мәлімет іздеу үшін бапталған карта қызметтеріне жіберіледі: OpenStreetMap және қосылған болса, TomTom.",
+    "Clicking sends the selected point's coordinates to the configured map providers to look up information: OpenStreetMap and, if connected, TomTom.",
   ],
   contains: [
     "Объект в выбранной точке",

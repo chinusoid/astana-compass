@@ -361,11 +361,7 @@ it("marks text, time, constraints, start and return edits as unapplied until the
   }
   const changes = [
     async () => user.type(input, " и парк"),
-    async () =>
-      user.selectOptions(
-        screen.getByRole("combobox", { name: "Wi-Fi" }),
-        "required",
-      ),
+    async () => user.click(screen.getByRole("checkbox", { name: "Wi-Fi" })),
     async () => {
       const time = screen.getByRole("spinbutton", {
         name: t("ru", "timeBudget"),
@@ -404,7 +400,7 @@ it("marks text, time, constraints, start and return edits as unapplied until the
     available_seconds: 5400,
     origin: { lat: 51.12, lon: 71.42 },
     return_to_origin: false,
-    constraints: [{ key: "has_wifi", value: true, strength: "required" }],
+    constraints: [{ key: "has_wifi", value: true, strength: "preferred" }],
   });
 });
 
@@ -626,14 +622,12 @@ it("submits explicit Wi-Fi and toilets requirements without weakening them", asy
     screen.getByRole("textbox", { name: t("ru", "query") }),
     "Кафе",
   );
+  await user.click(screen.getByText(t("ru", "strictConstraints")));
   await user.selectOptions(
     screen.getByRole("combobox", { name: "Wi-Fi" }),
     "required",
   );
-  await user.selectOptions(
-    screen.getByRole("combobox", { name: t("ru", "toilets") }),
-    "preferred",
-  );
+  await user.click(screen.getByRole("checkbox", { name: t("ru", "toilets") }));
   await user.click(screen.getByRole("button", { name: "Map pick" }));
   await user.click(screen.getByRole("button", { name: t("ru", "find") }));
   await waitFor(() => expect(submitted).toBeDefined());
@@ -681,6 +675,7 @@ for (const [key, preset] of [
           mapProvider="none"
         />,
       );
+      await user.click(screen.getByText(t("ru", "strictConstraints")));
       const constraint = screen.getByRole("combobox", { name: t("ru", key) });
       await user.selectOptions(constraint, strength);
       await user.selectOptions(
@@ -703,6 +698,130 @@ for (const [key, preset] of [
       await screen.findByRole("alert");
     });
   }
+}
+
+it("keeps the wishlist intact and sends ordinary amenities only as removable preferences", async () => {
+  const submitted: RecommendationRequest[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/places?"))
+        return Response.json({ places: [], next_cursor: null });
+      const request = JSON.parse(String(init?.body)) as RecommendationRequest;
+      submitted.push(request);
+      return Response.json(scenarioResponse(request));
+    }),
+  );
+  const user = userEvent.setup();
+  const { container } = render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  const strict = container.querySelector(".strict-constraints")!;
+  expect(strict).not.toHaveAttribute("open");
+  expect(screen.getByRole("combobox", { name: "Wi-Fi" })).not.toBeVisible();
+  const query = "Хочу прогулку по живописным местам, а по пути кофе";
+  await user.type(
+    screen.getByRole("textbox", { name: t("ru", "query") }),
+    query,
+  );
+  await user.click(screen.getByRole("checkbox", { name: "Wi-Fi" }));
+  await user.click(screen.getByRole("checkbox", { name: t("ru", "indoor") }));
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  await user.click(screen.getByRole("button", { name: t("ru", "find") }));
+  await screen.findByText(intentText("ru", "scenarioNoMatch"));
+  expect(submitted[0].query).toBe(query);
+  expect(submitted[0].constraints).toEqual(
+    expect.arrayContaining([
+      { key: "has_wifi", value: true, strength: "preferred" },
+      { key: "indoor", value: true, strength: "preferred" },
+    ]),
+  );
+  expect(submitted[0].constraints).toHaveLength(2);
+  await user.click(screen.getByRole("checkbox", { name: "Wi-Fi" }));
+  await user.click(screen.getByRole("checkbox", { name: t("ru", "indoor") }));
+  await user.click(screen.getByRole("button", { name: t("ru", "find") }));
+  await screen.findByText(intentText("ru", "scenarioNoMatch"));
+  expect(submitted[1].query).toBe(query);
+  expect(submitted[1].constraints).toEqual([]);
+  expect(strict).not.toHaveAttribute("open");
+});
+
+for (const locale of locales) {
+  it(`offers four meaningful walk presets without weakening explicit must-haves in ${locale}`, async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ places: [], next_cursor: null })),
+    );
+    const { container } = render(
+      <CompassApp
+        initialStart="2026-10-19T12:00"
+        allowFixtures
+        mapProvider="none"
+      />,
+    );
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: t("ru", "language") }),
+      locale,
+    );
+    const strict = container.querySelector(".strict-constraints")!;
+    expect(strict).not.toHaveAttribute("open");
+    await user.click(
+      within(strict as HTMLElement).getByText(t(locale, "strictConstraints")),
+    );
+    await user.selectOptions(
+      screen.getByRole("combobox", {
+        name: t(locale, "wheelchair_accessible"),
+      }),
+      "required",
+    );
+    const requiredCheckbox = screen.getByRole("checkbox", {
+      name: t(locale, "wheelchair_accessible"),
+    });
+    expect(requiredCheckbox).toBeChecked();
+    expect(requiredCheckbox).toBeDisabled();
+    await user.click(strict.querySelector("summary")!);
+    expect(strict).not.toHaveAttribute("open");
+    expect(strict.querySelector("summary")).toHaveTextContent("1");
+    for (const [preset, queryKey] of [
+      ["parkWalk", "parkWalkQuery"],
+      ["riversideWalk", "riversideWalkQuery"],
+      ["architectureWalk", "architectureWalkQuery"],
+      ["mixedWalk", "mixedWalkQuery"],
+    ] as const) {
+      await user.click(
+        screen.getByRole("button", { name: t(locale, preset), exact: true }),
+      );
+      expect(
+        screen.getByRole("textbox", { name: t(locale, "query") }),
+      ).toHaveValue(t(locale, queryKey));
+      expect(requiredCheckbox).toBeChecked();
+      expect(requiredCheckbox).toBeDisabled();
+    }
+    await user.click(strict.querySelector("summary")!);
+    expect(
+      screen.getByRole("combobox", {
+        name: t(locale, "wheelchair_accessible"),
+      }),
+    ).toHaveValue("required");
+    await user.selectOptions(
+      screen.getByRole("combobox", {
+        name: t(locale, "wheelchair_accessible"),
+      }),
+      "preferred",
+    );
+    expect(requiredCheckbox).toBeEnabled();
+    await user.click(requiredCheckbox);
+    expect(
+      screen.getByRole("combobox", {
+        name: t(locale, "wheelchair_accessible"),
+      }),
+    ).toHaveValue("");
+  });
 }
 
 for (const locale of locales) {
@@ -816,9 +935,8 @@ for (const locale of locales) {
       screen.getByRole("spinbutton", { name: t(locale, "longitude") }),
       "71.42",
     );
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: t(locale, "indoor") }),
-      "preferred",
+    await user.click(
+      screen.getByRole("checkbox", { name: t(locale, "indoor") }),
     );
     await user.click(
       screen.getByRole("button", { name: t(locale, "buildPlan") }),
@@ -933,6 +1051,7 @@ it("keeps the planner in memory across pages and isolates a group's map route", 
     screen.getByRole("spinbutton", { name: t("ru", "timeBudget") }),
     "45",
   );
+  await user.click(screen.getByText(t("ru", "strictConstraints")));
   await user.selectOptions(
     screen.getByRole("combobox", { name: t("ru", "wheelchair_accessible") }),
     "required",
@@ -1038,6 +1157,7 @@ it("applies reviewed intent without lowering must-haves or moving the origin", a
     screen.getByRole("textbox", { name: t("ru", "query") }),
     query,
   );
+  await user.click(screen.getByText(t("ru", "strictConstraints")));
   await user.selectOptions(
     screen.getByRole("combobox", { name: t("ru", "indoor") }),
     "required",

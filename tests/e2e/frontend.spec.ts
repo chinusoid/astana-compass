@@ -158,6 +158,7 @@ test("real API: unknown required is excluded without weakening it", async ({
   page,
 }) => {
   await fill(page);
+  await page.locator(".strict-constraints > summary").click();
   await page
     .getByRole("combobox", { name: "Доступно на коляске" })
     .selectOption("required");
@@ -177,6 +178,7 @@ test("presets preserve existing must-haves in the form and HTTP request", async 
   page,
 }) => {
   await fill(page);
+  await page.locator(".strict-constraints > summary").click();
   const indoor = page.getByRole("combobox", {
     name: "В помещении",
     exact: true,
@@ -209,6 +211,30 @@ test("presets preserve existing must-haves in the form and HTTP request", async 
       { key: "child_friendly", value: true, strength: "required" },
     ]),
   );
+});
+
+test("ordinary amenities remain preferences and keep the walk description", async ({
+  page,
+}) => {
+  await fill(page);
+  const query = "Хочу прогулку по живописным местам, а по пути кофе";
+  await page.locator('textarea[name="query"]').fill(query);
+  const strict = page.locator(".strict-constraints");
+  await expect(strict).not.toHaveAttribute("open");
+  await expect(strict.getByRole("combobox", { name: "Wi-Fi" })).toBeHidden();
+  await page.getByRole("checkbox", { name: "Wi-Fi", exact: true }).check();
+  const sent = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/recommendations") && request.method() === "POST",
+  );
+  await page.locator(".find-button").click();
+  const request = (await sent).postDataJSON() as RecommendationRequest;
+  expect(request.query).toBe(query);
+  expect(request.constraints).toEqual([
+    { key: "has_wifi", value: true, strength: "preferred" },
+  ]);
+  await page.getByRole("checkbox", { name: "Wi-Fi", exact: true }).uncheck();
+  await expect(page.locator('textarea[name="query"]')).toHaveValue(query);
 });
 
 test("real API: no-match keeps every stop; explicit reorder clears the previous route", async ({
@@ -569,7 +595,9 @@ test("keyboard, separate data page, empty catalog and map point selection", asyn
     .getByRole("button", { name: "Найти", exact: true })
     .click();
   await expect(
-    page.locator(".catalog").getByText(t("ru", "catalogNoMatch"), { exact: true }),
+    page
+      .locator(".catalog")
+      .getByText(t("ru", "catalogNoMatch"), { exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: t("ru", "catalogShowAll") }).click();
   await expect(page.locator("#catalog-query")).toHaveValue("");
@@ -644,6 +672,7 @@ test("real intent API: review before apply, keep must-haves and never geocode a 
   const query =
     "У меня 30 минут рядом с Байтереком. Хочу в помещении, нужны розетки.";
   await page.locator('textarea[name="query"]').fill(query);
+  await page.locator(".strict-constraints > summary").click();
   const indoor = page.getByRole("combobox", {
     name: "В помещении",
     exact: true,
