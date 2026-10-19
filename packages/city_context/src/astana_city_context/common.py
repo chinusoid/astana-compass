@@ -16,18 +16,26 @@ _DIAGNOSTIC_REASONS = frozenset({
     "http_error", "timeout", "transport_error", "rejected_encoding", "response_too_large",
     "invalid_json", "invalid_shape", "invalid_schema", "key_not_configured", "unclassified",
 })
+_TOMTOM_FIELDS = (
+    "Attributes", "query", "origin", "preferences", "geometry", "coordinates", "maxResults",
+    "filters", "types", "countryCodesIso2", "position", "poiTypes", "address", "contacts",
+    "phones", "websites", "openingHours", "timeRanges", "utcOffsetSeconds", "Accept-Language",
+    "TomTom-Api-Version", "Content-Type",
+)
 
 
 class ProviderError(ValueError):
     """Safe error with API-compatible code; original provider text is never copied."""
 
     def __init__(self, code: str, retryable: bool = False, retry_after_seconds: float = 0, *,
-                 upstream_status: int | None = None, reason: str | None = None) -> None:
+                 upstream_status: int | None = None, reason: str | None = None,
+                 field_hints: tuple[str, ...] = ()) -> None:
         self.code = code
         self.retryable = retryable
         self.retry_after_seconds = retry_after_seconds
         self.upstream_status = upstream_status if type(upstream_status) is int and 100 <= upstream_status <= 599 else None
         self.reason = reason if type(reason) is str and reason in _DIAGNOSTIC_REASONS else None
+        self.field_hints = tuple(field for field in _TOMTOM_FIELDS if field in field_hints)
         super().__init__(code)
 
 
@@ -44,8 +52,9 @@ def log_tomtom_failure(service: str, error: BaseException, *, reason: str = "unc
     if type(status) is not int or not 100 <= status <= 599:
         status = None
     logging.getLogger("uvicorn.error").warning(
-        "TomTom request failed: service=%s reason=%s code=%s upstream_status=%s",
+        "TomTom request failed: service=%s reason=%s code=%s upstream_status=%s fields=%s",
         service, category, code, status,
+        ",".join(field for field in _TOMTOM_FIELDS if field in getattr(error, "field_hints", ())) or "none",
     )
 
 
@@ -129,7 +138,24 @@ class JsonHTTP:
                                     raise ProviderError("provider_unavailable", retryable=True,
                                                         upstream_status=response.status_code, reason="http_error")
                                 if not 200 <= response.status_code < 300:
-                                    raise ProviderError("provider_unavailable", upstream_status=response.status_code, reason="http_error")
+                                    hints = ()
+                                    if response.status_code == 400 and url.startswith("https://api.tomtom.com/"):
+                                        # Only constant parameter names can reach a log. Never retain
+                                        # the provider's message, target, request echo or credentials.
+                                        raw = bytearray()
+                                        if response.headers.get("content-encoding", "identity").strip().lower() in {"", "identity"}:
+                                            if response.is_stream_consumed:
+                                                raw.extend(response.content if len(response.content) <= 16_384 else b"")
+                                            else:
+                                                async for chunk in response.aiter_raw(chunk_size=1024):
+                                                    raw.extend(chunk)
+                                                    if len(raw) > 16_384:
+                                                        raw.clear()
+                                                        break
+                                            text = raw.decode("utf-8", errors="replace")
+                                            hints = tuple(field for field in _TOMTOM_FIELDS if re.search(r"(?<!\w)" + re.escape(field) + r"(?!\w)", text, re.IGNORECASE))
+                                    raise ProviderError("provider_unavailable", upstream_status=response.status_code,
+                                                        reason="http_error", field_hints=hints)
                                 encoding = response.headers.get("content-encoding", "identity").strip().lower()
                                 if encoding not in {"", "identity"}:
                                     # Reject before HTTPX can decompress a small

@@ -266,3 +266,27 @@ def test_close_is_idempotent_and_requests_after_close_fail():
         with pytest.raises(ProviderError, match="provider_unavailable"):
             await http.request("GET", "https://provider.invalid/")
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("url,body,expected", [
+    ("https://api.tomtom.com/maps/orbis/places/discover", '{"detailedError":{"target":"Attributes","message":"Invalid openingHours; private-secret-value"}}', ("Attributes", "openingHours")),
+    ("https://other.invalid/", "Attributes private-secret-value", ()),
+    ("https://api.tomtom.com/maps/orbis/places/discover", "Attributes " + "x" * 20_000, ()),
+])
+def test_tomtom_bad_request_diagnostics_only_emit_constant_field_names(url, body, expected, caplog):
+    from astana_city_context.common import log_tomtom_failure
+
+    async def run():
+        http = JsonHTTP(client=httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda _: httpx.Response(400, text=body))))
+        try:
+            with pytest.raises(ProviderError) as failure:
+                await http.request("POST", url, json={})
+            assert failure.value.upstream_status == 400
+            assert failure.value.field_hints == expected
+            log_tomtom_failure("places", failure.value)
+        finally:
+            await http.aclose()
+    asyncio.run(run())
+    assert "private-secret-value" not in caplog.text
+    assert url not in caplog.text
