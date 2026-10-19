@@ -1,103 +1,144 @@
 # Реальный снимок Астаны: происхождение и качество
 
-Снимок получен одним ограниченным запросом Overpass **19 октября 2026,
+OSM получен одним ограниченным запросом Overpass **19 октября 2026,
 03:30:43 Asia/Almaty (18 октября 22:30:43 UTC)**. OSM replica timestamp:
-18 октября 22:29:47 UTC. Повторная сборка использовала сохранённый кэш без
-дополнительного внешнего запроса. Эти timestamps описывают загрузку данных,
-а не дату посещения или проверки каждого места.
+18 октября 22:29:47 UTC. Расширение 300 → 628 и новая нормализация использовали
+этот же raw-кэш, без повторного запроса Overpass. Семь точных OSM Wikidata QID
+получены одним GET 19 октября 2026, 07:45:49 UTC. Это времена загрузки источников,
+а не дата посещения или независимой проверки каждого места.
 
-Источник: © OpenStreetMap contributors.
+OSM: © OpenStreetMap contributors,
 [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/),
 [copyright/attribution](https://www.openstreetmap.org/copyright).
-Условия запросов проверены по
-[официальной документации Overpass](https://dev.overpass-api.de/overpass-doc/en/preface/commons.html).
-Приложение использует локальный snapshot; public Overpass не обслуживает
+Wikidata text: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+Правила проверены по [Overpass documentation](https://dev.overpass-api.de/overpass-doc/en/preface/commons.html),
+[Wikidata data access](https://www.wikidata.org/wiki/Wikidata:Data_access),
+[API etiquette](https://www.mediawiki.org/wiki/API:Etiquette) и
+[Wikidata licensing](https://www.wikidata.org/wiki/Wikidata:Licensing).
+Приложение использует локальный snapshot; внешние источники не обслуживают
 пользовательские HTTP-запросы Astana Compass.
 
-## Что входит
+## Состав
 
 | Этап | Число |
 | --- | ---: |
-| Получено элементов в полном query response | 628 |
-| Прошли нормализацию и географический фильтр | 628 |
-| Включено в компактный snapshot | 300 |
-| Не включено из-за sample limit | 328 |
-| Категорий в snapshot | 13 |
-| Отброшено невалидных записей в этом запуске | 0 |
+| Получено / прошло нормализацию | 628 / 628 |
+| Включено в snapshot при default limit 1000 | 628 |
+| Исключено из-за лимита / невалидности | 0 / 0 |
+| Категорий | 13 |
+| Точных Wikidata QID / связанных мест | 7 / 7 |
+| Мест с кратким Wikidata description | 6 |
 
-Выборка распределена по category × сетке 0.05° и упорядочена по OSM ID.
-Больше половины sample — кафе и рестораны, поскольку они представлены в
-источнике значительно чаще остальных категорий. Это не статистически
-репрезентативная выборка городских учреждений и не полный каталог.
+Выбор ограничен именованными категориями и bbox, не всей Астаной. Если в будущем
+результат превысит 1000, применяется category × grid round-robin; число исключённых
+из-за лимита выводится в manifest. Сейчас весь подходящий кэш включён. Большинство
+записей — кафе и рестораны; это не статистически репрезентативная выборка.
 
 | Категория | В snapshot |
 | --- | ---: |
-| cafe | 121 |
-| restaurant | 69 |
+| cafe | 346 |
+| restaurant | 172 |
 | park | 35 |
 | attraction | 16 |
 | artwork | 13 |
-| cinema | 9 |
-| theatre | 9 |
-| library | 8 |
-| museum | 8 |
+| cinema / theatre | 9 / 9 |
+| library / museum | 8 / 8 |
 | arts_centre | 6 |
-| garden | 3 |
-| gallery | 2 |
-| playground | 1 |
+| garden / gallery / playground | 3 / 2 / 1 |
 
-Границы реально выбранных координат: latitude 50.9562399–51.2892202,
-longitude 71.2358957–71.6456947. Это покрытие нескольких частей города,
-без утверждения о полноте отдельных административных районов.
+Границы: latitude 50.9562399–51.2892202, longitude 71.2358957–71.6456947.
+Way/relation coordinates — bounding-box centers, не проверенные входы.
+Полнота отдельных административных районов не установлена.
 
-## Измеренные пробелы
+## Аудит тегов и результат
 
-| Поле | Есть исходное значение | Доля от 300 |
-| --- | ---: | ---: |
-| name | 300 | 100% |
-| opening_hours | 86 | 28.7% |
-| name:ru | 68 | 22.7% |
-| name:en | 51 | 17.0% |
-| name:kk | 31 | 10.3% |
-| wheelchair yes/no | 16 | 5.3% |
-| description | 1 | 0.3% |
-| fee yes/no | 1 | 0.3% |
-| indoor yes/no | 0 | 0% |
+`raw_tag_counts` manifest содержит полный аудит 628 исходных объектов.
+Таблица сравнивает наличие исходного тега и результат консервативной нормализации.
 
-`wheelchair=limited` не превращается в полную доступность. Восемь исходных
-тегов indoor имеют иные значения и не считаются булевым подтверждением.
-Отсутствие fee не доказывает бесплатный вход. Категория park/playground не
-доказывает безопасность для детей; категория cafe/museum не заменяет
-свидетельство конкретного свойства. Поэтому required indoor или некоторые
-другие жёсткие условия честно могут дать пустую выдачу. Это известный пробел
-источника, а не основание ослаблять условия.
+| Поле OSM | Raw / прежний snapshot 300 | Новый snapshot 628 |
+| --- | ---: | --- |
+| internet_access | 37 / 13 | has_wifi: 29 true, 2 false, остальные unknown |
+| internet_access:fee | 12 / 6 | raw строки, не обещание бесплатного Wi-Fi |
+| toilets | 9 / 4 | 9 true, остальные unknown |
+| toilets:wheelchair | 2 / 1 | raw строки, не доступность всего места |
+| indoor_seating | 109 / 28 | raw строки, не boolean indoor |
+| outdoor_seating | 117 / 30 | raw строки |
+| cuisine | 172 / 52 | 172 raw строки |
+| addr:street | 111 / 53 | 111 raw строк |
+| addr:housenumber | 115 / 59 | 115 raw строк |
+| contact:website | 40 / 23 | 40 source URLs |
+| name:ru | 94 / 68 | 94 source names |
+| name:kk | 43 / 31 | 43 source names |
+| name:en | 75 / 51 | 75 source names |
+| wikidata | 7 / 7 | 7 точных связей, brand IDs исключены |
+| description | 1 / 1 | 1 OSM description без переписывания |
+| opening_hours | 188 / 86 | 188 исходных строк с evidence |
+| wheelchair | 54 / 18 | 32 true, 17 false; 5 limited остаются unknown |
+| indoor | 12 / 8 | room/area, boolean indoor unknown у всех |
+| fee | 1 / 1 | 1 free_entry=true |
+| quiet / power outlets | 0 / 0 | unknown у всех |
 
-Неизвестны `child_friendly`, `quiet`, `toilets` и динамический opening status
-при импорте. Открытость вычисляет ContextProvider по исходным opening_hours;
-unsupported/holiday schedules сохраняют unknown. Даже поддержанное расписание
-не подтверждает фактическую работу или доступность на весь период посещения.
+Кроме того, сохранены 6 highchair и 4 changing_table raw тега. Они не доказывают
+child_friendly. Wi-Fi определяется только по явному `wlan`; `internet_access=yes`
+означает доступ неизвестного вида. Противоречивые/неподдержанные tokens не дают
+true. [OSM internet_access](https://wiki.openstreetmap.org/wiki/Key:internet_access).
+`toilets=yes/no` относится к наличию туалета при объекте;
+[OSM toilets](https://wiki.openstreetmap.org/wiki/Key:toilets).
+Отсутствие и неоднозначные значения не превращаются в false или более широкие
+подтверждения. Категория park/playground не доказывает пригодность для детей.
 
-## Проверяемые артефакты
+Wikidata: 7 EN labels, 6 RU и 6 KK labels; aliases у 3 мест на RU, 1 на KK и 1 на EN.
+Descriptions после фильтра: 3 RU, 6 EN, **0 KK**. Всего в Place.description 7 текстов:
+1 OSM и 6 Wikidata. Это короткие исходные строки, не полные редакторские описания.
+Одна субъективная RU-строка о Ботаническом саде исключена из нормализованных
+данных и поиска; выбран нейтральный EN-текст. Исходный кэш сохранён без изменений.
+Ограниченный словарный фильтр не является независимой проверкой фактов.
+Выбор: OSM description → OSM description:ru/kk/en → Wikidata description:ru/kk/en.
+Поддержанные языки остаются в facts; переводов, дополнительных
+amenities и заполнения одной категорией нет. `description:source` и, когда язык
+известен, `description:language` отмечают выбор.
 
-- `data/samples/astana-overpass-cache.json`: исходный ответ в cache envelope;
-- `data/samples/astana-osm.json`: canonical Places и manifest;
-- `data/manifests/astana-osm.json`: query, bbox, часы загрузки/replica,
-  policy versions, raw/query/place SHA-256, исходный и выбранный coverage;
-- `packages/city_data`: importer, repository и offline tests.
+Quiet, child_friendly, power outlets и indoor неизвестны у всех мест. Required по
+ним может честно дать пустой результат. Открытость вычисляет ContextProvider из
+opening_hours; неподдержанные расписания остаются unknown. Поддержанное расписание
+не гарантирует фактическую работу весь визит. `osm:check_date*` — строки OSM,
+не наша полевая проверка; они не подменяют timestamps evidence.
 
-Raw SHA-256: `7e10e38b97d8e5cb546905f51a46d881aa35f1f4ccb26d2083c23a738746151c`.
-Places SHA-256: `e646f8ba7bd3a9bb5c2ceb36c273cd113f73a141449ea71efec195f1e4b01213`.
-Оба считаются по canonical JSON, описанному в `data/samples/README.md`.
-Тест воспроизведения повторяет normalization/sample selection из raw cache
-и сравнивает весь массив Places и manifest report без сетевых запросов.
+## Проверяемые примеры
 
-Repository возвращает независимые копии, стабильную пагинацию, nearby по
-distance → ID и статус источника. Прочитанные записи не меняются при случайной
-модификации результатов вызывающим кодом. Factory не подставляет fixtures
-при отсутствии или повреждении `ASTANA_POI_PATH`; startup завершается ошибкой
-источника. Валидный устаревший snapshot разрешён со статусом stale.
+- `osm:way/1395465867` Estet Coffee: wlan, toilets=yes, wheelchair=yes,
+  indoor_seating=yes, outdoor_seating=no, coffee_shop, 24/7. Indoor остаётся unknown.
+- `osm:node/11783576043` Drinkit: toilets=yes, internet_access=yes; Wi-Fi unknown.
+- `osm:node/4894937300` Национальный музей: Q18405670, description RU/EN.
+- `osm:way/917478479` Астана Опера: Q21371563, description RU/EN.
+- `osm:way/69232075` Жетысу: Q104866925, description только EN.
+- `osm:way/1460700597` Атамекен: Q1454511, source labels; description отсутствует.
 
-Команды импорта, запуска, ограничения ресурсов и политика обновления:
-`packages/city_data/README.md`. Полноценный production путь требует PostgreSQL/
-pgvector, безопасного управления обновлениями и расширения источников;
-текущий JSON adapter не объявляется готовой производственной базой.
+## Воспроизведение и границы доверия
+
+- `data/samples/astana-overpass-cache.json`: неизменённый исходный OSM response;
+- `data/samples/astana-wikidata-cache.json`: один Wikidata response, request/raw
+  hashes, точные QID, время загрузки, revisions и modified_at;
+- `data/samples/astana-osm.json`: canonical Places и встроенный manifest;
+- `data/manifests/astana-osm.json`: тот же manifest, bbox/query/hashes,
+  normalization `osm-tags-v2`, coverage и отдельная Wikidata provenance;
+- `packages/city_data`: bounded CLI, repository и offline tests.
+
+OSM raw SHA-256: `7e10e38b97d8e5cb546905f51a46d881aa35f1f4ccb26d2083c23a738746151c`.
+Wikidata raw SHA-256: `770b57e20dcb680e2dec1e4f431575b4bef651fc6d48f3bd16f39957b1134985`.
+Places SHA-256: `c8aa21649a1549a020c8102e18bc03ed47c1e19b76c6dd552a55c35c6ae1f0dc`.
+Canonical hashing описан в `data/samples/README.md`. Это контроль повреждения и
+воспроизводимости, не подпись доверенного издателя. Places воспроизводятся из
+двух кэшей без сети, включая descriptions и per-source evidence.
+
+Wikidata evidence имеет type `provider`, CC0 source name, точный QID и URL revision.
+Repository проверяет allowlist, match с OSM QID, source times и manifest counts;
+Wikidata evidence не может подтверждать amenities. Идентичность задана OSM-связью
+и не проверена независимо на месте. Обновление Wikidata не освежает OSM facts.
+data_status показывает источники отдельно; unique total не удваивается.
+
+Repository читает снимок один раз и возвращает независимые копии. Factory не
+подставляет fixtures при отсутствии/повреждении ASTANA_POI_PATH. Stale snapshot
+разрешён с warning. Команды импорта, offline replay и ограничения — в
+`packages/city_data/README.md`. PostgreSQL/pgvector остаётся production направлением;
+JSON adapter не объявляется производственной базой данных.
