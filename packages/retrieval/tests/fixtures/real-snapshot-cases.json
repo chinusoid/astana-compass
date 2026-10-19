@@ -1,7 +1,7 @@
 {
   "dataset": "astana-osm-628-source-regression-v1",
   "judgment_kind": "agent-authored source-informed regression judgments; not independent human relevance labels",
-  "snapshot_sha256": "bc919999881d216cf7692d2c7e3b0289fc388ce227c94a8fd00f0966bd2030df",
+  "snapshot_sha256": "b9fcecd9ae69192bc72a543a8bf1256b87ee3829849c50c0cf276fb70ad0d5ba",
   "snapshot_places": 628,
   "origin": {
     "lat": 51.127,

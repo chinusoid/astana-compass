@@ -48,7 +48,7 @@ def test_live_snapshot_is_ready_and_attributes_its_real_catalogue(offline_live):
     status = offline_live.get("/v1/data-status").json()
     validate_payload("DataStatusResponse", status)
     assert status["total_places"] == 628
-    assert len(status["sources"]) == 2
+    assert len(status["sources"]) == 11
     assert status["sources"][0]["status"] in {"ready", "stale"}
     assert status["sources"][0]["source_url"] == "https://www.openstreetmap.org/copyright"
     assert "ODbL" in " ".join(status["sources"][0]["warnings"])
@@ -61,21 +61,37 @@ def test_live_snapshot_is_ready_and_attributes_its_real_catalogue(offline_live):
         assert place["id"].startswith("osm:")
         assert "museum" in place["categories"]
         assert any(evidence["source_type"] == "osm" for evidence in place["evidence"])
-        assert all(evidence["source_type"] in {"osm", "provider"} for evidence in place["evidence"])
+        assert all(evidence["source_type"] in {"osm", "provider", "official"} for evidence in place["evidence"])
 
 
-def test_real_wikidata_description_has_separate_pinned_provenance(offline_live):
+def test_real_official_description_retains_separate_pinned_wikidata_provenance(offline_live):
     response = offline_live.get("/v1/places/osm:node/4894937300")
     assert response.status_code == 200
     place = response.json()
     description = next(fact for fact in place["facts"] if fact["key"] == "wikidata:description:ru")
-    assert description["status"] == "known" and place["description"] == description["value"]
+    assert description["status"] == "known" and description["value"] == "музей в Астане, Казахстан"
     evidence = [item for item in place["evidence"] if item["id"] in description["evidence_ids"]]
     assert len(evidence) == 1
     assert evidence[0]["source_type"] == "provider"
     assert "CC0" in evidence[0]["source_name"]
     assert "oldid=" in evidence[0]["source_url"]
     assert any(item["source_type"] == "osm" for item in place["evidence"])
+    facts = {fact["key"]: fact for fact in place["facts"]}
+    official = facts["official:description:ru"]
+    assert official["status"] == "known" and place["description"] == official["value"]
+    assert len(official["value"]) > len(description["value"])
+    assert facts["description:source"]["value"] == "official"
+    assert facts["description:language"]["value"] == "ru"
+    assert facts["description:source"]["evidence_ids"] == official["evidence_ids"]
+    official_evidence = [item for item in place["evidence"] if item["id"] in official["evidence_ids"]]
+    assert len(official_evidence) == 1
+    assert official_evidence[0]["source_type"] == "official"
+    assert official_evidence[0]["source_name"] == "Visit Astana"
+    assert official_evidence[0]["source_url"] == (
+        "https://www.visitastana.kz/ru/about-city/what-to-see/natsionalnyy-muzey-respubliki-kazakhstan/"
+    )
+    assert facts["opening_hours"]["evidence_ids"] == official["evidence_ids"]
+    assert all(facts[key]["status"] == "unknown" for key in ("has_wifi", "toilets", "free_entry"))
 
 
 def test_confirmed_real_wifi_and_toilets_satisfy_required_conditions(offline_live):
