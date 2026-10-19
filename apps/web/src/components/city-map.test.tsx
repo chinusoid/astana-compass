@@ -34,6 +34,7 @@ class MockMap {
   remove = vi.fn();
   resize = vi.fn();
   fitBounds = vi.fn();
+  queryRenderedFeatures = vi.fn((): { geometry: unknown }[] => []);
   easeTo = vi.fn((options: { center?: [number, number]; zoom?: number }) => {
     if (options.center)
       this.center = { lng: options.center[0], lat: options.center[1] };
@@ -250,8 +251,12 @@ it("accepts map clicks only during start selection and does not swap lat/lon", a
   const view = render(<CityMap {...config} />);
   const map = await loadMap();
   act(() =>
-    map.emit("click", { lngLat: { lng: 71.43056789, lat: 51.12834567 } }),
+    map.emit("click", {
+      point: { x: 300, y: 200 },
+      lngLat: { lng: 71.43056789, lat: 51.12834567 },
+    }),
   );
+  expect(map.queryRenderedFeatures).not.toHaveBeenCalled();
   expect(config.onPick).toHaveBeenCalledExactlyOnceWith({
     lat: 51.128346,
     lon: 71.430568,
@@ -273,6 +278,77 @@ it("accepts map clicks only during start selection and does not swap lat/lon", a
     }),
   );
 });
+
+it("looks up the footprint of a clicked 3D roof instead of the ground behind it", async () => {
+  const fetch = vi.fn().mockResolvedValue({ ok: false, status: 503 });
+  vi.stubGlobal("fetch", fetch);
+  render(<CityMap {...props()} picking={false} />);
+  const map = await loadMap();
+  map.queryRenderedFeatures.mockReturnValue([
+    {
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [71.4304, 51.1282],
+            [71.4306, 51.1282],
+            [71.4306, 51.1284],
+            [71.4304, 51.1284],
+            [71.4304, 51.1282],
+          ],
+        ],
+      },
+    },
+  ]);
+  const pixel = { x: 300, y: 200 };
+  act(() =>
+    map.emit("click", {
+      point: pixel,
+      lngLat: { lng: 71.43031, lat: 51.12928 },
+    }),
+  );
+  expect(map.queryRenderedFeatures).toHaveBeenCalledExactlyOnceWith(pixel, {
+    layers: [BUILDING_LAYER],
+  });
+  await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+  const request = JSON.parse(fetch.mock.calls[0][1].body);
+  expect(request.location.lat).toBeCloseTo(51.1283, 6);
+  expect(request.location.lon).toBeCloseTo(71.4305, 6);
+  expect(request.locale).toBe("ru");
+});
+
+it.each(["missing", "empty", "invalid", "throws", "flat"])(
+  "keeps ground lookup when the extrusion is %s",
+  async (state) => {
+    const fetch = vi.fn().mockResolvedValue({ ok: false, status: 503 });
+    vi.stubGlobal("fetch", fetch);
+    render(<CityMap {...props()} picking={false} />);
+    const map = await loadMap();
+    if (state === "missing") map.layers.delete(BUILDING_LAYER);
+    if (state === "invalid")
+      map.queryRenderedFeatures.mockReturnValue([
+        { geometry: { type: "Polygon", coordinates: [] } },
+      ]);
+    if (state === "throws")
+      map.queryRenderedFeatures.mockImplementation(() => {
+        throw new Error("Style changed");
+      });
+    if (state === "flat") fireEvent.click(screen.getByTestId("map-mode-2d"));
+    act(() =>
+      map.emit("click", {
+        point: { x: 300, y: 200 },
+        lngLat: { lng: 71.44, lat: 51.13 },
+      }),
+    );
+    if (state === "missing" || state === "flat")
+      expect(map.queryRenderedFeatures).not.toHaveBeenCalled();
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      location: { lon: 71.44, lat: 51.13 },
+      locale: "ru",
+    });
+  },
+);
 
 it("opens numbered stop details on click and keyboard and retains the popup when activeId updates", async () => {
   const place = structuredClone(

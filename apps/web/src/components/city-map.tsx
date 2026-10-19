@@ -23,6 +23,7 @@ import type {
 import type { Map as LibreMap, Marker } from "maplibre-gl";
 import { t, type Locale } from "@/lib/i18n";
 import { mapText } from "@/lib/map-copy";
+import { buildingLookupPoint } from "@/lib/map-building";
 import {
   ASTANA_VIEW,
   BUILDING_LAYER,
@@ -254,7 +255,23 @@ export default function CityMap(props: Props) {
               closeInspection();
               setPicked(true);
               current.current.onPick(point);
-            } else void inspectPoint(point);
+            } else {
+              let lookupPoint = point;
+              if (mode.current && event.point && map.getLayer(BUILDING_LAYER)) {
+                try {
+                  // The rendered extrusion hit-test includes its roof/walls;
+                  // event.lngLat alone projects onto the ground behind it.
+                  const building = map.queryRenderedFeatures(event.point, {
+                    layers: [BUILDING_LAYER],
+                  })[0];
+                  lookupPoint =
+                    buildingLookupPoint(building?.geometry) ?? point;
+                } catch {
+                  // A tile/style changing during the click keeps ground lookup.
+                }
+              }
+              void inspectPoint(lookupPoint);
+            }
           });
           observer = new ResizeObserver(() => map.resize());
           observer.observe(host);
