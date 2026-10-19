@@ -14,6 +14,7 @@ import { t, label, type Locale } from "@/lib/i18n";
 import { Sources, RouteNotes, Warnings } from "./details";
 import OsmAttribution from "./osm-attribution";
 import PlaceOverview from "./place-overview";
+import PlacePhoto from "./place-photo";
 import TimeBudgetNote from "./time-budget-note";
 import { factLabel, placeText } from "@/lib/place-presentation";
 
@@ -103,6 +104,7 @@ export default function PlaceCard({
       id={`place-${item ? "result" : "catalog"}-${place.id}`}
       data-testid="place-card"
     >
+      <PlacePhoto place={place} locale={locale} />
       <div className="card-top">
         <span className="place-number">
           {item ? String(item.rank).padStart(2, "0") : <Footprints size={21} />}

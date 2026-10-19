@@ -1,6 +1,7 @@
 import type { Place } from "@astana/api-client";
 import type { Locale } from "@/lib/i18n";
 import { safeUrl } from "@/lib/format";
+import PlacePhoto from "./place-photo";
 import {
   factLabel,
   factValue,
@@ -30,6 +31,7 @@ export default function PlaceOverview({
     .filter((fact) => fact !== undefined);
   return (
     <div className="place-overview">
+      {detailed && <PlacePhoto place={place} locale={locale} detailed />}
       {description ? (
         <div className="source-description">
           <p className="overview-label">{placeText(locale, "description")}</p>
