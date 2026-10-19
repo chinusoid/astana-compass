@@ -1,0 +1,46 @@
+# Allow only Python workspace sources and the explicitly reviewed public data.
+# This Dockerfile-specific file is evaluated relative to the repository context.
+**
+!pyproject.toml
+!uv.lock
+!packages/
+!packages/**
+!services/
+!services/**
+!data/
+!data/samples/
+!data/samples/astana-osm.json
+!infra/
+!infra/render/
+!infra/render/Dockerfile
+!infra/render/Dockerfile.dockerignore
+
+# Final exclusions override the source-directory inclusions above.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/credentials*.json
+**/service-account*.json
+**/.git
+**/.venv
+**/.venv-*
+**/venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.test-tmp*
+**/.next
+**/dist
+**/coverage
+**/*.log
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+**/*.onnx
+**/*.safetensors
+**/*.zip
