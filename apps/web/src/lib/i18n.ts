@@ -183,6 +183,8 @@ const messages = {
     "Wheelchair accessible",
   ],
   child_friendly: ["Подходит детям", "Балаларға қолайлы", "Child friendly"],
+  has_wifi: ["Wi-Fi", "Wi-Fi", "Wi-Fi"],
+  toilets: ["Туалет", "Дәретхана", "Toilets"],
   free_entry: ["Бесплатный вход", "Кіру тегін", "Free entry"],
   open_at_requested_time: [
     "Открыто в выбранное время",
@@ -231,9 +233,9 @@ const messages = {
     "No verified match this time",
   ],
   noMatchHint: [
-    "Можно увеличить время или самостоятельно изменить условия. Обязательные требования сохранены.",
-    "Уақытты көбейтуге немесе талаптарды өзіңіз өзгертуге болады. Міндетті талаптар сақталды.",
-    "Try more time or explicitly change your conditions. Your must-haves have been preserved.",
+    "В каталоге может не хватать сведений о нужных условиях, либо места не укладываются в прогулку. Это не означает, что таких мест в городе нет. Проверьте пояснения ниже; время и условия можно изменить самостоятельно. Обязательные требования сохранены.",
+    "Каталогта қажетті талаптар туралы мәлімет жетіспеуі немесе орындар серуенге сыймауы мүмкін. Бұл қалада ондай орын жоқ дегенді білдірмейді. Төмендегі түсіндірмелерді қараңыз; уақыт пен талаптарды өзіңіз өзгерте аласыз. Міндетті талаптар сақталды.",
+    "The catalog may lack evidence for your conditions, or places may not fit this walk. This does not mean such places do not exist in the city. Check the notes below; you can change the time or conditions yourself. Your must-haves have been preserved.",
   ],
   clarify: [
     "Нужно небольшое уточнение",
@@ -391,6 +393,36 @@ const messages = {
   ],
   more: ["Загрузить ещё", "Тағы жүктеу", "Load more"],
   catalogSearch: ["Поиск по названию", "Атауы бойынша іздеу", "Search by name"],
+  catalogQueryHint: [
+    "Ищите название места. Для пожеланий, удобств и времени откройте «Прогулку».",
+    "Орынның атауын іздеңіз. Қалаулар, қолайлылықтар және уақыт үшін «Серуен» бөлімін ашыңыз.",
+    "Search for a place name. For preferences, amenities and time, open Walk.",
+  ],
+  catalogPendingQuery: [
+    "Запрос изменён. Нажмите «Найти», чтобы обновить результаты.",
+    "Сұрау өзгерді. Нәтижелерді жаңарту үшін «Іздеу» түймесін басыңыз.",
+    "The query has changed. Press Search to update the results.",
+  ],
+  catalogResultsFor: [
+    "Результаты по названию",
+    "Атауы бойынша нәтижелер",
+    "Name search results for",
+  ],
+  catalogNoMatch: [
+    "По этому названию ничего не найдено в текущем каталоге.",
+    "Ағымдағы каталогтан бұл атау табылмады.",
+    "No name matches in the current catalog.",
+  ],
+  catalogNoMatchHint: [
+    "Попробуйте часть названия или другое написание. Каталог не охватывает весь город.",
+    "Атаудың бір бөлігін немесе басқа жазылуын қолданып көріңіз. Каталог бүкіл қаланы қамтымайды.",
+    "Try part of the name or another spelling. This catalog does not cover the whole city.",
+  ],
+  catalogShowAll: [
+    "Показать весь каталог",
+    "Бүкіл каталогты көрсету",
+    "Show the full catalog",
+  ],
   search: ["Найти", "Іздеу", "Search"],
   empty: ["Здесь пока нет мест", "Әзірге орындар жоқ", "No places here yet"],
   loading: ["Загрузка…", "Жүктелуде…", "Loading…"],
@@ -538,4 +570,6 @@ export const constraintKeys = [
   "open_at_requested_time",
   "quiet",
   "has_power_outlets",
+  "has_wifi",
+  "toilets",
 ] as const;

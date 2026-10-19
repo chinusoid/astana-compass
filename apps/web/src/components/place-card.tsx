@@ -13,6 +13,8 @@ import { duration } from "@/lib/format";
 import { t, label, type Locale } from "@/lib/i18n";
 import { Sources, RouteNotes, Warnings } from "./details";
 import OsmAttribution from "./osm-attribution";
+import PlaceOverview from "./place-overview";
+import { factLabel, placeText } from "@/lib/place-presentation";
 
 const cardCopy = {
   ru: {
@@ -74,6 +76,15 @@ export default function PlaceCard({
   onSave,
 }: Props) {
   const copy = cardCopy[locale];
+  const unknownFacts = place.facts.filter(
+    (fact) =>
+      fact.status !== "known" &&
+      !item?.constraint_evaluations.some(
+        (evaluation) =>
+          evaluation.key === fact.key &&
+          ["satisfied", "unsatisfied"].includes(evaluation.outcome),
+      ),
+  );
   const distance =
     item &&
     new Intl.NumberFormat(locale, {
@@ -190,23 +201,21 @@ export default function PlaceCard({
               .join(" · ")}
           </div>
         </>
-      ) : (
-        place.description && (
-          <p className="catalog-description">{place.description}</p>
-        )
-      )}
+      ) : null}
+      <PlaceOverview place={place} locale={locale} />
       {!place.is_synthetic &&
         place.evidence.some(
           (e) => e.source_type === "osm" && !e.is_synthetic,
         ) && <OsmAttribution locale={locale} />}
-      {place.facts.some((f) => f.status !== "known") && (
-        <p className="small muted unknown-note">
-          {t(locale, "unknown")}:{" "}
-          {place.facts
-            .filter((f) => f.status !== "known")
-            .map((f) => label(locale, f.key))
-            .join(", ")}
-        </p>
+      {unknownFacts.length > 0 && (
+        <details className="small muted unknown-note">
+          <summary>
+            {placeText(locale, "unknownConditions")} · {unknownFacts.length}
+          </summary>
+          <p>
+            {unknownFacts.map((fact) => factLabel(locale, fact.key)).join(", ")}
+          </p>
+        </details>
       )}
       <div className="card-actions">
         <button type="button" className="text-button" onClick={onDetails}>

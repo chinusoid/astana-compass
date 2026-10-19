@@ -1,7 +1,32 @@
-import { test, expect } from "../../apps/web/e2e-support";
+import {
+  test,
+  expect,
+  type Page,
+  type RecommendationResponse,
+} from "../../apps/web/e2e-support";
+import type { Place } from "../../packages/api_client/src/generated";
+import { locales, t } from "../../apps/web/src/lib/i18n";
+
+async function searchCatalog(page: Page, name: string) {
+  await page.locator("#catalog-query").fill(name);
+  await page.locator(".catalog-search button[type=submit]").click();
+}
+
+async function fillWalk(page: Page, place: Place, query: string) {
+  await page.getByRole("navigation").locator('a[href="/walk"]').click();
+  const advanced = page.locator("details.advanced-origin");
+  await advanced.locator("summary").click();
+  await page.locator('textarea[name="query"]').fill(query);
+  await page.locator('input[name="latitude"]').fill(String(place.location.lat));
+  await page
+    .locator('input[name="longitude"]')
+    .fill(String(place.location.lon));
+  await advanced.getByRole("button").click();
+  await page.locator('input[name="minutes"]').fill("120");
+}
 
 test.skip(
-  !process.env.ASTANA_LIVE_WEB_URL,
+  !process.env.ASTANA_LIVE_WEB_URL && process.env.ASTANA_LIVE_LOCAL !== "true",
   "Set ASTANA_LIVE_WEB_URL to a frontend connected to ASTANA_MODE=live. This is separate from synthetic tests.",
 );
 
@@ -26,4 +51,197 @@ test("live API readiness and non-synthetic catalog", async ({
         !place.is_synthetic && !place.id.startsWith("synthetic:"),
     ),
   ).toBe(true);
+});
+
+for (const locale of locales) {
+  test(`real source amenities and unknown Wi-Fi stay distinct on mobile in ${locale}`, async ({
+    page,
+    request,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const response = await request.get(
+      `/api/v1/places/${encodeURIComponent("osm:way/1395465867")}`,
+    );
+    expect(response.status()).toBe(200);
+    const place = (await response.json()) as Place;
+    expect(place.is_synthetic).toBe(false);
+    expect(
+      place.facts.some(
+        (fact) =>
+          fact.key === "has_wifi" &&
+          fact.status === "known" &&
+          fact.value === true,
+      ),
+    ).toBe(true);
+    await page.goto("/");
+    await page.locator(".language-select select").selectOption(locale);
+    await searchCatalog(page, place.name);
+    const card = page.locator(`[id="place-catalog-${place.id}"]`);
+    await expect(card).toBeVisible();
+    await expect(card.locator(".source-summary")).toContainText("Wi-Fi");
+    await expect(card.locator(".source-summary")).toContainText("24/7");
+    await expect(card.locator(".source-summary")).toContainText(
+      t(locale, "toilets"),
+    );
+    await expect(card.getByRole("link", { name: "ODbL 1.0" })).toBeVisible();
+    await card.getByRole("button", { name: t(locale, "details") }).click();
+    const dialog = page.getByRole("dialog");
+    const wifi = dialog
+      .locator(".fact")
+      .filter({ has: page.locator("strong", { hasText: /^Wi-Fi$/ }) });
+    await expect(wifi.locator(".fact-status")).toHaveText(t(locale, "known"));
+    await expect(wifi.locator("p").first()).toHaveText(t(locale, "yes"));
+    await expect(
+      dialog.locator(".fact-heading strong").filter({ hasText: /^osm:/ }),
+    ).toHaveCount(0);
+    await page.screenshot({
+      path: testInfo.outputPath(`real-amenities-${locale}-mobile.png`),
+      fullPage: true,
+    });
+    await page.keyboard.press("Escape");
+
+    await searchCatalog(page, "Drinkit");
+    const unknownCard = page.locator(
+      '[id="place-catalog-osm:node/11783576043"]',
+    );
+    await expect(unknownCard).toBeVisible();
+    await expect(
+      unknownCard.locator(".source-summary dt").filter({ hasText: /^Wi-Fi$/ }),
+    ).toHaveCount(0);
+    await unknownCard
+      .getByRole("button", { name: t(locale, "details") })
+      .click();
+    const unknownWifi = page
+      .getByRole("dialog")
+      .locator(".fact")
+      .filter({ has: page.locator("strong", { hasText: /^Wi-Fi$/ }) });
+    await expect(unknownWifi.locator(".fact-status")).toHaveText(
+      t(locale, "unknown"),
+    );
+    await expect(unknownWifi.locator(":scope > p")).toHaveCount(0);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth + 1,
+    );
+    expect(overflow).toBe(false);
+  });
+}
+
+test("real description preserves source language, exact provenance and catalog reset", async ({
+  page,
+  request,
+}, testInfo) => {
+  const response = await request.get(
+    `/api/v1/places/${encodeURIComponent("osm:way/69232075")}`,
+  );
+  expect(response.status()).toBe(200);
+  const place = (await response.json()) as Place;
+  expect(place.description).toBeTruthy();
+  const englishSource = place.facts.find(
+    (fact) => fact.key === "wikidata:description:en",
+  );
+  expect(englishSource?.status).toBe("known");
+  await page.goto("/");
+  await searchCatalog(page, place.name);
+  const card = page.locator(`[id="place-catalog-${place.id}"]`);
+  await expect(card.locator(".source-description")).toContainText(
+    String(englishSource?.value),
+  );
+  await card.getByRole("button", { name: t("ru", "details") }).click();
+  const description = page.getByRole("dialog").locator(".source-description");
+  await expect(description).toContainText("Текст сохранён на языке источника.");
+  const source = place.evidence.find((item) =>
+    englishSource?.evidence_ids.includes(item.id),
+  )!;
+  await expect(description.locator("a")).toHaveAttribute(
+    "href",
+    source.source_url,
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("real-source-description.png"),
+    fullPage: true,
+  });
+  await page.keyboard.press("Escape");
+  await searchCatalog(page, "zzzz-no-such-catalog-name-7391");
+  await expect(
+    page.getByText(t("ru", "catalogNoMatch"), { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: t("ru", "catalogShowAll") }).click();
+  await expect(
+    page.locator(".catalog-cards").getByTestId("place-card").first(),
+  ).toBeVisible();
+  await expect(page.locator("#catalog-query")).toHaveValue("");
+});
+
+test("real Wi-Fi requirement is honored and unknown outlets produce an explained no-match", async ({
+  page,
+  request,
+}, testInfo) => {
+  const response = await request.get(
+    `/api/v1/places/${encodeURIComponent("osm:way/1395465867")}`,
+  );
+  expect(response.status()).toBe(200);
+  const place = (await response.json()) as Place;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await fillWalk(page, place, "Estet Coffee");
+  await page
+    .getByRole("combobox", { name: "Wi-Fi", exact: true })
+    .selectOption("required");
+  const firstResponse = page.waitForResponse(
+    (res) =>
+      res.url().endsWith("/recommendations") &&
+      res.request().method() === "POST",
+  );
+  await page.locator(".find-button").click();
+  const result = (await (await firstResponse).json()) as RecommendationResponse;
+  expect(["matched", "partial"]).toContain(result.status);
+  expect(
+    result.recommendations.some((item) => item.place_id === place.id),
+  ).toBe(true);
+  for (const item of result.recommendations)
+    expect(item.constraint_evaluations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "has_wifi",
+          strength: "required",
+          outcome: "satisfied",
+        }),
+      ]),
+    );
+  await expect(
+    page.locator(".result-cards").getByTestId("place-card").first(),
+  ).toBeVisible();
+
+  await page
+    .getByRole("combobox", { name: t("ru", "has_power_outlets"), exact: true })
+    .selectOption("required");
+  const noMatchResponse = page.waitForResponse(
+    (res) =>
+      res.url().endsWith("/recommendations") &&
+      res.request().method() === "POST",
+  );
+  await page.locator(".find-button").click();
+  const noMatch = (await (
+    await noMatchResponse
+  ).json()) as RecommendationResponse;
+  expect(noMatch.status).toBe("no_match");
+  await expect(
+    page.locator(".result-cards").getByTestId("place-card"),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText(t("ru", "noMatchHint"), { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("combobox", {
+      name: t("ru", "has_power_outlets"),
+      exact: true,
+    }),
+  ).toHaveValue("required");
+  await expect(
+    page.locator(".results > .warnings, .results .warnings").first(),
+  ).toHaveAttribute("open", "");
+  await page.screenshot({
+    path: testInfo.outputPath("real-no-match-mobile.png"),
+    fullPage: true,
+  });
 });

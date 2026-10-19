@@ -1291,6 +1291,83 @@ details[open] > summary {
   font-size: 12px;
   line-height: 1.65;
 }
+.place-overview {
+  margin: 10px 0;
+  overflow-wrap: anywhere;
+}
+.overview-label {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+.source-description {
+  margin-bottom: 12px;
+}
+.source-description > p:not(.overview-label):not(.field-hint) {
+  margin: 0 0 5px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+.description-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.description-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 10px;
+}
+.source-summary {
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: #f4f7f3;
+}
+.source-summary dl {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.source-summary dl > div {
+  display: grid;
+  grid-template-columns: minmax(85px, 40%) minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+}
+.source-summary dt {
+  color: var(--muted);
+}
+.source-summary dd {
+  margin: 0;
+}
+.place-card .source-summary dd {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.source-summary .field-hint {
+  margin-bottom: 0;
+}
+.fact-original,
+.other-source-facts {
+  margin-top: 10px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.other-source-facts {
+  margin: 18px 0;
+}
+.fact-original > p {
+  margin-top: 8px;
+}
+.catalog-empty {
+  padding: 12px 0;
+}
 .catalog-cards {
   margin-bottom: 12px;
 }
