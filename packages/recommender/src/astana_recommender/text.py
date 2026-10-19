@@ -88,6 +88,10 @@ TEXT = {
 }
 
 LABELS = {
+    "quiet": ("Тихое место", "Тыныш орын", "Quiet place"),
+    "has_power_outlets": ("Розетки", "Розеткалар", "Power outlets"),
+    "has_wifi": ("Wi-Fi", "Wi-Fi", "Wi-Fi"),
+    "toilets": ("Туалет", "Дәретхана", "Toilets"),
     "indoor": ("В помещении", "Ғимарат ішінде", "Indoors"),
     "wheelchair_accessible": ("Доступность для коляски", "Арбаға қолжетімділік", "Wheelchair access"),
     "child_friendly": ("Подходит детям", "Балаларға қолайлы", "Child friendly"),

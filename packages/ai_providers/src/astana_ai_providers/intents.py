@@ -22,6 +22,8 @@ IntentProvider = Literal["rules", "openai", "nvidia"]
 _FEATURES = {
     "quiet": r"тих\w{0,20}|тишин\w{0,20}|спокойн\w{0,20}|без\s+шума|quiet|peaceful|not\s+noisy|тыныш\w{0,20}",
     "has_power_outlets": r"розет\w{0,20}|заряд\w{0,20}|power\s+(?:outlet|socket)s?|sockets?|charging|plug\s+in|қуатта\w{0,20}",
+    "has_wifi": r"wi[ -]?fi|вай[ -]?фай|беспроводн\w{0,20}\s+интернет|сымсыз\s+интернет",
+    "toilets": r"туалет\w{0,20}|уборн\w{0,20}|toilets?|restrooms?|дәретхана\w{0,20}",
     "child_friendly": r"реб[её]н\w{0,20}|детьми|детск\w{0,20}|детей|children|child|kids?|family.friend\w{0,20}|балам\w{0,20}|баламен|балалар\w{0,20}",
     "indoor": r"помещени\w{0,20}|внутри|indoor\w{0,20}|inside|үй-жай\w{0,20}|ғимарат\s+іш\w{0,20}",
     "wheelchair_accessible": r"инвалид\w{0,20}\s+коляс\w{0,20}|безбарьер\w{0,20}|wheelchair\w{0,20}|step.free|мүгедек\w{0,20}\s+арб\w{0,20}|кедергісіз",
