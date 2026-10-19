@@ -155,10 +155,15 @@ def test_invalid_tomtom_route_falls_back_to_verified_osrm(problem, caplog):
     asyncio.run(run())
     assert "service=routing reason=invalid_schema" in caplog.text
     assert SECRET not in caplog.text and "https://" not in caplog.text
+    expected = {"driving": "travel_mode", "other": "travel_mode", "missing-section": "section_count",
+                "section-gap": "section_gap", "section-overflow": "section_indices", "missing-leg": "leg_count",
+                "snap": "endpoint", "summary": "summary_totals", "distance": "leg_shortened",
+                "duration": "leg_numeric", "coordinate": "coordinate_schema", "empty": "response_shape"}[problem]
+    assert f"TomTom route rejected: check={expected} " in caplog.text
 
 
 @pytest.mark.parametrize("problem", ["reordered", "disconnected", "collapsed", "shortened", "missing-return"])
-def test_rejects_false_stop_or_return_coverage(problem):
+def test_rejects_false_stop_or_return_coverage(problem, caplog):
     data = response(count=2, returned=True)
     route = data["routes"][0]
     args = arguments(count=2, returned=True)
@@ -188,6 +193,32 @@ def test_rejects_false_stop_or_return_coverage(problem):
         finally:
             await client.aclose()
     asyncio.run(run())
+    expected = {"reordered": "endpoint", "disconnected": "leg_join", "collapsed": "leg_time",
+                "shortened": "leg_shortened", "missing-return": "leg_count"}[problem]
+    assert f"TomTom route rejected: check={expected} " in caplog.text
+
+
+def test_section_coverage_diagnostic_reports_only_counts_without_relaxing_validation(caplog):
+    data = response(count=3, returned=True)
+    # This reveals a provider's differing point-index convention without
+    # silently accepting missing coverage or dumping its route coordinates.
+    data["routes"][0]["sections"][0]["endPointIndex"] = 8
+    async def run():
+        client = http(lambda request: httpx.Response(200, json=data) if request.url.host == "api.tomtom.com" else httpx.Response(503))
+        try:
+            result = await TomTomWalkingRouter(client, api_key=SECRET).estimate_route(**arguments(count=3, returned=True))
+            assert result["method"] == "approximate" and result["geometry"] is None
+        finally:
+            await client.aclose()
+    asyncio.run(run())
+    assert "check=section_coverage legs=4 points=12 sections=1 covered_points=9" in caplog.text
+    assert not any(value in caplog.text for value in (SECRET, "51.1283", "71.4305", "https://"))
+
+
+def test_route_diagnostic_never_formats_untrusted_check_or_counts(caplog):
+    tomtom._RouteRejected(SECRET, legs=SECRET, points={"raw": SECRET}, sections=True, covered_points=100_000).log()
+    assert "check=response_shape legs=None points=None sections=None covered_points=None" in caplog.text
+    assert SECRET not in caplog.text
 
 
 def test_missing_key_uses_osrm_without_sending_an_empty_key():

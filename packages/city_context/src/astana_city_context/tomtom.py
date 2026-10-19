@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import time
 
@@ -18,6 +19,35 @@ SOURCE_URL = "https://docs.tomtom.com/routing-api/documentation/tomtom-maps/v1/c
 _TOTAL_SECONDS = 6.5
 _PRIMARY_SECONDS = 2.5
 _MAX_POINTS = 5000
+_CHECKS = frozenset({
+    "route_count", "leg_count", "point_count", "coordinate_schema", "endpoint", "leg_join",
+    "leg_numeric", "leg_time", "leg_shortened", "leg_geometry", "summary_numeric", "summary_totals",
+    "section_count", "travel_mode", "section_indices", "section_gap", "section_coverage",
+    "response_shape", "output_schema",
+})
+
+
+class _RouteRejected(ValueError):
+    """A fixed check name and bounded integer counts, never source text or geometry."""
+
+    def __init__(self, check, *, legs=None, points=None, sections=None, covered_points=None):
+        self.check = check if type(check) is str and check in _CHECKS else "response_shape"
+        self.counts = tuple(value if type(value) is int and 0 <= value <= _MAX_POINTS else None
+                            for value in (legs, points, sections, covered_points))
+        super().__init__(self.check)
+
+    def log(self):
+        logging.getLogger("uvicorn.error").warning(
+            "TomTom route rejected: check=%s legs=%s points=%s sections=%s covered_points=%s",
+            self.check, *self.counts,
+        )
+
+
+def _metric(value, check):
+    try:
+        return _number(value)
+    except (ValueError, TypeError, OverflowError):
+        raise _RouteRejected(check) from None
 
 
 class TomTomWalkingRouter(ORSWalkingRouter):
@@ -92,13 +122,19 @@ class TomTomWalkingRouter(ORSWalkingRouter):
                                     "departAt": start},
                         )
                         route = self._parse(response, points, return_to_origin, key)
-                        return validate_payload("RouteEstimate", route)
+                        try:
+                            return validate_payload("RouteEstimate", route)
+                        except ValueError:
+                            raise _RouteRejected("output_schema") from None
                 except ProviderError as error:
                     log_tomtom_failure("routing", error)
                     if error.code == "rate_limited":
                         self._cooldown = time.monotonic() + max(60, error.retry_after_seconds)
                 except TimeoutError as error:
                     log_tomtom_failure("routing", error, reason="timeout")
+                except _RouteRejected as error:
+                    log_tomtom_failure("routing", error, reason="invalid_schema")
+                    error.log()
                 except (ValueError, TypeError, KeyError, IndexError, OverflowError) as error:
                     log_tomtom_failure("routing", error, reason="invalid_schema")
         try:
@@ -120,59 +156,75 @@ class TomTomWalkingRouter(ORSWalkingRouter):
         return validate_payload("RouteEstimate", route)
 
     def _parse(self, response, points, returned, key):
+        try:
+            return self._parse_checked(response, points, returned, key)
+        except _RouteRejected:
+            raise
+        except (ValueError, TypeError, KeyError, IndexError, OverflowError):
+            raise _RouteRejected("response_shape") from None
+
+    def _parse_checked(self, response, points, returned, key):
         routes = response["routes"]
         if type(routes) is not list or len(routes) != 1:
-            raise ValueError("Expected exactly one route")
+            raise _RouteRejected("route_count")
         route = routes[0]
         legs = route["legs"]
         if type(legs) is not list or len(legs) != len(points) - 1:
-            raise ValueError("Missing ordered leg")
+            raise _RouteRejected("leg_count", legs=len(legs) if type(legs) is list else None)
         coordinates = []
         distance = duration = 0.0
         for index, leg in enumerate(legs):
             raw = leg["points"]
             if type(raw) is not list or not 2 <= len(raw) <= _MAX_POINTS - len(coordinates):
-                raise ValueError("Missing or excessive geometry")
+                raise _RouteRejected("point_count", points=len(raw) if type(raw) is list else None)
             part = [[point["longitude"], point["latitude"]] for point in raw]
-            validate_payload("RouteGeometry", {"type": "LineString", "coordinates": part})
+            try:
+                validate_payload("RouteGeometry", {"type": "LineString", "coordinates": part})
+            except ValueError:
+                raise _RouteRejected("coordinate_schema") from None
             if (_distance(points[index], part[0]) > 100
                     or _distance(points[index + 1], part[-1]) > 100):
-                raise ValueError("Leg omits ordered destination")
+                raise _RouteRejected("endpoint")
             if coordinates and coordinates[-1] != part[0]:
-                raise ValueError("Disconnected legs")
+                raise _RouteRejected("leg_join")
             # Preserve the provider's point indices, including repeated junctions.
             # No straight connector or entrance segment is added to its geometry.
             coordinates.extend(part)
-            leg_distance = _number(leg["summary"]["lengthInMeters"])
-            leg_duration = _number(leg["summary"]["travelTimeInSeconds"])
+            leg_distance = _metric(leg["summary"]["lengthInMeters"], "leg_numeric")
+            leg_duration = _metric(leg["summary"]["travelTimeInSeconds"], "leg_numeric")
             requested = _distance(points[index], points[index + 1])
             measured = sum(_distance(a, b) for a, b in zip(part, part[1:]))
             if ((requested > 1 and (leg_distance <= 0 or leg_duration <= 0))
-                    or (leg_distance == 0) != (leg_duration == 0)
-                    or (leg_distance < requested and not math.isclose(
-                        leg_distance, requested, rel_tol=.02, abs_tol=10,
-                    ))
-                    or not math.isclose(leg_distance, measured, rel_tol=.03, abs_tol=10)):
-                raise ValueError("Leg metrics do not match full geometry")
+                    or (leg_distance == 0) != (leg_duration == 0)):
+                raise _RouteRejected("leg_time")
+            if leg_distance < requested and not math.isclose(leg_distance, requested, rel_tol=.02, abs_tol=10):
+                raise _RouteRejected("leg_shortened")
+            if not math.isclose(leg_distance, measured, rel_tol=.03, abs_tol=10):
+                raise _RouteRejected("leg_geometry")
             distance += leg_distance
             duration += leg_duration
-        if (not math.isclose(_number(route["summary"]["lengthInMeters"]), distance, abs_tol=len(legs))
-                or not math.isclose(_number(route["summary"]["travelTimeInSeconds"]), duration, abs_tol=len(legs))):
-            raise ValueError("Summary omits a leg")
+        if (not math.isclose(_metric(route["summary"]["lengthInMeters"], "summary_numeric"), distance, abs_tol=len(legs))
+                or not math.isclose(_metric(route["summary"]["travelTimeInSeconds"], "summary_numeric"), duration, abs_tol=len(legs))):
+            raise _RouteRejected("summary_totals")
         sections = route["sections"]
         if type(sections) is not list or not 1 <= len(sections) <= _MAX_POINTS:
-            raise ValueError("Missing travel-mode verification")
+            raise _RouteRejected("section_count", sections=len(sections) if type(sections) is list else None)
         covered = 0
         for section in sections:
             if section["sectionType"] != "TRAVEL_MODE":
                 continue
             start, end = section["startPointIndex"], section["endPointIndex"]
-            if (section["travelMode"] != "pedestrian" or type(start) is not int or type(end) is not int
-                    or start != covered or not start < end < len(coordinates)):
-                raise ValueError("Unverified walking segment")
+            if section["travelMode"] != "pedestrian":
+                raise _RouteRejected("travel_mode")
+            if type(start) is not int or type(end) is not int or not start < end < len(coordinates):
+                raise _RouteRejected("section_indices", legs=len(legs), points=len(coordinates), sections=len(sections))
+            if start != covered:
+                raise _RouteRejected("section_gap", legs=len(legs), points=len(coordinates), sections=len(sections),
+                                     covered_points=covered + 1)
             covered = end
         if covered != len(coordinates) - 1:
-            raise ValueError("Travel modes do not cover complete route")
+            raise _RouteRejected("section_coverage", legs=len(legs), points=len(coordinates), sections=len(sections),
+                                 covered_points=covered + 1)
         generated = _stamp(self.clock())
         assumptions = [
             "TomTom Maps pedestrian profile; every ordered leg included; network snapping within 100 m.",
