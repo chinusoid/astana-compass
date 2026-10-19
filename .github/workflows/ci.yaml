@@ -209,3 +209,125 @@ jobs:
       - name: Stop test containers
         if: always()
         run: docker compose -f infra/compose.yaml down
+
+  cloudflare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      WRANGLER_SEND_METRICS: "false"
+      ASTANA_ALLOW_FIXTURES: "false"
+      ASTANA_MAP_PROVIDER: none
+      # Build a deployable worker without depending on a running backend.
+      ASTANA_API_URL: https://backend.example.invalid
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.19.0"
+          package-manager-cache: false
+      - name: Install pinned pnpm from the official registry
+        run: |
+          npm install --global pnpm@11.25.0 --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org
+          test "$(pnpm --version)" = "11.25.0"
+      - name: Install the independent frontend lockfile
+        working-directory: apps/web
+        run: pnpm install --frozen-lockfile
+      - name: Build the Cloudflare Worker and static assets
+        working-directory: apps/web
+        run: pnpm build:cloudflare
+      - name: Verify bundled map workers and package without publishing
+        working-directory: apps/web
+        run: |
+          test -s .open-next/worker.js
+          test -s .open-next/assets/maplibre/maplibre-gl-worker.mjs
+          test -s .open-next/assets/maplibre/maplibre-gl-shared.mjs
+          pnpm exec wrangler deploy --dry-run --outdir "$RUNNER_TEMP/cloudflare-dry-run"
+
+  render-container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the separate live Render image
+        run: docker build --file infra/render/Dockerfile --tag astana-render:ci .
+      - name: Start the live image without network or credentials
+        run: |
+          docker run --detach --name astana-render-ci \
+            --network none --read-only --memory 512m --memory-swap 512m \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --env PORT=11000 --env LLM_PROVIDER=none \
+            --env ASTANA_MAP_LOOKUP_ENABLED=false --env ASTANA_WEATHER_ENABLED=false \
+            --env ROUTING_PROVIDER=openrouteservice \
+            astana-render:ci
+      - name: Verify installed runtime and live catalog over container HTTP
+        shell: bash
+        run: |
+          docker exec -i astana-render-ci python - <<'PY'
+          import importlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          import time
+          from urllib.error import URLError
+          from urllib.request import urlopen
+
+          from astana_contracts import validate_payload
+
+          assert os.getuid() != 0, "The API must run as a non-root user"
+          assert os.environ["ASTANA_MODE"] == "live"
+          assert os.environ["LLM_PROVIDER"] == "none"
+          for key in ("OPENAI_API_KEY", "NVIDIA_API_KEY", "LLM_API_KEY", "TOMTOM_API_KEY", "ORS_API_KEY", "ROUTING_API_KEY"):
+              assert not os.environ.get(key), "CI must not use provider credentials"
+          for name in ("astana_api", "astana_city_data", "astana_retrieval", "astana_city_context", "astana_contracts"):
+              module = importlib.import_module(name)
+              assert Path(module.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()), name
+          assert not Path("/app/packages").exists(), "Runtime must use installed wheels"
+          assert Path(os.environ["ASTANA_POI_PATH"]).is_file(), "Public snapshot must be baked into the live image"
+
+          # A non-default PORT proves that the Render entrypoint uses its runtime env.
+          base = "http://127.0.0.1:11000"
+
+          def get(path, schema):
+              with urlopen(base + path, timeout=5) as response:
+                  assert response.status == 200
+                  assert response.headers["X-Astana-Data-Mode"] == "live"
+                  payload = json.load(response)
+              validate_payload(schema, payload)
+              return payload
+
+          deadline = time.monotonic() + 90
+          while True:
+              try:
+                  health = get("/v1/health/ready", "HealthResponse")
+                  assert health["status"] == "ok"
+                  break
+              except URLError:
+                  if time.monotonic() >= deadline:
+                      raise AssertionError("Live image did not become ready within 90 seconds") from None
+                  time.sleep(1)
+
+          status = get("/v1/data-status", "DataStatusResponse")
+          assert status["total_places"] == 628, status["total_places"]
+          assert status["sources"]
+          assert all(source["status"] in {"ready", "stale"} for source in status["sources"])
+          catalog = get("/v1/places?categories=museum&limit=3", "PlaceListResponse")
+          assert catalog["places"], "The real catalog must expose museum candidates"
+          assert all(not place["is_synthetic"] and place["id"].startswith("osm:") for place in catalog["places"])
+          detail = get("/v1/places/osm:way/1395465867", "Place")
+          facts = {fact["key"]: fact for fact in detail["facts"]}
+          assert facts["has_wifi"]["status"] == "known" and facts["has_wifi"]["value"] is True
+          assert facts["toilets"]["status"] == "known" and facts["toilets"]["value"] is True
+          print("Render live image passed: non-root installed runtime, dynamic PORT, 628 real POIs and verified details, no provider network or keys.")
+          PY
+      - name: Logs on failure
+        if: failure()
+        run: docker logs --tail=100 astana-render-ci || true
+      - name: Stop the live test container
+        if: always()
+        run: docker rm --force astana-render-ci 2>/dev/null || true
