@@ -103,11 +103,17 @@ async def build_services(settings, stack):
             context = await own(owned, resolve(settings.context_factory)(config=config))
         validate_port(context, ContextProvider)
         generator = None
+        llm_budget = None
         if settings.llm_provider != "none":
             from astana_ai_providers import create_generator
+            from astana_ai_providers.budgets import RequestBudget
+            # One allowance covers all intent and explanation calls in this API
+            # process. Multi-worker deployments also need a shared edge quota.
+            llm_budget = RequestBudget.from_env()
             generator = await own(
                 owned, create_generator(
-                    provider=settings.llm_provider, model=settings.llm_model, api_key=settings.llm_api_key
+                    provider=settings.llm_provider, model=settings.llm_model, api_key=settings.llm_api_key,
+                    budget=llm_budget,
                 )
             )
             validate_port(generator, ExplanationGenerator)
@@ -117,6 +123,7 @@ async def build_services(settings, stack):
         intent = await own(owned, create_intent_analyzer(
             provider=settings.llm_provider if settings.llm_provider != "none" else "rules",
             model=settings.llm_model or None, api_key=settings.llm_api_key or None,
+            budget=llm_budget,
         ))
         services = Services(repository=repository, recommender=recommender, intent=intent)
         stack.push_async_callback(owned.pop_all().aclose)

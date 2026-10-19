@@ -14,6 +14,7 @@ import httpx
 from astana_contracts import validate_payload
 
 from .generators import HostedExplanationGenerator, ProviderError, _strict_json
+from .budgets import RequestBudget
 
 IntentProvider = Literal["rules", "openai", "nvidia"]
 
@@ -485,6 +486,7 @@ def create_intent_analyzer(
     *,
     timeout_seconds: float = 6.0,
     transport: httpx.AsyncBaseTransport | None = None,
+    budget: RequestBudget | None = None,
 ) -> IntentAnalyzer:
     """No network until analyze; absent credentials explicitly select rules mode."""
     if provider not in {"rules", "openai", "nvidia"}:
@@ -500,5 +502,6 @@ def create_intent_analyzer(
             max_response_bytes=65_536,
             max_output_tokens=1536,
             transport=transport,
+            budget=budget,
         )
     )

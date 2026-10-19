@@ -15,6 +15,7 @@ from typing import Any, Literal, cast
 
 import httpx
 from astana_recommender import GroundedExplanation, GroundedReason
+from .budgets import BudgetExhausted, RequestBudget
 
 Provider = Literal["openai", "nvidia"]
 Activity = Literal["observe", "explore", "take_break"]
@@ -85,6 +86,7 @@ class HostedExplanationGenerator:
         timeout_seconds: float = 6.0, max_response_bytes: int = 65_536,
         max_output_tokens: int = 512,
         transport: httpx.AsyncBaseTransport | None = None,
+        budget: RequestBudget | None = None,
     ) -> None:
         if provider not in _ENDPOINTS:
             raise ValueError("provider must be openai or nvidia")
@@ -112,6 +114,7 @@ class HostedExplanationGenerator:
         self.timeout_seconds = float(timeout_seconds)
         self.max_response_bytes = max_response_bytes
         self.max_output_tokens = max_output_tokens
+        self._budget = budget if budget is not None else RequestBudget.from_env()
         self._closed = False
         self._client = httpx.AsyncClient(
             headers={
@@ -249,6 +252,12 @@ class HostedExplanationGenerator:
     async def _request(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             async with asyncio.timeout(self.timeout_seconds):
+                # Shared by intent and explanations in API composition. Reserve
+                # before the first await so concurrent calls cannot overspend.
+                try:
+                    self._budget.reserve()
+                except BudgetExhausted:
+                    raise ProviderError(self.provider, "local_budget_exhausted", retryable=True) from None
                 async with self._client.stream("POST", _ENDPOINTS[self.provider], json=payload) as response:
                     if response.status_code != 200:
                         status = response.status_code
@@ -395,6 +404,7 @@ def create_generator(
     provider: Provider, model: str, api_key: str, *,
     timeout_seconds: float = 6.0, max_response_bytes: int = 65_536,
     max_output_tokens: int = 512, transport: httpx.AsyncBaseTransport | None = None,
+    budget: RequestBudget | None = None,
 ) -> HostedExplanationGenerator:
     """Build a server-owned generator; credentials must come from server env.
 
@@ -404,5 +414,5 @@ def create_generator(
     return HostedExplanationGenerator(
         provider, model, api_key, timeout_seconds=timeout_seconds,
         max_response_bytes=max_response_bytes, max_output_tokens=max_output_tokens,
-        transport=transport,
+        transport=transport, budget=budget,
     )
