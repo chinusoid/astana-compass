@@ -9,7 +9,7 @@ import time
 
 from astana_contracts import validate_payload
 
-from .common import ProviderError, parse_instant
+from .common import ProviderError, log_tomtom_failure, parse_instant
 from .osrm import OSRMWalkingRouter
 from .routing import ORSWalkingRouter, _distance, _number, _stamp
 
@@ -40,6 +40,8 @@ class TomTomWalkingRouter(ORSWalkingRouter):
         self.fallback = OSRMWalkingRouter(
             http, clock=self.clock, pace_mps=self.pace_mps, allow_approximate=False,
         )
+        if not self.api_key:
+            log_tomtom_failure("routing", ProviderError("provider_unavailable"), reason="key_not_configured")
 
     @property
     def available(self):
@@ -92,10 +94,13 @@ class TomTomWalkingRouter(ORSWalkingRouter):
                         route = self._parse(response, points, return_to_origin, key)
                         return validate_payload("RouteEstimate", route)
                 except ProviderError as error:
+                    log_tomtom_failure("routing", error)
                     if error.code == "rate_limited":
                         self._cooldown = time.monotonic() + max(60, error.retry_after_seconds)
-                except (TimeoutError, ValueError, TypeError, KeyError, IndexError, OverflowError):
-                    pass
+                except TimeoutError as error:
+                    log_tomtom_failure("routing", error, reason="timeout")
+                except (ValueError, TypeError, KeyError, IndexError, OverflowError) as error:
+                    log_tomtom_failure("routing", error, reason="invalid_schema")
         try:
             remaining = deadline - time.monotonic()
             if remaining <= 0:

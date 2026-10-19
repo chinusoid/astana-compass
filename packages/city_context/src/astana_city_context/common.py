@@ -5,21 +5,48 @@ import asyncio
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import json as jsonlib
+import logging
 import math
 import re
 from typing import Any
 
 import httpx
 
+_DIAGNOSTIC_REASONS = frozenset({
+    "http_error", "timeout", "transport_error", "rejected_encoding", "response_too_large",
+    "invalid_json", "invalid_shape", "invalid_schema", "key_not_configured", "unclassified",
+})
+
 
 class ProviderError(ValueError):
     """Safe error with API-compatible code; original provider text is never copied."""
 
-    def __init__(self, code: str, retryable: bool = False, retry_after_seconds: float = 0) -> None:
+    def __init__(self, code: str, retryable: bool = False, retry_after_seconds: float = 0, *,
+                 upstream_status: int | None = None, reason: str | None = None) -> None:
         self.code = code
         self.retryable = retryable
         self.retry_after_seconds = retry_after_seconds
+        self.upstream_status = upstream_status if type(upstream_status) is int and 100 <= upstream_status <= 599 else None
+        self.reason = reason if type(reason) is str and reason in _DIAGNOSTIC_REASONS else None
         super().__init__(code)
+
+
+def log_tomtom_failure(service: str, error: BaseException, *, reason: str = "unclassified") -> None:
+    """Fixed categories only: never format an exception, URL, payload or secret."""
+    service = service if type(service) is str and service in {"routing", "places"} else "unknown"
+    code = getattr(error, "code", None)
+    if type(code) is not str or code not in {"rate_limited", "provider_unavailable", "invalid_provider_response", "invalid_request"}:
+        code = "provider_error"
+    category = getattr(error, "reason", None) or reason
+    if type(category) is not str or category not in _DIAGNOSTIC_REASONS:
+        category = "unclassified"
+    status = getattr(error, "upstream_status", None)
+    if type(status) is not int or not 100 <= status <= 599:
+        status = None
+    logging.getLogger("uvicorn.error").warning(
+        "TomTom request failed: service=%s reason=%s code=%s upstream_status=%s",
+        service, category, code, status,
+    )
 
 
 def utc_now() -> datetime:
@@ -96,42 +123,51 @@ class JsonHTTP:
                                         delay = float(retry_after) if retry_after.isdigit() else (parsedate_to_datetime(retry_after) - utc_now()).total_seconds()
                                     except (ValueError, TypeError, OverflowError):
                                         delay = 60
-                                    raise ProviderError("rate_limited", retryable=True, retry_after_seconds=max(60, delay))
+                                    raise ProviderError("rate_limited", retryable=True, retry_after_seconds=max(60, delay),
+                                                        upstream_status=429, reason="http_error")
                                 if response.status_code in {408, 500, 502, 503, 504}:
-                                    raise ProviderError("provider_unavailable", retryable=True)
+                                    raise ProviderError("provider_unavailable", retryable=True,
+                                                        upstream_status=response.status_code, reason="http_error")
                                 if not 200 <= response.status_code < 300:
-                                    raise ProviderError("provider_unavailable")
+                                    raise ProviderError("provider_unavailable", upstream_status=response.status_code, reason="http_error")
                                 encoding = response.headers.get("content-encoding", "identity").strip().lower()
                                 if encoding not in {"", "identity"}:
                                     # Reject before HTTPX can decompress a small
                                     # encoded body into an unbounded allocation.
-                                    raise ProviderError("invalid_provider_response")
+                                    raise ProviderError("invalid_provider_response", upstream_status=response.status_code,
+                                                        reason="rejected_encoding")
                                 if response.is_stream_consumed:
                                     # Custom in-memory transports may preload a
                                     # response. Real network responses stream raw.
                                     body = response.content
                                     if len(body) > self.max_bytes:
-                                        raise ProviderError("invalid_provider_response")
+                                        raise ProviderError("invalid_provider_response", upstream_status=response.status_code,
+                                                            reason="response_too_large")
                                 else:
                                     body = bytearray()
                                     chunk_size = min(4096, self.max_bytes + 1)
                                     async for chunk in response.aiter_raw(chunk_size=chunk_size):
                                         if len(body) + len(chunk) > self.max_bytes:
-                                            raise ProviderError("invalid_provider_response")
+                                            raise ProviderError("invalid_provider_response", upstream_status=response.status_code,
+                                                                reason="response_too_large")
                                         body.extend(chunk)
                                 try:
                                     def reject_constant(_):
                                         raise ValueError("Nonfinite JSON constant")
                                     result = jsonlib.loads(body, parse_constant=reject_constant)
                                 except (ValueError, UnicodeError, RecursionError):
-                                    raise ProviderError("invalid_provider_response") from None
+                                    raise ProviderError("invalid_provider_response", upstream_status=response.status_code,
+                                                        reason="invalid_json") from None
                                 if not isinstance(result, dict):
-                                    raise ProviderError("invalid_provider_response")
+                                    raise ProviderError("invalid_provider_response", upstream_status=response.status_code,
+                                                        reason="invalid_shape")
                                 return result
+                        except httpx.TimeoutException:
+                            failure = ProviderError("provider_unavailable", retryable=True, reason="timeout")
                         except httpx.TransportError:
-                            failure = ProviderError("provider_unavailable", retryable=True)
+                            failure = ProviderError("provider_unavailable", retryable=True, reason="transport_error")
                         except httpx.HTTPError:
-                            raise ProviderError("invalid_provider_response") from None
+                            raise ProviderError("invalid_provider_response", reason="transport_error") from None
                         except ProviderError as error:
                             if not error.retryable or error.code == "rate_limited":
                                 raise
@@ -140,7 +176,7 @@ class JsonHTTP:
                             raise failure from None
                         await asyncio.sleep(0.2 * (2 ** attempt))
         except TimeoutError:
-            raise ProviderError("provider_unavailable", retryable=True) from None
+            raise ProviderError("provider_unavailable", retryable=True, reason="timeout") from None
         raise ProviderError("provider_unavailable", retryable=True)
 
     async def aclose(self) -> None:

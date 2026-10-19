@@ -112,7 +112,7 @@ def test_explicit_pace_changes_only_routed_duration():
 
 @pytest.mark.parametrize("problem", ["driving", "other", "missing-section", "section-gap", "section-overflow",
                                       "missing-leg", "snap", "summary", "distance", "duration", "coordinate", "empty"])
-def test_invalid_tomtom_route_falls_back_to_verified_osrm(problem):
+def test_invalid_tomtom_route_falls_back_to_verified_osrm(problem, caplog):
     data = response()
     route = data["routes"][0]
     if problem in {"driving", "other"}:
@@ -153,6 +153,8 @@ def test_invalid_tomtom_route_falls_back_to_verified_osrm(problem):
         finally:
             await client.aclose()
     asyncio.run(run())
+    assert "service=routing reason=invalid_schema" in caplog.text
+    assert SECRET not in caplog.text and "https://" not in caplog.text
 
 
 @pytest.mark.parametrize("problem", ["reordered", "disconnected", "collapsed", "shortened", "missing-return"])
@@ -206,7 +208,7 @@ def test_missing_key_uses_osrm_without_sending_an_empty_key():
 
 
 @pytest.mark.parametrize("status", [401, 403, 429, 500])
-def test_provider_errors_and_strict_policy_do_not_leak_secrets(status):
+def test_provider_errors_and_strict_policy_do_not_leak_secrets(status, caplog):
     async def run():
         client = http(lambda _: httpx.Response(status, json={"message": SECRET}))
         try:
@@ -216,9 +218,12 @@ def test_provider_errors_and_strict_policy_do_not_leak_secrets(status):
         finally:
             await client.aclose()
     asyncio.run(run())
+    assert f"upstream_status={status}" in caplog.text
+    assert "service=routing reason=http_error" in caplog.text
+    assert SECRET not in caplog.text and "https://" not in caplog.text and "51.1283" not in caplog.text
 
 
-def test_primary_timeout_leaves_time_for_osrm_and_cancellation_propagates():
+def test_primary_timeout_leaves_time_for_osrm_and_cancellation_propagates(caplog):
     async def run():
         calls, cancelled = [], []
         async def handle(request):
@@ -244,6 +249,8 @@ def test_primary_timeout_leaves_time_for_osrm_and_cancellation_propagates():
         finally:
             await client.aclose()
     asyncio.run(run())
+    assert "service=routing reason=timeout" in caplog.text
+    assert SECRET not in caplog.text
 
 
 def test_total_deadline_bounds_both_slow_providers():

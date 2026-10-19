@@ -11,7 +11,7 @@ import os
 import re
 import time
 
-from astana_city_context.common import JsonHTTP, ProviderError
+from astana_city_context.common import JsonHTTP, ProviderError, log_tomtom_failure
 from astana_contracts import validate_payload
 from .map_features import MapFeatureService, clean, coordinate, xy
 
@@ -25,7 +25,7 @@ ATTRIBUTES = ("results(id,type,title,position(type,coordinates),poiTypes(name),"
 
 def normalize_places(data, location, locale, retrieved_at):
     if not isinstance(data, dict) or not isinstance(data.get("results"), list) or len(data["results"]) > 100:
-        raise ProviderError("invalid_provider_response")
+        raise ProviderError("invalid_provider_response", reason="invalid_schema")
     language = {"ru": 0, "kk": 1, "en": 2}[locale]
     labels = {
         "hours": ("Часы на указанную дату (TomTom)", "Көрсетілген күндегі уақыт (TomTom)", "Hours for the stated date (TomTom)"),
@@ -117,6 +117,8 @@ class TomTomPlacesService:
         self.http = http or JsonHTTP(timeout_seconds=5, retries=0, max_bytes=256_000)
         self.clock, self.calls = clock, deque()
         self.gate, self.cooldown = asyncio.Lock(), 0.0
+        if self.enabled and not self._api_key:
+            log_tomtom_failure("places", ProviderError("provider_unavailable"), reason="key_not_configured")
 
     async def aclose(self):
         await self.http.aclose()
@@ -151,9 +153,13 @@ class TomTomPlacesService:
                 # No persistent database, response cache, or provider payload logs.
                 return normalize_places(data, location, locale, datetime.now(timezone.utc).isoformat())
             except ProviderError as error:
+                log_tomtom_failure("places", error)
                 if error.code == "rate_limited":
                     self.cooldown = self.clock() + max(60, error.retry_after_seconds)
                 raise
+            except (ValueError, TypeError, KeyError, IndexError, OverflowError) as error:
+                log_tomtom_failure("places", error, reason="invalid_schema")
+                raise ProviderError("invalid_provider_response") from None
 
 
 class MultiSourceMapService:

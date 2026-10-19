@@ -188,3 +188,39 @@ def test_empty_source_plus_unavailable_source_is_not_reported_as_complete_empty(
     empty = normalize_places({"results": []}, LOCATION, "en", STAMP)
     with pytest.raises(ProviderError, match="provider_unavailable"):
         asyncio.run(MultiSourceMapService(Stub(empty), Stub(ProviderError("provider_unavailable"))).inspect(LOCATION, "en"))
+
+
+@pytest.mark.parametrize("status,data,reason", [(403, {"message": "private-provider-body"}, "http_error"),
+                                              (200, {"results": "private-provider-body"}, "invalid_schema")])
+def test_failed_lookup_logs_only_fixed_reason_and_status(status, data, reason, caplog):
+    async def check():
+        http = JsonHTTP(client=httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(status, json=data))), retries=0)
+        service = TomTomPlacesService(enabled=True, api_key="private-tomtom-key", http=http)
+        try:
+            with pytest.raises(ProviderError):
+                await service.inspect(LOCATION, "ru")
+        finally:
+            await service.aclose()
+    asyncio.run(check())
+    assert f"service=places reason={reason}" in caplog.text
+    if status == 403:
+        assert "upstream_status=403" in caplog.text
+    assert not any(secret in caplog.text for secret in ("private-provider-body", "private-tomtom-key", "51.1283", ENDPOINT))
+
+
+def test_normalization_exception_text_is_not_logged(monkeypatch, caplog):
+    import astana_api.tomtom_places as module
+    def fail(*args):
+        raise ValueError("secret-token and private raw provider data")
+    monkeypatch.setattr(module, "normalize_places", fail)
+    async def check():
+        http = JsonHTTP(client=httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response()))), retries=0)
+        service = TomTomPlacesService(enabled=True, api_key="private-tomtom-key", http=http)
+        try:
+            with pytest.raises(ProviderError, match="^invalid_provider_response$"):
+                await service.inspect(LOCATION, "en")
+        finally:
+            await service.aclose()
+    asyncio.run(check())
+    assert "service=places reason=invalid_schema" in caplog.text
+    assert "secret-token" not in caplog.text and "private" not in caplog.text
