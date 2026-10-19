@@ -294,6 +294,15 @@ export default function CityMap(props: Props) {
     import("maplibre-gl")
       .then((lib) => {
         if (disposed) return;
+        // Selection can refresh parent arrays or route geometry. Preserve an
+        // actually open place popup when replacing markers with updated data.
+        const openPlaceId = markers.current
+          .find(
+            (marker) =>
+              marker.getElement().dataset.placeId &&
+              marker.getPopup()?.isOpen(),
+          )
+          ?.getElement().dataset.placeId;
         markers.current.forEach((marker) => marker.remove());
         const next: Marker[] = [];
         props.places.forEach((place) => {
@@ -345,6 +354,7 @@ export default function CityMap(props: Props) {
               if (other !== marker) other.getPopup()?.remove();
             current.current.onSelect(place.id);
           });
+          if (place.id === openPlaceId) marker.togglePopup();
           next.push(marker);
         });
         if (props.origin) {

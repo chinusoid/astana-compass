@@ -7,7 +7,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import type { Place, RouteEstimate } from "@astana/api-client";
 import examples from "../../../../contracts.examples.json";
 import { BUILDING_LAYER } from "@/lib/map-style";
@@ -103,7 +103,13 @@ class MockMap {
 }
 class MockPopup {
   content: HTMLElement | null = null;
-  remove = vi.fn();
+  open = false;
+  remove = vi.fn(() => {
+    this.open = false;
+  });
+  isOpen() {
+    return this.open;
+  }
   setDOMContent(content: HTMLElement) {
     this.content = content;
     return this;
@@ -112,11 +118,19 @@ class MockPopup {
 class MockMarker {
   element: HTMLElement;
   popup: MockPopup | null = null;
-  togglePopup = vi.fn();
+  togglePopup = vi.fn(() => {
+    if (this.popup) this.popup.open = !this.popup.open;
+  });
+  getElement() {
+    return this.element;
+  }
   getPopup() {
     return this.popup;
   }
-  remove = vi.fn(() => this.element.remove());
+  remove = vi.fn(() => {
+    this.popup?.remove();
+    this.element.remove();
+  });
   constructor(options: { element: HTMLElement }) {
     this.element = options.element;
     fake.markers.push(this);
@@ -222,17 +236,15 @@ it("starts with real vector 3D and switches to genuinely flat footprints", async
   expect(screen.getByText(mapText("ru", "heights"))).toBeVisible();
 });
 it("accepts map clicks only during start selection and does not swap lat/lon", async () => {
-  const fetch = vi
-    .fn()
-    .mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        status: "empty",
-        features: [],
-        retrieved_at: "2026-10-19T10:00:00Z",
-        attribution: "© OpenStreetMap contributors",
-      }),
-    });
+  const fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      status: "empty",
+      features: [],
+      retrieved_at: "2026-10-19T10:00:00Z",
+      attribution: "© OpenStreetMap contributors",
+    }),
+  });
   vi.stubGlobal("fetch", fetch);
   const config = props();
   const view = render(<CityMap {...config} />);
@@ -297,6 +309,89 @@ it("opens numbered stop details on click and keyboard and retains the popup when
   fireEvent.keyDown(button, { key: "Enter" });
   expect(marker.togglePopup).toHaveBeenCalledTimes(2);
 });
+
+it.each(["click", "Enter"] as const)(
+  "retains an inactive stop popup on the first %s when parent selection rebuilds markers",
+  async (activation) => {
+    const first = structuredClone(
+      examples.cases.find((entry) => entry.name === "place_valid")!.instance,
+    ) as Place;
+    const second = { ...first, id: "second-stop", name: "Second cafe" };
+    const route = (
+      examples.cases.find((entry) => entry.name === "recommendations_valid")!
+        .instance as { recommendations: { route: RouteEstimate }[] }
+    ).recommendations[0].route;
+    const config = props();
+    function Parent({ hideSecond = false }: { hideSecond?: boolean }) {
+      const [activeId, setActiveId] = useState(first.id);
+      return (
+        <CityMap
+          {...config}
+          places={hideSecond ? [first] : [first, second]}
+          origin={{ lat: 51.12, lon: 71.43 }}
+          activeId={activeId}
+          onSelect={setActiveId}
+          selectedIds={[first.id, second.id]}
+          routeStopIds={[first.id, second.id]}
+          route={{
+            ...route,
+            method: "routed",
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [71.43, 51.12],
+                [71.44, 51.13],
+              ],
+            },
+          }}
+          communityEvents={[]}
+          sharedLocations={[]}
+          picking={false}
+        />
+      );
+    }
+    const view = render(<Parent />);
+    await loadMap();
+    const markerButton = () =>
+      screen.getByRole("button", {
+        name: new RegExp(`: ${second.name}$`),
+      });
+    await waitFor(() => expect(markerButton()).toBeVisible());
+    const original = markerButton();
+    expect(original).toHaveAttribute("aria-pressed", "false");
+    if (activation === "click") fireEvent.click(original);
+    else fireEvent.keyDown(original, { key: "Enter" });
+
+    await waitFor(() => expect(markerButton()).not.toBe(original));
+    const selected = markerButton();
+    const marker = fake.markers.find((entry) => entry.element === selected)!;
+    expect(selected).toHaveAttribute("aria-pressed", "true");
+    expect(marker.popup?.isOpen()).toBe(true);
+    expect(marker.popup?.content).toHaveTextContent(second.name);
+    expect(fake.markers.filter((entry) => entry.popup?.isOpen())).toEqual([
+      marker,
+    ]);
+
+    // A dismissed popup must stay dismissed on the next parent render.
+    marker.popup!.remove();
+    view.rerender(<Parent />);
+    await waitFor(() => expect(markerButton()).not.toBe(selected));
+    expect(fake.markers.some((entry) => entry.popup?.isOpen())).toBe(false);
+
+    // Removing an open stop must not resurrect its old popup.
+    fireEvent.click(markerButton());
+    expect(fake.markers.some((entry) => entry.popup?.isOpen())).toBe(true);
+    view.rerender(<Parent hideSecond />);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", {
+          name: new RegExp(`: ${second.name}$`),
+        }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(fake.markers.some((entry) => entry.popup?.isOpen())).toBe(false);
+  },
+);
 
 it("ignores stale object lookups and distinguishes nearby information from an exact building", async () => {
   let finishFirst: (result: unknown) => void = () => {};

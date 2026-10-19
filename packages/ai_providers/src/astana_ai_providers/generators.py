@@ -26,7 +26,7 @@ _ENDPOINTS = {
 }
 _SAFE_LABELS = frozenset({
     "indoor", "wheelchair_accessible", "child_friendly", "free_entry",
-    "open_at_requested_time", "quiet", "has_wifi", "has_power_outlets",
+    "open_at_requested_time", "quiet", "has_wifi", "has_power_outlets", "toilets",
 })
 _ACTIVITIES = frozenset({"observe", "explore", "take_break"})
 _INSTRUCTIONS = (
@@ -180,15 +180,19 @@ class HostedExplanationGenerator:
                 or not set(citations).issubset(available)
             ):
                 raise ProviderError(self.provider, "invalid_input")
-            token = f"fact_{len(allowed)}"
             citation_count += len(citations)
             if citation_count > 256:
                 raise ProviderError(self.provider, "input_too_large")
+            # Source metadata remains in the place, but is not a useful reason
+            # to visit it. Only locally labelled amenities can be selected.
+            if key not in _SAFE_LABELS:
+                continue
+            token = f"fact_{len(allowed)}"
             citation_tokens = tuple(f"{token}_e{index}" for index in range(len(citations)))
             allowed[token] = _AllowedReason(key, tuple(citations), citation_tokens)
             safe_fact: dict[str, Any] = {
                 "fact_key": token,
-                "meaning": key if key in _SAFE_LABELS else "other_confirmed_fact",
+                "meaning": key,
                 "evidence_ids": list(citation_tokens),
             }
             if type(fact["value"]) is bool:
