@@ -383,9 +383,21 @@ class DefaultRecommendationService:
                 warnings.append(text["generation_failed"])
         why = " ".join(
             self._render_reason(place, reason, locale) for reason in result.why
-        ) or text["found"]
+        )
+        # The source category is a grounded reason for the intended visit;
+        # do not let incidental amenities become the only explanation for a cafe
+        # or park. Names/descriptions cannot invent a category or an amenity.
+        categories = set(place["categories"])
+        purpose = next((key for key, values in (
+            ("cafe", {"cafe", "coffee_shop"}), ("park", {"park"}), ("garden", {"garden"}),
+        ) if categories.intersection(values)), None)
+        activity = text[result.suggested_activity]
+        if purpose:
+            why = " ".join(filter(None, [text[f"{purpose}_reason"].format(name=place["name"]), why]))
+            activity = text[f"{purpose}_activity"]
+        why = why or text["found"]
         why += " " + text["time"].format(minutes=math.ceil(total / 60))
-        return why, text[result.suggested_activity], warnings
+        return why, activity, warnings
 
     @staticmethod
     def _route_warnings(places: list[JSON], route: JSON, locale: str) -> list[str]:

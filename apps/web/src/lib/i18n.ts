@@ -240,9 +240,9 @@ const messages = {
   toilets: ["Туалет", "Дәретхана", "Toilets"],
   free_entry: ["Бесплатный вход", "Кіру тегін", "Free entry"],
   open_at_requested_time: [
-    "Открыто в выбранное время",
-    "Таңдалған уақытта ашық",
-    "Open at your chosen time",
+    "Открыто по расписанию на время старта",
+    "Жолға шығу уақытында кесте бойынша ашық",
+    "Scheduled open at departure",
   ],
   find: ["Найти мою прогулку", "Серуенімді табу", "Find my little adventure"],
   finding: [

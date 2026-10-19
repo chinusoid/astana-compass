@@ -651,6 +651,73 @@ class RecommendationTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("SECRET_TOKEN", json.dumps(value))
 
 
+class VisitPurposeTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
+    async def test_source_category_explains_coffee_and_green_stops_in_all_locales(self):
+        expected = {
+            "ru": {"cafe": ("как кафе", "кофе"), "park": ("как парк", "парку"), "garden": ("как сад", "саду")},
+            "kk": {"cafe": ("кафе ретінде", "Кофе"), "park": ("саябақ ретінде", "Саябақта"), "garden": ("бақ ретінде", "Бақта")},
+            "en": {"cafe": ("as a cafe", "coffee"), "park": ("as a park", "park"), "garden": ("as a garden", "garden")},
+        }
+        for locale, variants in expected.items():
+            for category, (reason, activity) in variants.items():
+                for operation in ("recommend", "build_itinerary"):
+                    with self.subTest(locale=locale, category=category, operation=operation):
+                        venue = place(1)
+                        venue["categories"] = [category]
+                        self.setup_service([venue])
+                        body = request(locale=locale, **({"place_ids": [venue["id"]]} if operation == "build_itinerary" else {}))
+                        result = await getattr(self.service, operation)(body)
+                        key = "recommendations" if operation == "recommend" else "stops"
+                        item = result[key][0]
+                        self.assertIn(activity, item["suggested_activity"])
+                        self.assertTrue(item["activity_is_ai_suggestion"])
+                        self.assertTrue(item["visit_duration_is_estimate"])
+                        self.assertEqual(item["visit_duration_seconds"], 1200)
+                        if operation == "recommend":
+                            self.assertIn(reason, item["why"])
+                            self.assertIn(venue["name"], item["why"])
+                            self.assertEqual(item["total_duration_seconds"], 1800)
+                        self.assertEqual(result["places"][0]["facts"], [])
+                        self.assertEqual(result["places"][0]["evidence"], venue["evidence"])
+
+    async def test_cafe_purpose_precedes_incidental_generated_amenities_without_inventing_services(self):
+        venue = place(1, facts=[fact("toilets", True), fact("has_wifi", status="unknown")])
+        venue["categories"] = ["coffee_shop"]
+        generator = Generator(GroundedExplanation((GroundedReason("toilets", (evidence()["id"],)),), "explore"))
+        self.setup_service([venue], generator=generator)
+        value = await self.service.recommend(request(query="Coffee", constraints=[constraint("has_wifi", strength="preferred")]))
+        item = value["recommendations"][0]
+        self.assertLess(item["why"].index("coffee stop"), item["why"].index("Toilets: yes"))
+        self.assertEqual(item["suggested_activity"], "Make a stop for coffee.")
+        self.assertEqual(item["constraint_evaluations"][0]["outcome"], "unknown")
+        self.assertEqual(value["status"], "partial")
+        self.assertEqual(value["places"][0]["facts"], venue["facts"])
+        self.assertEqual(len(generator.calls), 1)
+        self.assertNotIn("menu", item["why"].lower())
+
+    async def test_names_and_description_do_not_turn_another_category_into_a_cafe_or_park(self):
+        venue = place(1)
+        venue.update(name="SYNTHETIC Coffee Park", description="Coffee and park in a source description.", categories=["museum"])
+        self.setup_service([venue], generator=Generator(GroundedExplanation((), "explore")))
+        result = await self.service.recommend(request(query="not a cafe, a museum"))
+        item = result["recommendations"][0]
+        self.assertEqual(item["suggested_activity"], "Explore the place at a pace that suits you.")
+        self.assertNotIn("as a cafe", item["why"])
+        self.assertNotIn("as a park", item["why"])
+
+    async def test_model_failure_still_gives_the_same_grounded_park_activity(self):
+        venue = place(1)
+        venue["categories"] = ["park"]
+        self.setup_service([venue], generator=Generator(error=RuntimeError("private provider response")))
+        result = await self.service.recommend(request(query="not coffee, a park"))
+        item = result["recommendations"][0]
+        self.assertIn("as a park", item["why"])
+        self.assertEqual(item["suggested_activity"], "Walk through the park at your own pace.")
+        self.assertNotIn("coffee", item["suggested_activity"])
+        self.assertNotIn("private provider", json.dumps(result))
+        self.assertEqual(result["status"], "partial")
+
+
 class ParallelExplanationTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
     async def test_only_selected_places_share_one_generation_phase_and_keep_order(self):
         from astana_recommender.text import TEXT
