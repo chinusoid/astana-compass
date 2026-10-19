@@ -16,6 +16,12 @@ class Services:
     intent: object | None = None
 
 
+@dataclass
+class StartupProgress:
+    # Only fixed labels are assigned below; never include factory paths or env.
+    stage: str = "services"
+
+
 def resolve(path):
     module, separator, name = path.partition(":")
     if not separator or not module or not name:
@@ -79,17 +85,20 @@ def validate_port(resource, protocol):
                 raise ValueError(message) from None
 
 
-async def build_services(settings, stack):
+async def build_services(settings, stack, *, progress=None):
+    progress = progress or StartupProgress()
     # Failed startup must close partially-created clients immediately, rather than
     # leave them owned by the still-running liveness-only application.
     async with AsyncExitStack() as owned:
         # Config contains no secrets; each server-side adapter reads its documented env.
         config = {"timezone": "Asia/Almaty", "mode": settings.mode}
+        progress.stage = "repository"
         if settings.mode == "fixture":
             repository = FixtureRepository()
         else:
             repository = await own(owned, resolve(settings.repository_factory)(config=config))
         validate_port(repository, PlaceRepository)
+        progress.stage = "retriever"
         if settings.mode == "fixture":
             retriever = FixtureRetriever(repository)
         else:
@@ -97,6 +106,7 @@ async def build_services(settings, stack):
                 owned, resolve(settings.retriever_factory)(repository=repository, config=config)
             )
         validate_port(retriever, Retriever)
+        progress.stage = "context"
         if settings.mode == "fixture":
             context = FixtureContext()
         else:
@@ -105,6 +115,7 @@ async def build_services(settings, stack):
         generator = None
         llm_budget = None
         if settings.llm_provider != "none":
+            progress.stage = "generator"
             from astana_ai_providers import create_generator
             from astana_ai_providers.budgets import RequestBudget
             # One allowance covers all intent and explanation calls in this API
@@ -117,8 +128,10 @@ async def build_services(settings, stack):
                 )
             )
             validate_port(generator, ExplanationGenerator)
+        progress.stage = "recommender"
         recommender = DefaultRecommendationService(repository, retriever, context, generator=generator)
         validate_port(recommender, RecommendationService)
+        progress.stage = "intent"
         from astana_ai_providers.intents import create_intent_analyzer
         intent = await own(owned, create_intent_analyzer(
             provider=settings.llm_provider if settings.llm_provider != "none" else "rules",

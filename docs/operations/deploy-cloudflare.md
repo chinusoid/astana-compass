@@ -36,6 +36,27 @@ Secrets добавьте runtime variables:
 через `pnpm exec wrangler secret put ASTANA_API_URL` (CLI спросит значение).
 Это URL, не ключ OpenAI. Не добавляйте `OPENAI_API_KEY` или `NEXT_PUBLIC_*` ключи.
 
+### Windows: готовая сборка из GitHub Actions
+
+Нативная сборка OpenNext на Windows может завершиться ошибкой создания junction
+даже после успешной сборки Next.js. Не меняйте права системы ради этого шага:
+job `cloudflare` собирает приложение на Linux и проверяет готовую папку в workerd.
+После успешной проверки он сохраняет artifact `astana-cloudflare-<commit SHA>`.
+
+Скачайте artifact нужного успешного запуска CI и распакуйте всю папку, включая
+скрытую `.open-next`. Проверьте `build-info.json`: `source_revision` должен совпасть
+с публикуемым commit. Из распакованной папки выполните:
+
+```sh
+npx --yes wrangler@4.151.1 deploy --config wrangler.jsonc --keep-vars \
+  --var ASTANA_API_URL:https://<service>.onrender.com \
+  --var ASTANA_ALLOW_FIXTURES:false --var ASTANA_MAP_PROVIDER:openfreemap
+```
+
+В PowerShell используйте одну строку команды. Зависимости Next.js и Linux для
+этого шага не нужны. В artifact нет ключей API; он содержит серверный bundle,
+статические файлы, конфигурацию Wrangler и сведения о проверенной сборке.
+
 Альтернатива: подключить GitHub в Cloudflare Workers Builds. Выберите ветку
 `coordinator/map-interaction`, root `apps/web`, build `pnpm build:cloudflare`,
 deploy `pnpm deploy:cloudflare`. Это Worker, а не статический Pages export:

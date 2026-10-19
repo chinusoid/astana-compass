@@ -5,6 +5,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import asyncio
 import json
+import logging
 import math
 import os
 import uuid
@@ -17,7 +18,7 @@ from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 from astana_contracts import ContractValidationError, load_schema, validate_payload
 from astana_recommender import RecommenderError
-from .composition import build_services
+from .composition import StartupProgress, build_services
 from .demo_examples import request_examples
 from .sandbox import sandbox_router
 from .settings import Settings
@@ -25,6 +26,9 @@ from .social import SocialError, SocialStore, social_error_handler, social_route
 from .traffic import TrafficService
 from .map_features import MapFeatureService
 from astana_city_context.common import ProviderError
+
+
+logger = logging.getLogger(__name__)
 
 
 MESSAGES = {
@@ -182,11 +186,17 @@ def create_app(settings=None, services=None):
             stack.push_async_callback(app.state.map_features.aclose)
             app.state.services = services
             if app.state.services is None:
+                progress = StartupProgress()
                 try:
                     async with asyncio.timeout(settings.request_timeout_seconds):
-                        app.state.services = await build_services(settings, stack)
-                except Exception:
+                        app.state.services = await build_services(settings, stack, progress=progress)
+                except Exception as error:
                     # Keep liveness available, readiness fails closed; never emit provider text.
+                    # Do not pass the exception object, traceback, settings or raw env to logging.
+                    logger.error(
+                        "Service initialization failed: stage=%s exception=%s",
+                        progress.stage, type(error).__name__, exc_info=False, stack_info=False,
+                    )
                     app.state.services = None
             app.state.gate = asyncio.Semaphore(settings.max_concurrent_requests)
             app.state.feedback = deque(maxlen=settings.feedback_capacity)

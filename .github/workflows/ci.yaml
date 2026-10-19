@@ -363,13 +363,40 @@ jobs:
       - name: Build the separate live Render image
         run: docker build --file infra/render/Dockerfile --tag astana-render:ci .
       - name: Start the live image without network or credentials
+        # Mirror every literal env value in render.yaml, except hosted LLM calls.
+        # Account-supplied sync:false values and provider keys are not used in CI.
+        env:
+          ASTANA_MODE: live
+          ASTANA_POI_PATH: /app/data/astana-osm.json
+          ASTANA_POI_STALE_SECONDS: "604800"
+          ASTANA_REPOSITORY_FACTORY: astana_city_data:create_repository
+          ASTANA_RETRIEVER_FACTORY: astana_retrieval:create_retriever
+          ASTANA_CONTEXT_FACTORY: astana_city_context:create_context
+          ASTANA_RETRIEVAL_POOL_LIMIT: "1000"
+          LLM_PROVIDER: none
+          ASTANA_LLM_REQUESTS_PER_MINUTE: "10"
+          ASTANA_LLM_REQUESTS_PER_DAY: "100"
+          ROUTING_PROVIDER: osrm_public
+          ASTANA_ROUTE_ALLOW_APPROXIMATE: "true"
+          ASTANA_CONTEXT_TIMEOUT_SECONDS: "10"
+          ASTANA_CONTEXT_RETRIES: "0"
+          ASTANA_MAP_LOOKUP_ENABLED: "true"
+          ASTANA_MAP_LOOKUP_PROVIDER: nominatim
+          ASTANA_WEATHER_ENABLED: "false"
+          REQUEST_TIMEOUT_SECONDS: "30"
         run: |
           docker run --detach --name astana-render-ci \
             --network none --read-only --memory 512m --memory-swap 512m \
             --cap-drop ALL --security-opt no-new-privileges:true \
-            --env PORT=11000 --env LLM_PROVIDER=none \
-            --env ASTANA_MAP_LOOKUP_ENABLED=false --env ASTANA_WEATHER_ENABLED=false \
-            --env ROUTING_PROVIDER=openrouteservice \
+            --env PORT=11000 --env ASTANA_MODE --env ASTANA_POI_PATH \
+            --env ASTANA_POI_STALE_SECONDS --env ASTANA_REPOSITORY_FACTORY \
+            --env ASTANA_RETRIEVER_FACTORY --env ASTANA_CONTEXT_FACTORY \
+            --env ASTANA_RETRIEVAL_POOL_LIMIT --env LLM_PROVIDER \
+            --env ASTANA_LLM_REQUESTS_PER_MINUTE --env ASTANA_LLM_REQUESTS_PER_DAY \
+            --env ROUTING_PROVIDER --env ASTANA_ROUTE_ALLOW_APPROXIMATE \
+            --env ASTANA_CONTEXT_TIMEOUT_SECONDS --env ASTANA_CONTEXT_RETRIES \
+            --env ASTANA_MAP_LOOKUP_ENABLED --env ASTANA_MAP_LOOKUP_PROVIDER \
+            --env ASTANA_WEATHER_ENABLED --env REQUEST_TIMEOUT_SECONDS \
             astana-render:ci
       - name: Verify installed runtime and live catalog over container HTTP
         shell: bash
