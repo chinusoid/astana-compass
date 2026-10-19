@@ -24,6 +24,7 @@ import type { Map as LibreMap, Marker } from "maplibre-gl";
 import { t, type Locale } from "@/lib/i18n";
 import { mapText } from "@/lib/map-copy";
 import { buildingLookupPoint } from "@/lib/map-building";
+import { keepPopupInMap } from "@/lib/map-popup-bounds";
 import {
   ASTANA_VIEW,
   BUILDING_LAYER,
@@ -421,7 +422,7 @@ export default function CityMap(props: Props) {
             .setPopup(
               new lib.Popup({
                 offset: 26,
-                maxWidth: "330px",
+                maxWidth: "min(330px, calc(100% - 24px))",
                 focusAfterOpen: false,
               }).setDOMContent(
                 placePopup(place, props.locale, index, () =>
@@ -432,6 +433,7 @@ export default function CityMap(props: Props) {
               ),
             )
             .addTo(map);
+          keepPopupInMap(map, marker.getPopup()!);
           bindMarkerPopup(button, marker, () => {
             closeInspection();
             for (const other of markers.current)

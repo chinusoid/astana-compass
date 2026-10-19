@@ -104,6 +104,7 @@ class MockMap {
   }
 }
 class MockPopup {
+  on = vi.fn();
   content: HTMLElement | null = null;
   open = false;
   remove = vi.fn(() => {

@@ -1043,6 +1043,9 @@ details[open] > summary {
 .maplibregl-popup {
   z-index: 5;
 }
+.maplibregl-popup[data-horizontal-clamp] .maplibregl-popup-tip {
+  visibility: hidden;
+}
 .maplibregl-popup-content {
   border-radius: 14px;
   padding: 18px;
