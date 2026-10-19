@@ -252,7 +252,17 @@ it("adds user-controlled camera following without changing the route or starting
   expect(screen.getByText(mapText("ru", "following"))).toBeVisible();
   act(() => control.emit("trackuserlocationend"));
   expect(screen.getByText(mapText("ru", "followPaused"))).toBeVisible();
+  act(() => control.emit("error", { code: 2 }));
+  expect(screen.getByText(mapText("ru", "followUnavailable"))).toBeVisible();
+  act(() => control.emit("geolocate"));
+  expect(screen.getByText(mapText("ru", "followPaused"))).toBeVisible();
+  expect(
+    screen.queryByText(mapText("ru", "following")),
+  ).not.toBeInTheDocument();
   act(() => control.emit("trackuserlocationstart"));
+  act(() => control.emit("error", { code: 2 }));
+  act(() => control.emit("geolocate"));
+  expect(screen.getByText(mapText("ru", "following"))).toBeVisible();
   act(() => control.emit("error", { code: 1 }));
   expect(screen.getByText(mapText("ru", "followDenied"))).toBeVisible();
   act(() => control.emit("error", { code: 2 }));

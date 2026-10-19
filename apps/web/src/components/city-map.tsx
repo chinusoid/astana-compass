@@ -122,6 +122,7 @@ export default function CityMap(props: Props) {
   const [followState, setFollowState] = useState<
     "idle" | "following" | "paused" | "denied" | "unavailable"
   >("idle");
+  const followMode = useRef<"idle" | "following" | "paused">("idle");
   const [motionEnabled, setMotionEnabled] = useState(false);
   const [motionStatus, setMotionStatus] = useState<MotionStatus>("empty");
   const geometry = useMemo(
@@ -172,6 +173,7 @@ export default function CityMap(props: Props) {
           setTransient(false);
           setBuildings(false);
           setFollowState("idle");
+          followMode.current = "idle";
           lib.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
           const map = new lib.Map({
             container: host,
@@ -236,16 +238,22 @@ export default function CityMap(props: Props) {
             fitBoundsOptions: { maxZoom: 16 },
           });
           geolocate.on("trackuserlocationstart", () => {
-            if (!disposed) setFollowState("following");
+            if (!disposed) {
+              followMode.current = "following";
+              setFollowState("following");
+            }
           });
           geolocate.on("trackuserlocationend", () => {
-            if (!disposed) setFollowState("paused");
+            if (!disposed) {
+              followMode.current = "paused";
+              setFollowState("paused");
+            }
           });
           geolocate.on("geolocate", () => {
             if (!disposed)
               setFollowState((state) =>
                 state === "denied" || state === "unavailable"
-                  ? "following"
+                  ? followMode.current
                   : state,
               );
           });

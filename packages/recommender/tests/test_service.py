@@ -189,6 +189,32 @@ class Generator:
         return self.value
 
 
+class PendingGenerator:
+    """Manually resolve concurrent calls without relying on network timing."""
+
+    def __init__(self):
+        self.pending = {}
+        self.started = asyncio.Event()
+        self.finished = []
+        self.cancelled = []
+        self.max_active = 0
+
+    async def generate(self, **kwargs):
+        place_id = kwargs["place"]["id"]
+        future = asyncio.get_running_loop().create_future()
+        self.pending[place_id] = future
+        self.max_active = max(self.max_active, sum(not item.done() for item in self.pending.values()))
+        if len(self.pending) == 3:
+            self.started.set()
+        try:
+            result = await future
+            self.finished.append(place_id)
+            return result
+        except asyncio.CancelledError:
+            self.cancelled.append(place_id)
+            raise
+
+
 class ServiceSetupMixin:
     def setup_service(self, places=None, **kwargs):
         places = [place(facts=[fact()])] if places is None else places
@@ -544,6 +570,89 @@ class RecommendationTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
             value = await self.service.recommend(request())
             self.assertEqual(value["status"], "partial")
             self.assertNotIn("SECRET_TOKEN", json.dumps(value))
+
+
+class ParallelExplanationTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
+    async def test_only_selected_places_share_one_generation_phase_and_keep_order(self):
+        from astana_recommender.text import TEXT
+
+        for operation in ("recommend", "build_itinerary"):
+            with self.subTest(operation=operation):
+                generator = PendingGenerator()
+                places = [place(i) for i in (1, 2, 3, 4)]
+                self.setup_service(places, generator=generator)
+                if operation == "recommend":
+                    # A failed first route must be replaced before generation;
+                    # it must not consume a model call or split the phase.
+                    self.context.route_transform = lambda route: {
+                        **route,
+                        "duration_seconds": -1,
+                    } if route["geometry"]["coordinates"][1][1] == places[0]["location"]["lat"] else route
+                    expected_ids = [p["id"] for p in places[1:]]
+                    body = request()
+                    result_key = "recommendations"
+                    order_key = "rank"
+                else:
+                    expected_ids = [places[i]["id"] for i in (2, 0, 1)]
+                    body = request(place_ids=expected_ids)
+                    result_key = "stops"
+                    order_key = "order"
+                task = asyncio.create_task(getattr(self.service, operation)(body))
+                try:
+                    await asyncio.wait_for(generator.started.wait(), timeout=2)
+                    self.assertEqual(list(generator.pending), expected_ids)
+                    activities = ["observe", "explore", "take_break"]
+                    for place_id, activity in reversed(list(zip(expected_ids, activities, strict=True))):
+                        generator.pending[place_id].set_result(GroundedExplanation((), activity))
+                    result = await asyncio.wait_for(task, timeout=2)
+                    self.assertEqual(generator.finished, list(reversed(expected_ids)))
+                    self.assertEqual([item["place_id"] for item in result[result_key]], expected_ids)
+                    self.assertEqual([item[order_key] for item in result[result_key]], [1, 2, 3])
+                    self.assertEqual(
+                        [item["suggested_activity"] for item in result[result_key]],
+                        [TEXT["en"][activity] for activity in activities],
+                    )
+                finally:
+                    if not task.done():
+                        task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+    async def test_cancellation_stops_every_pending_explanation(self):
+        for operation in ("recommend", "build_itinerary"):
+            with self.subTest(operation=operation):
+                generator = PendingGenerator()
+                places = [place(i) for i in (1, 2, 3)]
+                self.setup_service(places, generator=generator)
+                body = request(**({"place_ids": [p["id"] for p in places]} if operation == "build_itinerary" else {}))
+                task = asyncio.create_task(getattr(self.service, operation)(body))
+                try:
+                    await asyncio.wait_for(generator.started.wait(), timeout=2)
+                finally:
+                    task.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await task
+                self.assertCountEqual(generator.cancelled, [p["id"] for p in places])
+                self.assertTrue(all(future.cancelled() for future in generator.pending.values()))
+
+    async def test_three_slow_explanations_fall_back_together_without_dropping_the_route(self):
+        from astana_recommender.text import TEXT
+
+        for operation in ("recommend", "build_itinerary"):
+            with self.subTest(operation=operation):
+                generator = PendingGenerator()
+                places = [place(i) for i in (1, 2, 3)]
+                self.setup_service(places, generator=generator, timeout_seconds=0.05)
+                body = request(**({"place_ids": [p["id"] for p in places]} if operation == "build_itinerary" else {}))
+                result = await asyncio.wait_for(getattr(self.service, operation)(body), timeout=2)
+                # All calls start before any timeout; serial execution would
+                # only add the next call after its predecessor was cancelled.
+                self.assertTrue(generator.started.is_set())
+                self.assertEqual(generator.max_active, 3)
+                self.assertCountEqual(generator.cancelled, [p["id"] for p in places])
+                self.assertEqual(result["status"], "partial")
+                self.assertEqual(len(result["places"]), 3)
+                self.assertIn(TEXT["en"]["generation_failed"], result["warnings"])
+                self.assertIsNotNone(result["route"] if operation == "build_itinerary" else result["recommendations"][0]["route"])
 
 
 class ItineraryTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):

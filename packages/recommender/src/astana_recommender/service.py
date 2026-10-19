@@ -415,10 +415,11 @@ class DefaultRecommendationService:
         eligible.sort(key=lambda item: (-item[3], item[2]))
         route_failed = False
         offset = 0
-        while offset < len(eligible) and len(response["recommendations"]) < request["limit"]:
+        selected = []
+        while offset < len(eligible) and len(selected) < request["limit"]:
             # Route only as many candidates as can still be returned. A longer
             # outing is a visible alternative, not a reason to scan the pool.
-            needed = request["limit"] - len(response["recommendations"])
+            needed = request["limit"] - len(selected)
             batch = eligible[offset : offset + min(self.route_concurrency, needed)]
             offset += len(batch)
             routes = await asyncio.gather(*(self._route([item[0]], request) for item in batch))
@@ -428,40 +429,45 @@ class DefaultRecommendationService:
                     continue
                 visit = self._visit_seconds(place)
                 total = route["duration_seconds"] + visit
-                why, activity, generator_warnings = await self._explain(
-                    place, evaluations, request, total
-                )
-                item_warnings = self._route_warnings([place], route, request["locale"])
-                item_warnings.extend(generator_warnings)
-                time_warning = self._time_warning(total, request)
-                if time_warning:
-                    item_warnings.append(time_warning)
-                    degraded = True
-                if not self._preferences_ok(evaluations):
-                    item_warnings.append(text["preferences"])
-                    degraded = True
-                if route["method"] == "approximate" or generator_warnings:
-                    degraded = True
-                recommendation = {
-                    "place_id": place["id"],
-                    "rank": len(response["recommendations"]) + 1,
-                    "why": why,
-                    "suggested_activity": activity,
-                    "activity_is_ai_suggestion": True,
-                    "visit_duration_seconds": visit,
-                    "visit_duration_is_estimate": True,
-                    "route": route,
-                    "total_duration_seconds": total,
-                    "constraint_evaluations": evaluations,
-                    "warnings": _dedupe(item_warnings),
-                }
-                response["places"].append(place)
-                response["recommendations"].append(recommendation)
-                response["warnings"].extend(item_warnings)
-                if len(response["recommendations"]) == request["limit"]:
-                    break
-            if len(response["recommendations"]) == request["limit"]:
-                break
+                selected.append((place, evaluations, route, visit, total))
+        # Only the final (at most three) alternatives get generated text. Run
+        # their bounded calls together so three slow providers use one timeout
+        # window, not three, and keep gather's stable input/result ordering.
+        explanations = await asyncio.gather(*(
+            self._explain(place, evaluations, request, total)
+            for place, evaluations, _, _, total in selected
+        ))
+        for (place, evaluations, route, visit, total), explanation in zip(
+            selected, explanations, strict=True
+        ):
+            why, activity, generator_warnings = explanation
+            item_warnings = self._route_warnings([place], route, request["locale"])
+            item_warnings.extend(generator_warnings)
+            time_warning = self._time_warning(total, request)
+            if time_warning:
+                item_warnings.append(time_warning)
+                degraded = True
+            if not self._preferences_ok(evaluations):
+                item_warnings.append(text["preferences"])
+                degraded = True
+            if route["method"] == "approximate" or generator_warnings:
+                degraded = True
+            recommendation = {
+                "place_id": place["id"],
+                "rank": len(response["recommendations"]) + 1,
+                "why": why,
+                "suggested_activity": activity,
+                "activity_is_ai_suggestion": True,
+                "visit_duration_seconds": visit,
+                "visit_duration_is_estimate": True,
+                "route": route,
+                "total_duration_seconds": total,
+                "constraint_evaluations": evaluations,
+                "warnings": _dedupe(item_warnings),
+            }
+            response["places"].append(place)
+            response["recommendations"].append(recommendation)
+            response["warnings"].extend(item_warnings)
         if route_failed:
             response["warnings"].append(text["route_failed"])
             degraded = True
@@ -512,12 +518,14 @@ class DefaultRecommendationService:
         response["warnings"].extend(self._route_warnings(places, route, request["locale"]))
         if route["method"] == "approximate":
             degraded = True
-        for index, (place, evaluation, visit) in enumerate(
-            zip(places, evaluations, visits, strict=True), start=1
+        explanations = await asyncio.gather(*(
+            self._explain(place, evaluation, request, total)
+            for place, evaluation in zip(places, evaluations, strict=True)
+        ))
+        for index, (place, evaluation, visit, explanation) in enumerate(
+            zip(places, evaluations, visits, explanations, strict=True), start=1
         ):
-            _, activity, generator_warnings = await self._explain(
-                place, evaluation, request, total
-            )
+            _, activity, generator_warnings = explanation
             response["warnings"].extend(generator_warnings)
             if generator_warnings:
                 degraded = True
