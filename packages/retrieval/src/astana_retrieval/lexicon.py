@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import re
 import unicodedata
 
-LEXICON_VERSION = "ru-kk-en-3"
+LEXICON_VERSION = "ru-kk-en-4"
 CATEGORIES = {
     "cafe": r"кафе(?:ге|де|ден|ні|нің|лер(?:ге|де|ден|і|ін)?)?|кофе\w{0,12}|coffee|caf[eé]s?|cappuccino|капучино|латте",
     "restaurant": r"рестора\w{0,12}|поесть|обед\w{0,12}|ужин\w{0,12}|еда|restaurants?|dining|lunch|dinner|eat|тамақ\w{0,12}|мейрамхана\w{0,12}",
@@ -20,14 +20,22 @@ CATEGORIES = {
     "art": r"галере\w{0,12}|искусств\w{0,12}|выстав\w{0,12}|art|galler(?:y|ies)|exhibition\w{0,12}|өнер|көрме\w{0,12}",
     "viewpoint": r"смотров\w{0,12}|панорам\w{0,12}|viewpoints?|observation\s+deck|panoram\w{0,12}",
     "attraction": r"достопримечательност\w{0,12}|attractions?|sightseeing|көрікті\s+жер\w{0,12}",
+    "architecture": r"архитектур\w{0,12}|architectur\w{0,12}|сәулет\w{0,12}",
+    "waterfront": r"набережн\w{0,12}|рек[аиуе]|рекой|есил\w{0,4}|ишим\w{0,4}|rivers?|riverfront|waterfront|embankments?|өзен\w{0,8}|жағалау\w{0,8}",
 }
+OUTDOOR_CATEGORIES = frozenset({"park", "garden", "viewpoint", "artwork"})
+DISCOVERY_CATEGORIES = OUTDOOR_CATEGORIES | frozenset({"attraction", "theatre", "museum", "library", "arts_centre"})
+SOURCE_THEMES = frozenset({"architecture", "waterfront"})
 CATEGORY_GROUPS = {
     **{key: frozenset({key}) for key in CATEGORIES},
     "art": frozenset({"art", "gallery", "arts_centre", "artwork"}),
     "park": frozenset({"park", "garden"}),
     "paintings": frozenset({"gallery", "museum"}),
     # Discovery categories, never an assertion of beauty or proximity to water.
-    "scenic": frozenset({"park", "garden", "viewpoint"}),
+    "scenic": DISCOVERY_CATEGORIES,
+    "walk": DISCOVERY_CATEGORIES,
+    "architecture": DISCOVERY_CATEGORIES,
+    "waterfront": DISCOVERY_CATEGORIES,
 }
 FEATURES = {
     "quiet": r"тих\w{0,12}|тишин\w{0,12}|спокойн\w{0,12}|quiet|peaceful|тыныш\w{0,12}|без\s+шума|not\s+noisy",
@@ -73,7 +81,8 @@ NEG_AFTER = re.compile(
 WORDS = re.compile(r"[^\W_]+(?:['’][^\W_]+)*", re.UNICODE)
 STOPWORDS = frozenset("""
 я мы мне нам меня нас хочу хотим нужно нужна нужны нужен найти найди ищу есть где рядом около возле выпить сходить
-место места куда можно пожалуйста для чтобы и или на в во у с со к от до за по это тут там сейчас
+место места куда можно пожалуйста для чтобы и или на в во у с со к от до за по это тут там сейчас посмотреть
+разнообразная разнообразную смешанная смешанную самые самый самая самое
 а но не без час часа часов минут минуты минуту мин сегодня завтра вечером утром аст whereto
 i we me my our want would like find please need needs needed a an the to at in on near nearby with
 and or for of by is are it this somewhere place places go have has can now today tomorrow not no without
@@ -103,6 +112,8 @@ class Query:
     excluded_categories: frozenset[str]
     features: frozenset[str]
     has_unresolved_anchor: bool
+    diversify: bool = False
+    excluded_themes: frozenset[str] = frozenset()
 
 
 def understand(text: str, *, named_goal: bool = False) -> Query:
@@ -126,7 +137,7 @@ def understand(text: str, *, named_goal: bool = False) -> Query:
                     is_anchor = ANCHOR_BEFORE.search(clause[:match.start()]) or ANCHOR_AFTER.search(clause[match.end():])
                     if is_anchor:
                         has_anchor = True
-                    else:
+                    if not is_anchor or (key == "waterfront" and walk_requested):
                         (negative if is_negative else positive).add(key)
                 else:
                     (negative_features if is_negative else features).add(key)
@@ -143,13 +154,15 @@ def understand(text: str, *, named_goal: bool = False) -> Query:
         positive.update(activities - negative)
     # A walk is an activity, not a competing park destination when the user
     # explicitly asks to walk to a cafe/museum. Spatial anchors are not goals.
-    if walk_requested and not positive and "park" not in negative and not named_goal:
-        positive.add("park")
+    if walk_requested and not positive and not named_goal:
+        positive.add("walk")
     terms.update("category:" + key for key in positive)
     terms.update("feature:" + key for key in features)
     return Query(
         frozenset(terms), frozenset().union(*(CATEGORY_GROUPS[k] for k in positive)),
-        frozenset().union(*(CATEGORY_GROUPS[k] for k in negative)), frozenset(features), has_anchor,
+        frozenset().union(*(CATEGORY_GROUPS[k] for k in negative - SOURCE_THEMES)), frozenset(features), has_anchor,
+        not named_goal and (walk_requested or "scenic" in positive or len(positive) > 1),
+        frozenset(negative & SOURCE_THEMES),
     )
 
 
@@ -158,16 +171,27 @@ def document_terms(place: dict) -> Counter[str]:
     from .names import source_names, source_texts, words
 
     terms: Counter[str] = Counter()
+    source_themes: set[str] = set()
     for name, _ in source_names(place):
         # Literal names are source data, never parsed as negation or category commands.
         for term in words(name):
             terms[term] = 3
+        source_themes.update(key for key in SOURCE_THEMES if PATTERNS[key].search(name))
     for text, _ in source_texts(place):
         parsed = understand(text)
         # A lexical feature token from wording is not a matched_fact_keys claim.
         for term in parsed.terms:
             terms[term] = max(terms[term], 1)
+        for key in SOURCE_THEMES:
+            if any(not negated(text, match.start(), match.end()) for match in PATTERNS[key].finditer(text)):
+                source_themes.add(key)
+    for key in source_themes:
+        terms["category:" + key] = 3
     for key, categories in CATEGORY_GROUPS.items():
+        if key in SOURCE_THEMES:
+            continue  # A broad category alone cannot establish a sourced theme.
+        if key in {"walk", "scenic"} and not (OUTDOOR_CATEGORIES.intersection(place["categories"]) or source_themes):
+            continue
         if categories.intersection(place["categories"]):
             terms["category:" + key] += 3
     for fact in place["facts"]:

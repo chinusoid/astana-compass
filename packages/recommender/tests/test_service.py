@@ -286,13 +286,15 @@ class RecommendationTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
             ["unsatisfied", "unknown"],
         )
 
-    async def test_preferred_matches_rank_ahead_and_retrieval_breaks_ties(self):
+    async def test_preferred_matches_do_not_override_retrieval_relevance(self):
         places = [place(1, facts=[fact(value=False)]), place(2, facts=[fact()]), place(3, facts=[fact()])]
         self.setup_service(places)
         value = await self.service.recommend(
             request(constraints=[constraint(strength="preferred")], limit=2)
         )
-        self.assertEqual([p["id"] for p in value["places"]], [places[1]["id"], places[2]["id"]])
+        self.assertEqual([p["id"] for p in value["places"]], [places[0]["id"], places[1]["id"]])
+        self.assertEqual(value["recommendations"][0]["constraint_evaluations"][0]["outcome"], "unsatisfied")
+        self.assertEqual(value["status"], "partial")
 
     async def test_dynamic_constraint_is_evaluated_after_enrichment(self):
         self.setup_service()

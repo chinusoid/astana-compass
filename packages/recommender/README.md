@@ -10,8 +10,9 @@ Importing the package creates no clients, makes no requests and reads no secrets
 - Validates requests, dependency boundaries and final responses against the
   canonical schema and invariants.
 - Bounds retrieval candidates, context enrichment, provider timeouts and route
-  concurrency. Preserves retrieval ordering for ties while favoring satisfied
-  preferences. It never treats a retrieval score as a confidence probability.
+  concurrency. Preserves the retriever's query relevance and diversity ordering
+  after required-condition checks. Preferences stay visible and do not override
+  the user's destination intent. It never treats a retrieval score as a confidence probability.
 - Checks every required condition after context enrichment using JSON equality:
   true is not the number 1. Unknown, absent and conflicting required facts exclude
   a place. Unmet preferences remain visible and produce a partial response.

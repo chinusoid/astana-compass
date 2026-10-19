@@ -11,7 +11,7 @@ from typing import Any
 
 from astana_contracts import JSON, PlaceRepository, validate_payload
 
-from .lexicon import LEXICON_VERSION, document_terms, understand
+from .lexicon import CATEGORY_GROUPS, LEXICON_VERSION, document_terms, normalize, understand
 from .names import goal_text, mentions, source_names, source_texts, typo_expansions, words
 
 DYNAMIC_KEYS = frozenset({"open_at_requested_time", "weather_suitable"})
@@ -127,6 +127,12 @@ class LexicalRetriever:
                 protected[mention.start:mention.end] = " " * (mention.end - mention.start)
         named_goal = any(name_mentions.values())
         query = understand("".join(protected), named_goal=named_goal)
+        # goal_text masks spatial anchors, but a walking request along a river
+        # still has a useful source-text theme. This does not geocode the river.
+        raw_query = understand(request["query"], named_goal=named_goal)
+        if not named_goal and query.diversify and "category:waterfront" in raw_query.terms:
+            query = replace(query, terms=(query.terms - {"category:walk", "category:scenic"}) | {"category:waterfront"},
+                            categories=CATEGORY_GROUPS["waterfront"])
         named_only = named_goal and not query.terms
         query = replace(query, terms=query.terms | literal_terms)
         corrections = typo_expansions(query.terms, list(aliases.values()))
@@ -155,6 +161,9 @@ class LexicalRetriever:
                 continue
             if query.categories and not query.categories.intersection(place["categories"]):
                 continue
+            terms = document_terms(place)
+            if any("category:" + theme in terms for theme in query.excluded_themes):
+                continue
             for key in query.features:
                 fact = facts.get(key)
                 if fact and fact["status"] == "known" and fact["value"] is True:
@@ -165,12 +174,14 @@ class LexicalRetriever:
             for text, key in source_texts(place):
                 if key and query.terms.intersection(understand(text).terms):
                     matched.add(key)
-            corpus.append((place, document_terms(place), distance, matched, deferred))
+            corpus.append((place, terms, distance, matched, deferred))
         # BM25 statistics describe the bounded, filtered corpus, not the whole city.
         frequencies = Counter(term for _, terms, *_ in corpus for term in terms)
         mean_length = sum(sum(terms.values()) for _, terms, *_ in corpus) / max(1, len(corpus))
         ranked = []
         category_only = bool(query.terms) and all(term.startswith("category:") for term in query.terms)
+        preferred_keys = {item["key"] for item in request["constraints"] if item["strength"] == "preferred"}
+        groups = {}
         for place, terms, distance, matched, deferred in corpus:
             score = 100.0 if name_mentions[place["id"]] else 0.0
             for term in sorted(query.terms):
@@ -181,7 +192,7 @@ class LexicalRetriever:
                 # A structured category matches equally whether its source has a
                 # short label or a richer description. BM25 length applies to words.
                 if term.startswith("category:"):
-                    score += inverse
+                    score += 1.0
                     continue
                 length = sum(terms.values())
                 weight = 0.65 if term in corrections.values() else 1.0
@@ -189,15 +200,40 @@ class LexicalRetriever:
             # Explicit constraints may define intent, but must have known matching evidence.
             if score <= 0 and (query.terms or not matched):
                 continue
-            score += 0.2 * len(matched)
             ranked.append((score, distance, place["id"], place, sorted(matched), deferred))
+            groups[place["id"]] = (
+                "waterfront" if "category:waterfront" in terms else
+                "architecture" if "category:architecture" in terms else
+                "green" if {"park", "garden"}.intersection(place["categories"]) else
+                "art" if {"artwork", "gallery", "arts_centre"}.intersection(place["categories"]) else
+                min(place["categories"])
+            )
         # For equal generic-category relevance, a source description makes a
         # candidate more useful to inspect. Never override a lexical/name score.
         ranked.sort(key=lambda item: (
-            -item[0], -int(category_only and bool((item[3].get("description") or "").strip())),
+            -item[0], -len(preferred_keys.intersection(item[4])),
+            -int(category_only and bool((item[3].get("description") or "").strip())),
             item[1], item[2],
         ))
-        selected = ranked[:request["candidate_limit"]]
+        selected = []
+        remaining = ranked[:]
+        while remaining and len(selected) < request["candidate_limit"]:
+            index = 0
+            if query.diversify and selected:
+                # Diversity stays inside comparable text relevance. Never trade
+                # a strong literal match for a weak but novel kind of place.
+                used = {groups[item[2]] for item in selected}
+                comparable = [(i, item) for i, item in enumerate(remaining) if item[0] >= 0.75 * remaining[0][0]]
+                novel = next((i for i, item in comparable if groups[item[2]] not in used), None)
+                if novel is not None:
+                    index = novel
+                else:
+                    index = next((i for i, item in comparable if not any(
+                        normalize(item[3]["name"]) == normalize(previous[3]["name"])
+                        and distance_meters(item[3]["location"], previous[3]["location"]) < 300
+                        for previous in selected
+                    )), 0)
+            selected.append(remaining.pop(index))
         if any(item[5] for item in selected):
             warnings.append(_text("deferred", locale))
         if not selected:

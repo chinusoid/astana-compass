@@ -403,16 +403,12 @@ class DefaultRecommendationService:
         degraded |= context_degraded
 
         eligible = []
-        for index, place in enumerate(candidates):
+        for place in candidates:
             evaluations = self._evaluate(place, request)
             if self._required_ok(evaluations):
-                preferred_count = sum(
-                    e["strength"] == "preferred" and e["outcome"] == "satisfied"
-                    for e in evaluations
-                )
-                eligible.append((place, evaluations, index, preferred_count))
-        # Retrieval order breaks ties; scores from unrelated backends are not compared.
-        eligible.sort(key=lambda item: (-item[3], item[2]))
+                eligible.append((place, evaluations))
+        # Preserve the retriever's query relevance and diversity. Preferences
+        # remain visible, but cannot replace the user's destination intent.
         route_failed = False
         offset = 0
         selected = []
@@ -423,7 +419,7 @@ class DefaultRecommendationService:
             batch = eligible[offset : offset + min(self.route_concurrency, needed)]
             offset += len(batch)
             routes = await asyncio.gather(*(self._route([item[0]], request) for item in batch))
-            for (place, evaluations, _, _), route in zip(batch, routes, strict=True):
+            for (place, evaluations), route in zip(batch, routes, strict=True):
                 if route is None:
                     route_failed = True
                     continue
