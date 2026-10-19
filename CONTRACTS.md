@@ -16,6 +16,8 @@ The installable `astana-contracts` package contains generated copies, runtime va
 | POST `/v1/itineraries` | `ItineraryRequest` | `ItineraryResponse` | Explicit selected `place_ids`; one ordered trip with its complete duration. |
 | POST `/v1/feedback` | `FeedbackRequest` | `FeedbackResponse` | Anonymous product feedback; never require location. |
 | GET `/v1/data-status` | none | `DataStatusResponse` | Source freshness and ingestion status. |
+| POST `/v1/map-features` | `MapFeatureRequest` | `MapFeatureResponse` | Explicit clicked point; source identities remain separate. |
+| POST `/v1/traffic` | `TrafficRequest` | `TrafficResponse` | Bounded road-flow samples; not simulated vehicle positions. |
 
 Errors use `ErrorResponse`: `invalid_request` (422), `unsupported_transport` (422), `provider_unavailable` (503), `rate_limited` (429), `internal_error` (500), `not_found` (404). Do not expose stack traces or provider secrets. User location and free-text query must not be logged by default.
 
@@ -32,8 +34,11 @@ Errors use `ErrorResponse`: `invalid_request` (422), `unsupported_transport` (42
 - Every place fact/evaluation references evidence in that place. Every recommendation/stop/hit resolves to a returned place. Duplicate IDs, duplicate fact keys and duplicate constraint keys are invalid. Responses contain only their referenced places.
 - Constraints are predicates expressed as `{key, value, strength}`. In v0.1, a key matches the same place fact key and comparison is exact JSON value equality (booleans are distinct from numbers). Do not introduce undocumented range or fuzzy semantics. Suggested predicate keys: `indoor`, `wheelchair_accessible`, `child_friendly`, `free_entry`, `open_at_requested_time`. Time-dependent predicates are computed from source schedules for the request instant before evaluation, retaining schedule evidence and an explanatory note.
 - Every requested constraint gets one evaluation per candidate. A required constraint must be **known and satisfied**, with its fact evidence cited. An absent or conflicting required fact excludes the place. Preferred unknown/unsatisfied constraints may remain, but must be explained. Relaxing a required constraint requires a new user request.
+- The plain UI amenity controls submit `preferred`; only an explicit mandatory choice submits `required`. Free-text destination intent is primary in ranking. Preferences may break equal-relevance ties, but cannot replace the requested goal. Diversity operates within comparable relevance and does not relax required predicates or invent evidence. This is selection policy, not a new wire field or fuzzy constraint comparison.
 - `matched` means results meet required constraints; it does not promise three results or all preferences. `partial` means some preferences/desired coverage could not be met, with warnings. `no_match` has empty places/results. `needs_clarification` also has empty results and at least one question. No hidden substitute recommendations may appear in either state.
 - `suggested_activity` is an explicitly labelled AI suggestion. `why` cannot invent factual amenities. Retrieval scores are backend-specific and are not confidence probabilities; declare their `score_kind`.
+- A `MapFeature` is not a catalog `Place`. OSM and TomTom nearby entries retain distinct source IDs and attribution; proximity never establishes identity or building containment. Date-specific provider hours remain display attributes, not automatically verified `open_at_requested_time` facts. Unknown fields stay unknown. `retrieved_at` denotes retrieval, not an on-site survey.
+- Route `provider` and assumptions identify the actual pedestrian source or fallback. TomTom/OSRM routing must preserve ordered stops and every return leg; neither a traffic sample nor 3D simulation establishes a walking route. Live provider access is verified separately from canonical/offline tests.
 
 ## Python async service ports
 
