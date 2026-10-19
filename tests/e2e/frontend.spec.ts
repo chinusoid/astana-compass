@@ -19,19 +19,31 @@ import type {
 
 const results = (page: Page) => page.locator(".results");
 const cards = (page: Page) => results(page).getByTestId("place-card");
-async function fill(page: Page) {
+async function openFilters(page: Page) {
+  const toggle = page.locator(".filter-toggle");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true")
+    await toggle.click();
+  await expect(page.locator("#walk-filters")).toBeVisible();
+}
+async function manualStart(page: Page, query = "Прогулка без спешки") {
   if (!new URL(page.url()).pathname.startsWith("/walk")) {
     await page.getByRole("navigation").locator('a[href="/walk"]').click();
   }
   const advanced = page.locator("details.advanced-origin");
   if ((await advanced.getAttribute("open")) === null)
     await advanced.locator("summary").click();
-  await page.locator('textarea[name="query"]').fill("Прогулка без спешки");
+  await page.locator('textarea[name="query"]').fill(query);
   await page.locator('input[name="latitude"]').fill("51.090");
   await page.locator('input[name="longitude"]').fill("71.420");
   await advanced.getByRole("button").click();
+}
+async function fill(page: Page) {
+  await manualStart(page);
+  await openFilters(page);
   await page.locator('input[name="start"]').fill("2026-10-19T12:00");
   await page.locator('input[name="minutes"]').fill("90");
+  // Return is now an explicit choice, rather than a hidden default.
+  await page.locator('input[name="return"]').check();
 }
 async function search(page: Page) {
   await page.locator(".find-button").click();
@@ -51,6 +63,113 @@ async function screenshot(page: Page, name: string) {
 }
 test.beforeEach(async ({ page }) => {
   await page.goto("/walk");
+});
+
+test("walk starts without filters and searches without adding a return or time target", async ({
+  page,
+}) => {
+  const toggle = page.getByRole("button", { name: "Фильтры", exact: true });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).toHaveAttribute("aria-controls", "walk-filters");
+  await expect(page.locator("#walk-filters")).toBeHidden();
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("");
+  await expect(page.locator('input[name="return"]')).not.toBeChecked();
+  await expect(page.locator(".filter-count")).toHaveCount(0);
+  await expect(page.locator(".filter-summary")).toHaveText("Без фильтров");
+  await manualStart(page, "Хочу посмотреть город");
+  const sent = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/recommendations") && request.method() === "POST",
+  );
+  await search(page);
+  const request = (await sent).postDataJSON() as RecommendationRequest;
+  expect(request.available_seconds).toBe(86400);
+  expect(request.return_to_origin).toBe(false);
+  expect(request.constraints).toEqual([]);
+  await expect(page.locator("#walk-filters")).toBeHidden();
+  await expect(page.locator(".journey-preview .journey-stop")).toHaveCount(3);
+});
+
+test("the description supplies 90 minutes and the whole walk appears beside the map automatically", async ({
+  page,
+}) => {
+  await manualStart(page, "Хочу погулять по городу 90 минут");
+  const sent = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/recommendations") && request.method() === "POST",
+  );
+  const itinerary = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/itineraries") && request.method() === "POST",
+  );
+  await page.locator('textarea[name="query"]').press("Enter");
+  const request = (await sent).postDataJSON() as RecommendationRequest;
+  expect(request.available_seconds).toBe(5400);
+  expect(request.return_to_origin).toBe(false);
+  expect((await itinerary).postDataJSON().place_ids).toHaveLength(3);
+  await expect(cards(page)).toHaveCount(3);
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("");
+  await expect(page.locator(".intent-summary")).toContainText("90 мин");
+  await expect(page.locator("#walk-filters")).toBeHidden();
+  await expect(page.locator(".journey-preview .journey-stop")).toHaveCount(3);
+  await expect(page.locator(".journey-preview-heading")).toContainText(
+    "Ваша прогулка на карте",
+  );
+  await expect(page.getByTestId("map-journey-summary")).toBeVisible();
+  await expect(page.getByTestId("map-panel")).toBeInViewport();
+});
+
+test("the map-side plan opens a readable side card and removes its middle destination", async ({
+  page,
+}) => {
+  await fill(page);
+  const itinerary = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/itineraries") && request.method() === "POST",
+  );
+  await search(page);
+  const originalIds = (await itinerary).postDataJSON().place_ids as string[];
+  await expect(page.locator(".journey-preview-heading")).toContainText(
+    "Ваша прогулка на карте",
+  );
+  const stopNames = await page
+    .locator(".journey-preview .journey-stop strong")
+    .allTextContents();
+  await page.locator(".journey-preview .journey-stop").nth(1).click();
+  const drawer = page.getByRole("dialog");
+  await expect(drawer).toHaveClass(/place-drawer/);
+  await expect(
+    drawer.getByRole("heading", { level: 2, name: stopNames[1], exact: true }),
+  ).toBeVisible();
+  const box = await drawer.boundingBox();
+  const viewport = page.viewportSize()!;
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThan(viewport.width / 2);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width + 1);
+  const recalculated = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/itineraries") &&
+      request.method() === "POST" &&
+      request.postDataJSON().place_ids.length === 2,
+  );
+  await drawer
+    .getByRole("button", { name: "Убрать остановку", exact: true })
+    .click();
+  expect((await recalculated).postDataJSON().place_ids).toEqual([
+    originalIds[0],
+    originalIds[2],
+  ]);
+  await page.keyboard.press("Escape");
+  await expect(
+    page.locator(".journey-preview .journey-stop strong"),
+  ).toHaveText([stopNames[0], stopNames[2]]);
+  await expect(
+    page.getByTestId("selected-stops").locator("li strong"),
+  ).toHaveText([stopNames[0], stopNames[2]]);
+  await expect(page.locator(".map-marker.selected")).toHaveCount(2);
+  await expect(page.locator(".journey-preview-heading")).toContainText(
+    "Ваша прогулка на карте",
+  );
 });
 
 test("real foundation API: manual start, sources, exact seconds, return itinerary, feedback, favorites", async ({
@@ -362,6 +481,44 @@ for (const code of ["provider_unavailable", "rate_limited"] as const) {
   });
 }
 
+test("a temporary location error keeps the loading state until the retry finds the start", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    let attempts = 0;
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: {
+        getCurrentPosition: (
+          success: (position: {
+            coords: { latitude: number; longitude: number };
+          }) => void,
+          failure: (error: { code: number }) => void,
+        ) => {
+          if (attempts++ === 0) failure({ code: 2 });
+          else
+            success({ coords: { latitude: 51.123456, longitude: 71.456789 } });
+        },
+      },
+    });
+  });
+  await page
+    .getByRole("button", { name: "Моё местоположение", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Определяем точку…", exact: true }),
+  ).toBeDisabled();
+  await expect(page.locator(".start-card .warning-text")).toHaveCount(0);
+  await expect(page.locator('input[name="latitude"]')).toHaveValue("51.123456");
+  await expect(page.locator('input[name="longitude"]')).toHaveValue(
+    "71.456789",
+  );
+  await expect(page.locator(".start-card .warning-text")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Моё местоположение", exact: true }),
+  ).toBeEnabled();
+});
+
 test("geolocation denial preserves manual entry; late callbacks cannot overwrite a manual edit", async ({
   page,
 }) => {
@@ -615,6 +772,10 @@ test("navigation preserves the private plan in memory and offers direct URLs", a
 });
 
 async function interpret(page: Page): Promise<IntentResponse> {
+  await openFilters(page);
+  const advanced = page.locator("details.advanced-intent");
+  if ((await advanced.getAttribute("open")) === null)
+    await advanced.locator("summary").click();
   const received = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/v1/intent") &&

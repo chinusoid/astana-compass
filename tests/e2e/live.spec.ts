@@ -23,6 +23,10 @@ async function fillWalk(page: Page, place: Place, query: string) {
     .locator('input[name="longitude"]')
     .fill(String(place.location.lon));
   await advanced.getByRole("button").click();
+  const filters = page.locator(".filter-toggle");
+  if ((await filters.getAttribute("aria-expanded")) !== "true")
+    await filters.click();
+  await expect(page.locator("#walk-filters")).toBeVisible();
   await page.locator('input[name="minutes"]').fill("120");
 }
 
