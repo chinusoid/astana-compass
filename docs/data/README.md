@@ -9,6 +9,8 @@ OSM получен одним ограниченным запросом Overpass
 
 19 октября добавлено [официальное редакционное дополнение](official-sources.md):
 девять страниц пяти организаций, 37 утверждений и шесть развёрнутых RU-описаний.
+20 октября расширено до 16 страниц семи организаций, 80 утверждений и 11
+развёрнутых описаний, добавлены проверенные контакты и отдельно часы касс.
 OSM/Wikidata кэши и их даты не менялись. У каждой заметки своя ссылка и время чтения;
 это сведения источников, а не полевая проверка удобств.
 
@@ -33,9 +35,9 @@ Wikidata text: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 | Категорий | 13 |
 | Точных Wikidata QID / связанных мест | 7 / 7 |
 | Мест с кратким Wikidata description | 6 |
-| Мест с официальным редакционным дополнением | 6 |
-| Официальных страниц / утверждений | 9 / 37 |
-| Непустых итоговых Place.description | 9 |
+| Мест с официальным редакционным дополнением | 11 |
+| Официальных страниц / утверждений | 16 / 80 |
+| Непустых итоговых Place.description | 13 |
 
 Выбор ограничен именованными категориями и bbox, не всей Астаной. Если в будущем
 результат превысит 1000, применяется category × grid round-robin; число исключённых
@@ -97,8 +99,8 @@ true. [OSM internet_access](https://wiki.openstreetmap.org/wiki/Key:internet_acc
 
 Wikidata: 7 EN labels, 6 RU и 6 KK labels; aliases у 3 мест на RU, 1 на KK и 1 на EN.
 Descriptions Wikidata после фильтра: 3 RU, 6 EN, **0 KK**. До официального дополнения
-в Place.description было 7 текстов: 1 OSM и 6 Wikidata. Теперь шесть карточек имеют
-развёрнутый официальный RU-пересказ, а всего непустых описаний девять. Короткие
+в Place.description было 7 текстов: 1 OSM и 6 Wikidata. Теперь 11 карточек имеют
+развёрнутый официальный RU-пересказ, а всего непустых описаний 13. Короткие
 исходные тексты сохранены отдельными фактами.
 Одна субъективная RU-строка о Ботаническом саде исключена из нормализованных
 данных и поиска; выбран нейтральный EN-текст. Исходный кэш сохранён без изменений.
@@ -122,8 +124,8 @@ opening_hours; неподдержанные расписания остаютс�
 - `osm:node/11783576043` Drinkit: toilets=yes, internet_access=yes; Wi-Fi unknown.
 - `osm:node/4894937300` Национальный музей: Q18405670, description RU/EN.
 - `osm:way/917478479` Астана Опера: Q21371563, description RU/EN.
-- `osm:way/69232075` Жетысу: Q104866925, description только EN.
-- `osm:way/1460700597` Атамекен: Q1454511, source labels; description отсутствует.
+- `osm:way/69232075` Жетысу: Q104866925, развёрнутое официальное RU-описание; прежний EN source сохранён.
+- `osm:way/1460700597` Атамекен: Q1454511, source labels и официальное RU-описание формата экспозиции по статье 2023 года.
 
 ## Воспроизведение и границы доверия
 
@@ -131,7 +133,7 @@ opening_hours; неподдержанные расписания остаютс�
 - `data/samples/astana-wikidata-cache.json`: один Wikidata response, request/raw
   hashes, точные QID, время загрузки, revisions и modified_at;
 - `data/samples/astana-official-supplement.json`: редакционные заметки, ссылки,
-  области фактов и точные привязки к шести OSM ID;
+  области фактов и точные привязки к 11 OSM ID;
 - `data/samples/astana-osm.json`: canonical Places и встроенный manifest;
 - `data/manifests/astana-osm.json`: тот же manifest, bbox/query/hashes,
   normalization `osm-tags-v2`, coverage и отдельная Wikidata provenance;
@@ -139,8 +141,8 @@ opening_hours; неподдержанные расписания остаютс�
 
 OSM raw SHA-256: `7e10e38b97d8e5cb546905f51a46d881aa35f1f4ccb26d2083c23a738746151c`.
 Wikidata raw SHA-256: `770b57e20dcb680e2dec1e4f431575b4bef651fc6d48f3bd16f39957b1134985`.
-Places SHA-256: `acb20fb2606c0a7f2ef24625ccccbed64318645c65715ea7c4432005fe5157c3`.
-Official supplement SHA-256: `8f5646a21864f07910d0e7586238d9b3c89a3de09059aa8d410d602166370539`.
+Places SHA-256: `500dc98cfa94753e2554a2faca883303b4e673510372784cfcbdc536e8871e36`.
+Official supplement SHA-256: `5dc8445df95879a7a3811079f654e3d7d96684cbfd1b1b1d178d3f92cc8824d4`.
 Canonical hashing описан в `data/samples/README.md`. Это контроль повреждения и
 воспроизводимости, не подпись доверенного издателя. Places воспроизводятся из
 двух кэшей и официального дополнения без сети, включая descriptions и per-source evidence.

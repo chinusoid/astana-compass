@@ -29,6 +29,20 @@ PAGES = {
     "visit-museum": ("Visit Astana", "https://www.visitastana.kz/ru/about-city/what-to-see/natsionalnyy-muzey-respubliki-kazakhstan/"),
     "opera-about": ("Астана Опера", "https://astanaopera.kz/ru/about-us"),
     "visit-arch": ("Visit Astana", "https://visitastana.kz/ru/about-city/what-to-see/triumfalnaya-arka-m-gilik-el9679/"),
+    "visit-jetisu": ("Visit Astana", "https://visitastana.kz/ru/about-city/what-to-see/park-zhetysu/"),
+    "visit-korean": ("Visit Astana", "https://visitastana.kz/ru/about-city/what-to-see/koreyskiy-sad-druzhby-/"),
+    "visit-triathlon": ("Visit Astana", "https://visitastana.kz/ru/about-city/what-to-see/triatlon-park-astana/"),
+    "visit-zheruyyk": ("Visit Astana", "https://visitastana.kz/ru/about-city/what-to-see/park-zheruyyk/"),
+    "museums-atameken": ("Дирекция музеев города Астаны", "https://astanamuseums.kz/news/28-avgusta-6-osobennostej-etno-memorialnogo-kompleksa-karta-kazahstana-atameken"),
+    "museum-contacts": ("Национальный музей Республики Казахстан", "https://nmrk.kz/ru/about-museum/contacts/"),
+    "opera-contacts": ("Астана Опера", "https://astanaopera.kz/en/contacts"),
+}
+# A tourist publication is evidence, not automatically the venue's own website.
+# Operator links are reviewed separately and must be supported by that operator.
+OPERATOR_WEBSITES = {
+    "https://www.astanabotsad.kz/": frozenset({"botsad-about", "botsad-contacts"}),
+    "https://nmrk.kz/": frozenset({"museum-contacts"}),
+    "https://astanaopera.kz/": frozenset({"opera-about", "opera-contacts"}),
 }
 BOOL_KEYS = frozenset({
     "free_entry", "has_wifi", "toilets", "wheelchair_accessible", "indoor",
@@ -38,6 +52,7 @@ BOOL_KEYS = frozenset({
 TEXT_KEYS = frozenset({
     "opening_hours", "official:waterfront", "official:greenhouse_hours", "official:greenhouse_entry_hours",
     "official:architecture", "official:visitor_note", "official:published_hours",
+    "official:address", "official:ticket_office_hours",
     *(f"official:description:{lang}" for lang in ("ru", "kk", "en")),
 })
 LIST_KEYS = frozenset({"official:highlights", *(f"official:aliases:{lang}" for lang in ("ru", "kk", "en"))})
@@ -88,6 +103,12 @@ def validate_bundle(bundle, *, clock=utcnow):
                      or (key in LIST_KEYS and isinstance(value, list) and 1 <= len(value) <= 12
                          and all(_text(v, 300) for v in value) and len(set(value)) == len(value))
                      or (key == "official:opened_year" and type(value) is int and 1000 <= value <= clock().year))
+            if key == "official:website":
+                valid = isinstance(value, str) and bool(
+                    OPERATOR_WEBSITES.get(value, frozenset()).intersection(fact["sources"]))
+            elif key == "official:phone":
+                valid = (isinstance(value, str) and bool(re.fullmatch(r"\+[0-9 ()-]+", value))
+                         and 7 <= sum(char.isdigit() for char in value) <= 15)
             identity = (key, tuple(sorted(fact["sources"])))
             if not valid or identity in claims:
                 raise DataError("Invalid or duplicate official claim")

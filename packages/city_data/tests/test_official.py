@@ -11,7 +11,7 @@ from astana_city_data.normalize import normalize_response, query
 from astana_city_data.official import FORMAT, POLICY, PAGES, USAGE, enrich, expected_records, validate_bundle
 from astana_city_data.repository import SnapshotRepository
 
-NOW = datetime(2026, 10, 19, 16, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 20, 16, tzinfo=timezone.utc)
 
 
 def raw(**tags):
@@ -152,12 +152,12 @@ def test_repository_replays_reviewed_claims_and_rejects_tampering(tmp_path, muta
     assert SnapshotRepository(path, clock=lambda: NOW)._status == "unavailable"
 
 
-def test_real_supplement_covers_six_places_without_promising_unsupported_amenities():
+def test_real_supplement_covers_priority_places_without_promising_unsupported_amenities():
     root = Path(__file__).resolve().parents[3]
     supplement = load_json(root / "data/samples/astana-official-supplement.json")
     snapshot = load_json(root / "data/samples/astana-osm.json")
     validate_bundle(supplement, clock=lambda: NOW)
-    assert len(supplement["places"]) == 6 and len(supplement["sources"]) == 9
+    assert len(supplement["places"]) == 11 and len(supplement["sources"]) == 16
     assert len(snapshot["places"]) == 628
     lookup = {p["id"]: p for p in snapshot["places"]}
     for entry in supplement["places"]:
@@ -175,3 +175,48 @@ def test_real_supplement_covers_six_places_without_promising_unsupported_ameniti
     bridge = lookup["osm:way/1239177393"]
     assert facts(bridge)["official:waterfront"]["value"] == "Есиль"
     assert not any("atyrauskiy-most" in e["source_url"] for e in bridge["evidence"])
+
+
+def test_operator_links_require_exact_reviewed_venue_source_and_phone_is_public_format():
+    data = bundle([claim("official:website", "https://www.astanabotsad.kz/")])
+    with pytest.raises(DataError):
+        validate_bundle(data, clock=lambda: NOW)
+    # Even an otherwise reviewed tourist publication must not claim to be the operator.
+    for url in (PAGES["visit-central"][1], "javascript:alert(1)", "https://nmrk.kz@unreviewed.example/",
+                "https://nmrk.kz/?redirect=https://unreviewed.example"):
+        data["places"][0]["facts"][0]["value"] = url
+        with pytest.raises(DataError):
+            validate_bundle(data, clock=lambda: NOW)
+    for phone in ("Касса: +7 (7172) 709600", "tel:+77172709600", "+7", "+1234567890123456"):
+        with pytest.raises(DataError):
+            validate_bundle(bundle([claim("official:phone", phone)]), clock=lambda: NOW)
+    validate_bundle(bundle([claim("official:phone", "+7 (7172) 709-600")]), clock=lambda: NOW)
+
+
+def test_real_practical_details_keep_operator_contact_and_hours_scopes():
+    root = Path(__file__).resolve().parents[3]
+    snapshot = load_json(root / "data/samples/astana-osm.json")
+    lookup = {p["id"]: p for p in snapshot["places"]}
+    garden = facts(lookup["osm:way/1196402246"])
+    assert garden["official:website"]["value"] == "https://www.astanabotsad.kz/"
+    assert "10:00–19:00" in garden["official:greenhouse_hours"]["value"]
+    assert "18:30" in garden["official:greenhouse_entry_hours"]["value"]
+    assert "19:00" in garden["official:greenhouse_entry_hours"]["value"]
+    assert garden["opening_hours"]["status"] == "unknown"
+    museum = facts(lookup["osm:node/4894937300"])
+    assert "10:00–17:00" in museum["official:ticket_office_hours"]["value"]
+    assert "Последний вторник" in museum["official:ticket_office_hours"]["value"]
+    assert museum["official:phone"]["evidence_ids"] == ["official:museum-contacts"]
+    opera = facts(lookup["osm:way/917478479"])
+    assert "кассы" in opera["official:visitor_note"]["value"]
+    assert opera["opening_hours"]["status"] == "unknown"
+    for pid in ("osm:way/1296051287", "osm:way/1363058986", "osm:relation/16002498"):
+        f = facts(lookup[pid])
+        assert f["official:highlights"]["status"] == "known"
+        assert f["quiet"]["status"] == "unknown"
+        assert f["child_friendly"]["status"] == "unknown"
+        assert f["open_at_requested_time"]["status"] == "unknown"
+    triathlon = facts(lookup["osm:way/1363058986"])
+    assert triathlon["official:waterfront"]["value"] == "Есиль"
+    assert triathlon["opening_hours"]["status"] == "unknown"
+    assert "2023" in facts(lookup["osm:way/1460700597"])["official:visitor_note"]["value"]
