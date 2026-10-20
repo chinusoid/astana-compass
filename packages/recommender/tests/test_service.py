@@ -7,6 +7,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import json
 import unittest
+from unittest.mock import patch
 
 from astana_contracts import ContractValidationError, validate_payload
 from astana_recommender import (
@@ -1036,6 +1037,217 @@ class PaceAndCategoryTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
                 result = await self.service.recommend(request(query="Show me something interesting"))
                 self.assertIn(activity, result["recommendations"][0]["suggested_activity"])
                 self.assertIn(reason, result["recommendations"][0]["why"])
+
+
+class Planner:
+    """The planner knows the user's words, never locations or catalog POIs."""
+
+    def __init__(self, stages, *, order="explicit", error=None):
+        self.value = {"provider": "openai", "stages": stages, "order": order,
+                      "clarification_questions": [], "warnings": []}
+        self.calls = []
+        self.error = error
+
+    async def plan(self, query, locale):
+        self.calls.append((query, locale))
+        if self.error:
+            raise self.error
+        return deepcopy(self.value)
+
+
+def planned_stage(quote, *, search=None, kind="activity", name=None, cuisine=None):
+    return {"source_quote": quote, "search_query": search or quote, "kind": kind,
+            "named_place": name, "cuisine": cuisine}
+
+
+class PlannedRetriever(Retriever):
+    def __init__(self, mapping):
+        super().__init__([])
+        self.mapping = mapping
+
+    async def retrieve(self, payload):
+        self.places = self.mapping.get(payload["query"], [])
+        return await super().retrieve(payload)
+
+
+class PlannedJourneyTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
+    def setup_planned(self, stages, mapping, **kwargs):
+        planner = Planner(stages)
+        venues = {venue["id"]: venue for group in mapping.values() for venue in group}
+        self.setup_service(list(venues.values()), planner=planner, **kwargs)
+        self.service.retriever = self.retriever = PlannedRetriever(mapping)
+        return planner
+
+    async def test_semantic_six_goal_plan_named_food_culture_coffee_shop_and_park(self):
+        stages = [
+            planned_stage("The Sphere", kind="named_place", name="The Sphere"),
+            planned_stage("a sushi lunch", search="sushi", kind="meal", cuisine="sushi"),
+            planned_stage("a little culture", search="museum"),
+            planned_stage("a caffeine break", search="coffee"),
+            planned_stage("buy a book", search="bookshop"),
+            planned_stage("some greenery", search="park"),
+        ]
+        venues = [place(index) for index in range(1, 7)]
+        for venue, category in zip(venues, ("attraction", "restaurant", "museum", "cafe", "shop", "park"), strict=True):
+            venue["categories"] = [category]
+        venues[0]["name"] = "The Sphere"
+        venues[1]["facts"] = [fact("osm:cuisine", "sushi")]
+        mapping = {stage["search_query"]: [venue] for stage, venue in zip(stages, venues, strict=True)}
+        planner = self.setup_planned(stages, mapping, generator=Generator())
+        query = "First " + " then ".join(stage["source_quote"] for stage in stages)
+        value = await self.service.recommend(request(query=query, limit=3))
+        self.assertEqual([item["place_id"] for item in value["recommendations"]], [venue["id"] for venue in venues])
+        self.assertEqual(planner.calls, [(query, "en")])
+        self.assertEqual(value["journey_plan"], planner.value)
+        self.assertEqual(value["request"]["limit"], 3)
+        self.assertEqual(len(self.context.routes), 6)
+        self.assertLessEqual(self.context.max_routes, 4)
+        self.assertEqual(len(self.service.generator.calls), 6)
+        self.assertEqual([payload["query"] for payload in self.retriever.requests], list(mapping))
+        self.assertEqual(self.retriever.requests[0]["named_place"], "The Sphere")
+        self.assertEqual(self.retriever.requests[1]["cuisine"], "sushi")
+        self.assertEqual(sum(payload["candidate_limit"] for payload in self.retriever.requests), 24)
+        self.assertIn("sushi", value["recommendations"][1]["why"])
+        self.assertIn("meal stop", value["recommendations"][1]["suggested_activity"])
+
+    async def test_single_concrete_goal_returns_one_stop_and_empty_plan_keeps_discovery(self):
+        stages = [planned_stage("a museum", search="museum")]
+        self.setup_planned(stages, {"museum": [place(1), place(2), place(3)]})
+        value = await self.service.recommend(request(query="I want a museum", limit=3))
+        self.assertEqual(len(value["recommendations"]), 1)
+        self.setup_service([place(1), place(2), place(3)], planner=Planner([]))
+        with patch("astana_recommender.service.stage_matches", side_effect=AssertionError("legacy matcher called")):
+            value = await self.service.recommend(request(query="Suggest an interesting walk"))
+        self.assertEqual(len(value["recommendations"]), 3)
+        self.assertEqual(value["journey_plan"]["stages"], [])
+
+    async def test_model_order_handles_after_relation_instead_of_textual_order(self):
+        stages = [planned_stage("sushi", kind="meal", cuisine="sushi"), planned_stage("museum")]
+        self.setup_planned(stages, {"sushi": [place(2)], "museum": [place(1)]})
+        value = await self.service.recommend(request(query="Visit a museum after sushi"))
+        self.assertEqual([item["place_id"] for item in value["recommendations"]], [place(2)["id"], place(1)["id"]])
+        self.assertEqual(value["journey_plan"]["order"], "explicit")
+
+    async def test_unresolved_and_unmatched_goals_remain_visible_without_substitutes(self):
+        stages = [planned_stage("coffee"), planned_stage("something impossible", kind="unresolved"),
+                  planned_stage("Unknown Palace", kind="named_place", name="Unknown Palace"), planned_stage("bookshop")]
+        self.setup_planned(stages, {"coffee": [place(1)], "bookshop": [place(4)]})
+        value = await self.service.recommend(request(query="coffee, something impossible, Unknown Palace, bookshop"))
+        self.assertEqual([item["place_id"] for item in value["recommendations"]], [place(1)["id"], place(4)["id"]])
+        self.assertTrue(value["recommendations"][0]["why"].startswith("Stage 1"))
+        self.assertTrue(value["recommendations"][1]["why"].startswith("Stage 4"))
+        self.assertEqual(len(value["journey_plan"]["stages"]), 4)
+        self.assertIn("stage 2", " ".join(value["warnings"]))
+        self.assertIn("stage 3", " ".join(value["warnings"]))
+        self.assertEqual(value["status"], "partial")
+        self.assertEqual(len(self.retriever.requests), 3)
+
+    async def test_eight_extracted_goals_keep_coverage_and_warn_about_six_stop_bound(self):
+        stages = [planned_stage(f"goal {index}") for index in range(1, 9)]
+        self.setup_planned(stages, {stage["search_query"]: [place(index)]
+                                  for index, stage in enumerate(stages, start=1)})
+        value = await self.service.recommend(request(query=" then ".join(stage["source_quote"] for stage in stages), limit=1))
+        self.assertEqual(len(value["recommendations"]), 6)
+        self.assertEqual(len(value["journey_plan"]["stages"]), 8)
+        self.assertEqual(value["request"]["limit"], 1)
+        self.assertIn("6 requested stops", " ".join(value["warnings"]))
+        self.assertEqual(len(self.context.routes), 6)
+        self.assertEqual(value["status"], "partial")
+
+    async def test_unresolved_goals_do_not_consume_the_six_concrete_stop_slots(self):
+        stages = [planned_stage("unclear first", kind="unresolved")]
+        stages.extend(planned_stage(f"goal {index}") for index in range(1, 7))
+        stages.insert(3, planned_stage("unclear middle", kind="unresolved"))
+        self.setup_planned(stages, {stage["search_query"]: [place(index)]
+                                  for index, stage in enumerate(stages, start=1) if stage["kind"] != "unresolved"})
+        value = await self.service.recommend(request(query=" then ".join(stage["source_quote"] for stage in stages)))
+        self.assertEqual(len(value["recommendations"]), 6)
+        self.assertEqual(len(self.context.routes), 6)
+        self.assertTrue(value["recommendations"][0]["why"].startswith("Stage 2"))
+        self.assertTrue(value["recommendations"][-1]["why"].startswith("Stage 8"))
+        self.assertIn("stage 1", " ".join(value["warnings"]))
+        self.assertIn("stage 4", " ".join(value["warnings"]))
+        self.assertNotIn("6 requested stops", " ".join(value["warnings"]))
+
+    async def test_planned_required_constraints_and_soft_time_never_drop_valid_goals(self):
+        stages = [planned_stage("museum"), planned_stage("coffee"), planned_stage("shop"), planned_stage("park")]
+        rejected = place(9)
+        accepted = [place(index, facts=[fact()]) for index in range(1, 5)]
+        self.setup_planned(stages, {stage["search_query"]: [rejected, venue]
+                                  for stage, venue in zip(stages, accepted, strict=True)})
+        value = await self.service.recommend(request(query="museum coffee shop park", available_seconds=60,
+                                                     constraints=[constraint()]))
+        self.assertEqual([item["place_id"] for item in value["recommendations"]], [venue["id"] for venue in accepted])
+        self.assertTrue(all(item["total_duration_seconds"] > 60 for item in value["recommendations"]))
+        self.assertTrue(all(payload["constraints"] == [constraint()] for payload in self.retriever.requests))
+        self.assertEqual(value["status"], "partial")
+
+    async def test_route_failures_are_bounded_at_six_attempts(self):
+        stages = [planned_stage("museum")]
+        self.setup_planned(stages, {"museum": [place(index) for index in range(1, 101)]}, candidate_limit=100)
+        self.context.route_error = RuntimeError("private provider failure")
+        value = await self.service.recommend(request(query="museum"))
+        self.assertEqual(len(self.context.routes), 6)
+        self.assertEqual(value["status"], "needs_clarification")
+        self.assertEqual(value["places"], [])
+        self.assertNotIn("private provider failure", json.dumps(value))
+
+    async def test_discovery_route_failures_are_also_bounded(self):
+        self.setup_service([place(index) for index in range(1, 101)], planner=Planner([]), candidate_limit=100)
+        self.context.route_error = RuntimeError("private provider failure")
+        value = await self.service.recommend(request(query="Suggest an interesting walk"))
+        self.assertEqual(len(self.context.routes), 6)
+        self.assertEqual(value["status"], "no_match")
+        self.assertEqual(value["places"], [])
+
+    async def test_early_route_failure_does_not_use_later_goals_first_attempts(self):
+        stages = [planned_stage(f"goal {index}") for index in range(1, 7)]
+        self.setup_planned(stages, {stage["search_query"]: [place(index), place(index + 10)]
+                                  for index, stage in enumerate(stages, start=1)})
+        original = self.context.estimate_route
+
+        async def route(**kwargs):
+            if kwargs["destinations"][0] == place(1)["location"]:
+                self.context.routes.append(deepcopy(kwargs))
+                raise RuntimeError("unroutable")
+            return await original(**kwargs)
+
+        self.context.estimate_route = route
+        value = await self.service.recommend(request(query=" then ".join(stage["source_quote"] for stage in stages)))
+        self.assertEqual(len(self.context.routes), 6)
+        self.assertEqual([item["place_id"] for item in value["recommendations"]],
+                         [place(index)["id"] for index in range(2, 7)])
+        self.assertIn("stage 1", " ".join(value["warnings"]))
+        self.assertTrue(value["recommendations"][-1]["why"].startswith("Stage 6"))
+
+    async def test_bad_or_unavailable_planner_retains_unresolved_goal_without_legacy_inference(self):
+        invalid_plans = [
+            Planner([], error=RuntimeError("SECRET provider token")),
+            Planner([planned_stage("Invented destination")]),
+            Planner([planned_stage("coffee", kind="named_place", name="Another name")]),
+        ]
+        for planner in invalid_plans:
+            with self.subTest(planner=planner):
+                self.setup_service([place(1)], planner=planner)
+                value = await self.service.recommend(request(query="coffee and Botanical Garden"))
+                self.assertEqual(value["status"], "needs_clarification")
+                self.assertEqual(value["journey_plan"]["stages"][0]["kind"], "unresolved")
+                self.assertEqual(value["places"], [])
+                self.assertFalse(self.retriever.requests)
+                self.assertFalse(self.context.routes)
+                self.assertNotIn("SECRET", json.dumps(value))
+
+    async def test_six_selected_stops_get_one_complete_route_and_context_limit_adapter(self):
+        venues = [place(index) for index in range(1, 7)]
+        self.setup_service(venues)
+        payload = request(query="A six stop outing", place_ids=[venue["id"] for venue in venues], limit=6)
+        value = await self.service.build_itinerary(payload)
+        self.assertEqual([stop["place_id"] for stop in value["stops"]], payload["place_ids"])
+        self.assertEqual(value["request"], payload)
+        self.assertEqual(self.context.context_requests[0]["limit"], 3)
+        self.assertEqual(len(self.context.routes), 1)
+        self.assertEqual(self.context.routes[0]["destinations"], [venue["location"] for venue in venues])
+        self.assertEqual(value["total_duration_seconds"], 6 * 1200 + 600)
 
 
 if __name__ == "__main__":

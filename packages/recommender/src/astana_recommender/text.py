@@ -2,6 +2,11 @@
 
 TEXT = {
     "ru": {
+        "plan_failed": "Не удалось надёжно разобрать пожелание. Запрос сохранён как неуточнённый этап; случайные места не добавлены.",
+        "plan_question": "Уточните, какие места или занятия вы хотите включить в прогулку и в каком порядке.",
+        "plan_limit": "В план включено не более {limit} запрошенных остановок. Дополнительные пожелания сохранены в разобранном плане; сократите прогулку или разделите её, чтобы включить их.",
+        "cuisine_reason": "У «{name}» в подтверждённых данных источника указана кухня {cuisine}.",
+        "meal_activity": "Сделайте остановку на еду; меню и наличие выбранных блюд уточните в заведении.",
         "stage_found": "Этап {order} из вашего пожелания.",
         "stage_missing": "Для этапа {order} не найдено отдельного места с подтверждёнными обязательными условиями и маршрутом. Уточните название или занятие этого этапа; план пока неполный.",
         "stage_search_failed": "Поиск одного из этапов недоступен; случайное ближайшее место вместо него не подставлялось.",
@@ -56,6 +61,11 @@ TEXT = {
         "take_break": "Если обстановка позволяет, сделайте небольшую паузу.",
     },
     "kk": {
+        "plan_failed": "Қалауды сенімді талдау мүмкін болмады. Сұрау нақтыланбаған кезең ретінде сақталды; кездейсоқ орындар қосылмады.",
+        "plan_question": "Серуенге қандай орындар мен әрекеттерді, қандай ретпен қосқыңыз келетінін нақтылаңыз.",
+        "plan_limit": "Жоспарға ең көбі {limit} сұралған аялдама енгізілді. Қосымша қалаулар талданған жоспарда сақталды; оларды қосу үшін серуенді қысқартыңыз немесе бөліңіз.",
+        "cuisine_reason": "«{name}» дереккөзінің расталған деректерінде {cuisine} асханасы көрсетілген.",
+        "meal_activity": "Тамақтануға аялдаңыз; мәзір мен таңдаған тағамдардың бар-жоғын мекемеден нақтылаңыз.",
         "stage_found": "Қалауыңыздағы {order}-кезең.",
         "stage_missing": "{order}-кезең үшін міндетті талаптары мен маршруты расталған бөлек орын табылмады. Осы кезеңдегі орын атауын немесе әрекетті нақтылаңыз; жоспар әзірге толық емес.",
         "stage_search_failed": "Кезеңдердің бірінің іздеуі қолжетімсіз; оның орнына кездейсоқ жақын орын қосылмады.",
@@ -110,6 +120,11 @@ TEXT = {
         "take_break": "Жағдай мүмкіндік берсе, аздап үзіліс жасаңыз.",
     },
     "en": {
+        "plan_failed": "Your wish could not be reliably interpreted. It was kept as an unresolved stage; no arbitrary places were added.",
+        "plan_question": "Clarify which places or activities you want to include and in what order.",
+        "plan_limit": "This plan includes at most {limit} requested stops. Additional goals remain visible in the extracted plan; reduce or split the outing to include them.",
+        "cuisine_reason": "{name} has {cuisine} listed in its verified source cuisine data.",
+        "meal_activity": "Make a meal stop; check the menu and availability of your chosen dishes at the venue.",
         "stage_found": "Stage {order} of your wish.",
         "stage_missing": "No distinct place with verified required conditions and a route was found for stage {order}. Clarify its place name or activity; the plan is still incomplete.",
         "stage_search_failed": "Search for a stage is unavailable; an arbitrary nearby place was not substituted.",

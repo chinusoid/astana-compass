@@ -2,7 +2,7 @@
 
 Installable Python package, Python 3.12–3.14. The public entry point is
 astana_recommender.DefaultRecommendationService(repository, retriever, context,
-generator=None). Dependencies implement the async ports from astana_contracts.
+generator=None, planner=None). Dependencies implement the async ports from astana_contracts.
 Importing the package creates no clients, makes no requests and reads no secrets.
 
 ## Implemented behavior
@@ -23,28 +23,35 @@ Importing the package creates no clients, makes no requests and reads no secrets
   The selected time is a preference: longer alternatives and complete selected
   itineraries remain visible with a localized duration/overrun warning and a
   partial status. Selected stops preserve their requested ID order.
-- Explicit sequences such as `сначала кофе, потом парк`, `first coffee then
-  park` and `алдымен кофе, содан кейін саябақ` retrieve each destination
-  separately and return one distinct place per stage in that order (up to the
-  requested limit of three). Two stages produce two stops. Ordinary mixed
-  wishes retain normal relevance/diversity ranking. The same required-condition
-  checks and soft time preference apply; no additional LLM parsing is used.
-- A Botanical Garden plus food wish joined by `и`, `and` or `және` also forms
-  two core stages: food before the named garden. Explicit order takes priority.
-  Generic mixed wishes, negation and food searches near the landmark do not
-  trigger this inference. The named garden must match a known source name or
-  alias; another park cannot fill that stage. Pizza requires a known, cited
-  cuisine value `pizza` or `italian_pizza` at a cafe or restaurant. A venue name
-  or description alone cannot establish cuisine. The food shortlist accounts
-  for the onward garden location using a geographic heuristic. Recommendation
-  cards keep their routes from the original start; `build_itinerary` constructs
-  the connected route in returned stage order. Two recommendation routes plus
-  that itinerary use three route calls when the providers succeed.
+- An injected `JourneyPlanner.plan(query, locale)` interprets the user's wishes
+  without receiving coordinates, catalog places or the complete request. The
+  canonical `JourneyPlan` preserves source quotes, explicit or suggested order,
+  named destinations, food goals and unresolved wishes. Invalid extraction or
+  planner failure retains an unresolved goal and asks for clarification.
+- Each concrete goal retrieves independently with grounded `named_place` and
+  `cuisine` filters. The retrieval port must verify names against source aliases
+  and food against known, cited cuisine facts. A name or description cannot
+  establish that a dish is served. The orchestration does not apply a separate
+  scenario-specific matching rule to planned stages.
+- A single concrete goal yields one stop. Multiple goals yield one distinct
+  place per goal in plan order, up to six concrete stops, independently of the
+  request's one-to-three discovery alternative limit. Unresolved stages do not
+  consume stop slots. The full extracted plan remains in `journey_plan`, with
+  explicit warnings for missing or additional goals. An empty plan denotes broad
+  discovery and retains ordinary relevance/diversity alternatives.
+- Geographic proximity to neighboring stages only selects a bounded shortlist;
+  it is not a route claim. Recommendation cards retain their routes from the
+  original start. `build_itinerary` constructs the complete connected route in
+  selected order, including a requested return. All required-condition checks
+  and soft time preferences apply to plans and itineraries.
 - An empty, unmatched or unroutable sequence stage is disclosed as an
   incomplete plan, with its original stage number. Available stops remain a
   partial result; if none are available, the response needs clarification.
   A failed stage search never substitutes an arbitrary nearby place.
-- Uses an explicit nearby-catalog fallback for ordinary requests if retrieval fails. Context failure
+- With no planner injected, the legacy API behavior remains available to direct
+  package callers. Production wiring supplies the planner. Planned requests never
+  replace a failed search with arbitrary nearby places. The legacy ordinary path
+  uses an explicit nearby-catalog fallback if retrieval fails. Context failure
   invalidates request-time facts; static facts may still support a partial result.
   Route failure excludes a candidate rather than fabricating a path.
 - Marks synthetic data, approximate routing, visit estimates, generator failure
@@ -87,11 +94,12 @@ are separate from this package.
 
 ## Configuration and errors
 
-Keyword-only settings: candidate_limit=24, radius_meters=10000,
+Keyword-only settings: planner=None, candidate_limit=24, radius_meters=10000,
 timeout_seconds=8, default_visit_seconds=1200, route_concurrency=4, clock=None.
 The injected clock must return a timezone-aware datetime.
 
-Each external call has its own timeout; route calls run in bounded batches no
+Each external call has its own timeout; planned requests make at most six route
+attempts and six explanation calls. Route calls run in bounded batches no
 larger than the number of remaining result slots and stop once enough valid
 recommendations are found. Explanations are generated only for returned places.
 The package does not promise

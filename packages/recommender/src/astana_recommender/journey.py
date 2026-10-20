@@ -77,9 +77,13 @@ def food_intent(query: str) -> str | None:
     return None
 
 
-def pizza_fact(place: dict) -> dict | None:
-    """A venue name/description cannot establish that pizza is served."""
-    if not {"restaurant", "cafe"}.intersection(place["categories"]):
+def cuisine_fact(place: dict, cuisine: str) -> dict | None:
+    """A known, cited cuisine value supports the extracted food goal.
+
+    A venue name/description or a broad country cuisine cannot establish an
+    arbitrary requested dish. Tokens come from the catalog, never LLM facts.
+    """
+    if not {"restaurant", "cafe", "fast_food", "food_court"}.intersection(place["categories"]):
         return None
     evidence = {item["id"] for item in place["evidence"]}
     for fact in place["facts"]:
@@ -89,9 +93,17 @@ def pizza_fact(place: dict) -> dict | None:
         values = fact["value"] if isinstance(fact["value"], list) else [fact["value"]]
         cuisines = {part.strip().casefold() for value in values if isinstance(value, str)
                     for part in re.split(r"[;,]", value)}
-        if cuisines.intersection({"pizza", "italian_pizza"}):
+        requested = {cuisine}
+        if cuisine == "pizza":
+            requested.add("italian_pizza")
+        if cuisines.intersection(requested):
             return fact
     return None
+
+
+def pizza_fact(place: dict) -> dict | None:
+    """Compatibility check for callers without an injected journey planner."""
+    return cuisine_fact(place, "pizza")
 
 
 def stage_matches(place: dict, query: str) -> bool:

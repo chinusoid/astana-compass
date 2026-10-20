@@ -14,13 +14,14 @@ from uuid import uuid4
 from astana_contracts import (
     JSON,
     ContextProvider,
+    JourneyPlanner,
     PlaceRepository,
     Retriever,
     validate_payload,
 )
 
 from .explanations import ExplanationGenerator, GroundedExplanation, GroundedReason
-from .journey import botanical_destination, food_intent, journey_stages, pizza_fact, stage_matches
+from .journey import botanical_destination, cuisine_fact, food_intent, journey_stages, pizza_fact, stage_matches
 from .preferences import walking_preference
 from .text import TEXT, label
 
@@ -107,6 +108,7 @@ class DefaultRecommendationService:
         context: ContextProvider,
         generator: ExplanationGenerator | None = None,
         *,
+        planner: JourneyPlanner | None = None,
         candidate_limit: int = 24,
         radius_meters: float = 10_000,
         timeout_seconds: float = 8,
@@ -133,6 +135,7 @@ class DefaultRecommendationService:
         self.retriever = retriever
         self.context = context
         self.generator = generator
+        self.planner = planner
         self.candidate_limit = candidate_limit
         self.radius_meters = radius_meters
         self.timeout_seconds = timeout_seconds
@@ -175,6 +178,7 @@ class DefaultRecommendationService:
 
     async def _retrieve(
         self, request: JSON, *, candidate_limit: int | None = None, allow_fallback: bool = True,
+        stage: JSON | None = None, apply_legacy_matching: bool = True,
     ) -> tuple[list[JSON], list[str], bool]:
         locale = request["locale"]
         limit = self.candidate_limit if candidate_limit is None else candidate_limit
@@ -186,6 +190,10 @@ class DefaultRecommendationService:
             "constraints": deepcopy(request["constraints"]),
             "candidate_limit": limit,
         }
+        if stage is not None:
+            # These are grounded extraction filters, never model-generated POI
+            # identities. The retriever verifies them against catalog sources.
+            payload.update(named_place=stage["named_place"], cuisine=stage["cuisine"])
         validate_payload("RetrievalRequest", payload)
         try:
             result = await asyncio.wait_for(
@@ -196,7 +204,7 @@ class DefaultRecommendationService:
             candidates = [
                 deepcopy(places[h["place_id"]])
                 for h in _diverse_lexical_hits(result["hits"][:limit], places)
-                if stage_matches(places[h["place_id"]], request["query"])
+                if stage is not None or not apply_legacy_matching or stage_matches(places[h["place_id"]], request["query"])
             ]
             return candidates, list(result["warnings"]), False
         except Exception:
@@ -233,6 +241,7 @@ class DefaultRecommendationService:
             return [], [], False
         # ItineraryRequest has place_ids; the context port takes RecommendationRequest.
         context_request = {k: deepcopy(v) for k, v in request.items() if k != "place_ids"}
+        context_request["limit"] = min(context_request["limit"], 3)
         validate_payload("RecommendationRequest", context_request)
         originals = {p["id"]: p for p in candidates}
         try:
@@ -395,7 +404,8 @@ class DefaultRecommendationService:
             seen.add(reason.fact_key)
 
     async def _explain(
-        self, place: JSON, evaluations: list[JSON], request: JSON, total: int
+        self, place: JSON, evaluations: list[JSON], request: JSON, total: int,
+        stage: JSON | None = None,
     ) -> tuple[str, str, list[str]]:
         locale = request["locale"]
         text = TEXT[locale]
@@ -410,7 +420,7 @@ class DefaultRecommendationService:
                 generated = await asyncio.wait_for(
                     self.generator.generate(
                         locale=locale,
-                        query=request["query"],
+                        query=stage["search_query"] if stage is not None else request["query"],
                         place=deepcopy(place),
                         constraint_evaluations=deepcopy(evaluations),
                     ),
@@ -433,7 +443,7 @@ class DefaultRecommendationService:
             ("architecture", {"architecture"}), ("history", {"historic", "monument", "memorial"}),
             ("viewpoint", {"viewpoint"}),
         ) if categories.intersection(values)), None)
-        cuisine = pizza_fact(place) if food_intent(request["query"]) == "pizza" else None
+        cuisine = pizza_fact(place) if stage is None and food_intent(request["query"]) == "pizza" else None
         if cuisine:
             purpose = "pizza"
             why = " ".join(filter(None, [why, self._render_reason(
@@ -443,6 +453,15 @@ class DefaultRecommendationService:
         if purpose:
             why = " ".join(filter(None, [text[f"{purpose}_reason"].format(name=place["name"]), why]))
             activity = text[f"{purpose}_activity"]
+        if stage is not None and stage["cuisine"]:
+            source_cuisine = cuisine_fact(place, stage["cuisine"])
+            if source_cuisine is not None:
+                why = " ".join(filter(None, [text["cuisine_reason"].format(
+                    name=place["name"], cuisine=stage["cuisine"],
+                ), self._render_reason(place, GroundedReason(
+                    source_cuisine["key"], tuple(source_cuisine["evidence_ids"]),
+                ), locale), why]))
+                activity = text["meal_activity"]
         why = why or text["found"]
         why += " " + text["time"].format(minutes=math.ceil(total / 60))
         return why, activity, warnings
@@ -462,36 +481,91 @@ class DefaultRecommendationService:
         request = self._request("RecommendationRequest", request)
         response = self._base(request)
         text = TEXT[request["locale"]]
-        stages = journey_stages(request["query"])
+        plan = None
+        planned_degraded = False
+        if self.planner is not None:
+            try:
+                plan = await asyncio.wait_for(
+                    self.planner.plan(request["query"], request["locale"]),
+                    timeout=self.timeout_seconds,
+                )
+                validate_payload("JourneyPlan", plan)
+                if any(stage["source_quote"] not in request["query"] or (
+                    stage["named_place"] is not None and stage["named_place"] not in stage["source_quote"]
+                ) for stage in plan["stages"]):
+                    raise ValueError("ungrounded journey plan")
+                plan = deepcopy(plan)
+            except Exception:
+                # Fail closed on unknown wishes. This general fallback retains
+                # the user's request as unresolved; it cannot invent a venue or
+                # fall through into the old scenario-specific parser.
+                plan = {
+                    "provider": "rules", "order": "suggested", "stages": [{
+                        "source_quote": request["query"][:500],
+                        "search_query": request["query"][:300],
+                        "kind": "unresolved", "named_place": None, "cuisine": None,
+                    }], "clarification_questions": [text["plan_question"]],
+                    "warnings": [text["plan_failed"]],
+                }
+                planned_degraded = True
+            response["journey_plan"] = plan
+            response["warnings"].extend(plan["warnings"])
+            response["clarification_questions"].extend(plan["clarification_questions"])
+            # An empty stage list is deliberate broad discovery. Every concrete
+            # goal, including a lone meal/name/activity, gets one distinct stop.
+            stages = tuple(stage["search_query"] if stage["kind"] != "unresolved" else ""
+                           for stage in plan["stages"])
+            planned_degraded |= bool(plan["clarification_questions"])
+        else:
+            stages = journey_stages(request["query"])
         stage_ids: list[list[str]] = []
         missing_stages: list[int] = []
         if stages:
             # Reuse lexical/name retrieval independently for each destination,
             # while keeping the total candidate and provider work bounded.
-            active_stages = stages[:request["limit"]]
-            limit = max(1, self.candidate_limit // len(active_stages))
+            stage_limit = 6 if plan is not None else request["limit"]
+            if plan is not None:
+                concrete = 0
+                active_stages = []
+                for stage, query in zip(plan["stages"], stages, strict=True):
+                    concrete += stage["kind"] != "unresolved"
+                    active_stages.append(query if concrete <= stage_limit else "")
+                # Unresolved goals retain their original numbers but do not
+                # consume a concrete stop slot or provider candidate allowance.
+                executable = min(concrete, stage_limit)
+                overflow = concrete > stage_limit
+            else:
+                active_stages = stages[:stage_limit]
+                executable = len(active_stages)
+                overflow = len(stages) > len(active_stages)
+            limit = max(1, self.candidate_limit // max(1, executable))
 
-            async def retrieve_stage(query: str) -> tuple[list[JSON], list[str], bool]:
+            async def retrieve_stage(index: int, query: str) -> tuple[list[JSON], list[str], bool]:
                 if not query:
                     return [], [], False
                 return await self._retrieve(
                     {**request, "query": query}, candidate_limit=limit, allow_fallback=False,
+                    stage=plan["stages"][index] if plan is not None else None,
                 )
 
-            results = await asyncio.gather(*(retrieve_stage(stage) for stage in active_stages))
+            results = await asyncio.gather(*(retrieve_stage(index, stage)
+                                            for index, stage in enumerate(active_stages)))
             unique = {}
-            degraded = False
+            degraded = planned_degraded
             for places, warnings, failed in results:
                 stage_ids.append([place["id"] for place in places])
                 unique.update((place["id"], place) for place in places)
                 response["warnings"].extend(warnings)
                 degraded |= failed
             candidates = list(unique.values())
-            if len(stages) > len(active_stages):
-                response["warnings"].append(text["stage_limit"].format(limit=request["limit"]))
+            if overflow:
+                response["warnings"].append(text["plan_limit" if plan is not None else "stage_limit"].format(limit=stage_limit))
                 degraded = True
         else:
-            candidates, warnings, degraded = await self._retrieve(request)
+            candidates, warnings, degraded = await self._retrieve(
+                request, allow_fallback=plan is None, apply_legacy_matching=plan is None,
+            )
+            degraded |= planned_degraded
             response["warnings"].extend(warnings)
         candidates, warnings, context_degraded = await self._enrich(candidates, request)
         response["warnings"].extend(warnings)
@@ -508,6 +582,7 @@ class DefaultRecommendationService:
         offset = 0
         selected = []
         selected_stage_orders: list[int] = []
+        route_attempts = 0
         pace = walking_preference(request["query"])
         origin = request["origin"]
 
@@ -527,7 +602,7 @@ class DefaultRecommendationService:
         if stages:
             by_id = {place["id"]: (place, evaluations) for place, evaluations in eligible}
             groups = [[by_id[place_id] for place_id in ids if place_id in by_id] for ids in stage_ids]
-            if len(groups) == 2:
+            if plan is None and len(groups) == 2:
                 # Select the food stop as part of this journey, rather than an
                 # isolated highly ranked cafe across town. Coordinates only
                 # choose the bounded shortlist; only the context provider may
@@ -546,33 +621,51 @@ class DefaultRecommendationService:
             offsets = [0] * len(groups)
             completed = {}
             used: set[str] = set()
+            attempted_stages: set[int] = set()
             while True:
                 batch = []
                 reserved = set(used)
                 anchor = request["origin"]
-                for index, group in enumerate(groups):
+                indices = range(len(groups))
+                if plan is not None:
+                    # Give every concrete goal its first route attempt before
+                    # spending the bounded allowance on an earlier retry.
+                    indices = sorted(indices, key=lambda index: index in attempted_stages)
+                prospective = {index: value[0]["location"] for index, value in completed.items()}
+                for index in indices:
+                    group = groups[index]
+                    if plan is not None:
+                        anchor = next((prospective[previous] for previous in range(index - 1, -1, -1)
+                                       if previous in prospective), origin)
                     if index in completed:
                         anchor = completed[index][0]["location"]
                         continue
-                    if pace:
+                    if pace or plan is not None:
                         # Prefer shorter/longer transfers within this stage,
                         # anchored to the preceding chosen stop. This only
                         # selects candidates; measured routes remain explicit
                         # and the requested stage order is never changed.
+                        following = next((later[0][0]["location"] for later in groups[index + 1:] if later), None)
                         group[offsets[index]:] = sorted(
-                            group[offsets[index]:], key=lambda item: proximity(item, anchor),
+                            group[offsets[index]:], key=lambda item: proximity(item, anchor) + (
+                                proximity(item, following) if plan is not None and following is not None else 0
+                            ),
                             reverse=pace == "long_walk",
                         )
                     while offsets[index] < len(group) and group[offsets[index]][0]["id"] in reserved:
                         offsets[index] += 1
-                    if offsets[index] < len(group) and len(batch) < self.route_concurrency:
+                    if (offsets[index] < len(group) and len(batch) < self.route_concurrency
+                            and (plan is None or route_attempts + len(batch) < 6)):
                         item = group[offsets[index]]
                         offsets[index] += 1
                         batch.append((index, item))
+                        attempted_stages.add(index)
                         reserved.add(item[0]["id"])
                         anchor = item[0]["location"]
+                        prospective[index] = anchor
                 if not batch:
                     break
+                route_attempts += len(batch)
                 routes = await asyncio.gather(*(self._route([item[0]], request) for _, item in batch))
                 for (index, (place, evaluations)), route in zip(batch, routes, strict=True):
                     if route is None:
@@ -590,12 +683,15 @@ class DefaultRecommendationService:
             if missing_stages:
                 degraded = True
                 response["warnings"].extend(text["stage_missing"].format(order=index) for index in missing_stages)
-        while not stages and offset < len(eligible) and len(selected) < request["limit"]:
+        while (not stages and offset < len(eligible) and len(selected) < request["limit"]
+               and (plan is None or route_attempts < 6)):
             # Route only as many candidates as can still be returned. A longer
             # outing is a visible alternative, not a reason to scan the pool.
             needed = request["limit"] - len(selected)
-            batch = eligible[offset : offset + min(self.route_concurrency, needed)]
+            remaining_attempts = 6 - route_attempts if plan is not None else self.route_concurrency
+            batch = eligible[offset : offset + min(self.route_concurrency, needed, remaining_attempts)]
             offset += len(batch)
+            route_attempts += len(batch)
             routes = await asyncio.gather(*(self._route([item[0]], request) for item in batch))
             for (place, evaluations), route in zip(batch, routes, strict=True):
                 if route is None:
@@ -606,12 +702,14 @@ class DefaultRecommendationService:
                 selected.append((place, evaluations, route, visit, total))
         if pace and not stages:
             selected.sort(key=lambda item: item[2]["distance_meters"], reverse=pace == "long_walk")
-        # Only the final (at most three) alternatives get generated text. Run
-        # their bounded calls together so three slow providers use one timeout
-        # window, not three, and keep gather's stable input/result ordering.
+        # Only returned alternatives/stops get generated text. Run their
+        # bounded calls together so slow providers use one timeout
+        # window, and keep gather's stable input/result ordering.
         explanations = await asyncio.gather(*(
-            self._explain(place, evaluations, request, total)
-            for place, evaluations, _, _, total in selected
+            self._explain(place, evaluations, request, total,
+                          plan["stages"][selected_stage_orders[index] - 1]
+                          if plan is not None and stages else None)
+            for index, (place, evaluations, _, _, total) in enumerate(selected)
         ))
         for (place, evaluations, route, visit, total), explanation in zip(
             selected, explanations, strict=True
@@ -658,7 +756,10 @@ class DefaultRecommendationService:
             response["warnings"].append(text["no_match"])
             if missing_stages:
                 response["status"] = "needs_clarification"
-                response["clarification_questions"] = [text["stage_missing"].format(order=index) for index in missing_stages]
+                response["clarification_questions"] = _dedupe([
+                    *response["clarification_questions"],
+                    *(text["stage_missing"].format(order=index) for index in missing_stages),
+                ])[:5]
         return self._finish(response)
 
     async def build_itinerary(self, request: JSON) -> JSON:
