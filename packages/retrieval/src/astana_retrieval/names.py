@@ -116,6 +116,26 @@ class NameMention:
     key: str | None
 
 
+def maximal_source_mentions(found: dict[str, list[NameMention]]) -> dict[str, list[NameMention]]:
+    """Keep complete source names over contained aliases, per query occurrence.
+
+    An independent shorter mention still identifies its own destination. Equal
+    spans retain all source identities/alias evidence. Apply this separately to
+    positive and negative mentions, so a longer excluded name cannot exclude an
+    independently requested shorter one. The interval sweep is O(M log M).
+    """
+    spans = sorted({(mention.start, mention.end) for values in found.values() for mention in values},
+                   key=lambda span: (span[0], -span[1]))
+    maximal = set()
+    furthest = -1
+    for start, end in spans:
+        if end > furthest:
+            maximal.add((start, end))
+            furthest = end
+    return {place_id: [mention for mention in values if (mention.start, mention.end) in maximal]
+            for place_id, values in found.items()}
+
+
 def exact_source_mentions(text: str, aliases: list[tuple[str, str | None]]) -> list[NameMention]:
     """A structured destination must match an entire source alias, not its suffix."""
     value = normalize(text).strip(" \t\r\n\"'«»“”‘’")

@@ -54,3 +54,12 @@ def test_named_mall_uses_its_actual_source_identity(name, identifier):
 
 def test_generic_mall_type_does_not_become_a_name_alias_for_every_mall():
     assert not search("shopping mall", named_place="shopping mall", categories=["mall"])["hits"]
+
+
+@pytest.mark.parametrize("query", ["Mega Silk Way", "Сначала хочу зайти в MEGA Silk Way"])
+def test_complete_real_mall_name_does_not_admit_the_shorter_cafe_name(query):
+    result = search(query, "ru")
+    selected = {place["id"]: place for place in result["places"]}
+    assert MEGA in selected
+    assert MEGA_CAFE not in selected
+    assert all("mall" in place["categories"] for place in selected.values())

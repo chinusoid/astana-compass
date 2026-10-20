@@ -12,7 +12,7 @@ from typing import Any
 from astana_contracts import JSON, PlaceRepository, validate_payload
 
 from .lexicon import CATEGORY_ALIASES, CATEGORY_GROUPS, FOOD_CATEGORIES, LEXICON_VERSION, document_terms, known_cuisines, normalize, understand
-from .names import exact_source_mentions, goal_text, mentions, source_names, source_texts, typo_expansions, words
+from .names import exact_source_mentions, goal_text, maximal_source_mentions, mentions, source_names, source_texts, typo_expansions, words
 
 DYNAMIC_KEYS = frozenset({"open_at_requested_time", "weather_suitable"})
 STRATEGY = f"snapshot-bm25-{LEXICON_VERSION}"
@@ -122,10 +122,19 @@ class LexicalRetriever:
         required_categories = {CATEGORY_ALIASES.get(category, category) for category in request.get("categories", [])}
         structured_names = {place_id: exact_source_mentions(required_name, names) if required_name else []
                             for place_id, names in aliases.items()}
-        named_ids = {place_id for place_id, found in structured_names.items() if found}
         goal, has_anchor = goal_text(request["query"], list(aliases.values()))
-        name_mentions = {place_id: mentions(goal, names) for place_id, names in aliases.items()}
-        excluded_names = {place_id for place_id, names in aliases.items() if mentions(goal, names, excluded=True)}
+        raw_mentions = {place_id: mentions(goal, names) for place_id, names in aliases.items()}
+        name_mentions = maximal_source_mentions(raw_mentions)
+        # A cropped structured name cannot restore a shorter source identity
+        # mentioned only inside a different, complete source destination.
+        for place_id in aliases:
+            if raw_mentions[place_id] and not name_mentions[place_id]:
+                structured_names[place_id] = []
+        named_ids = {place_id for place_id, found in structured_names.items() if found}
+        excluded_mentions = maximal_source_mentions({
+            place_id: mentions(goal, names, excluded=True) for place_id, names in aliases.items()
+        })
+        excluded_names = {place_id for place_id, found in excluded_mentions.items() if found}
         protected = list(goal)
         literal_terms = set()
         for found in name_mentions.values():

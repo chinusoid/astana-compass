@@ -81,6 +81,60 @@ def test_structured_name_is_case_normalized_complete_and_independent_of_paraphra
     assert result["hits"][0]["score"] >= 100
 
 
+def test_complete_positive_source_name_does_not_admit_a_contained_shorter_destination():
+    requested = fixture("Harbor Lantern Centre", category="mall")
+    contained = fixture("Lantern", category="cafe")
+    prefix = fixture("Harbor Lantern", category="restaurant")
+    repository = Repository([contained, prefix, requested])
+    result = search(repository, "First visit Harbor Lantern Centre", "en")
+    assert ids(result) == [requested["id"]]
+    assert not search(repository, "Harbor Lantern Centre", "en", named_place="Lantern")["hits"]
+
+
+@pytest.mark.parametrize("query", [
+    "First visit Harbor Lantern Centre, then Lantern",
+    "First Lantern, then visit Harbor Lantern Centre",
+])
+def test_independent_shorter_positive_source_name_is_preserved(query):
+    long = fixture("Harbor Lantern Centre", category="mall")
+    short = fixture("Lantern", category="cafe")
+    assert set(ids(search(Repository([short, long]), query, "en"))) == {long["id"], short["id"]}
+
+
+@pytest.mark.parametrize("query,expected", [
+    ("not Harbor Lantern Centre but Lantern", "short"),
+    ("Harbor Lantern Centre, not Lantern", "long"),
+])
+def test_nested_source_names_keep_positive_and_negative_occurrences_separate(query, expected):
+    long = fixture("Harbor Lantern Centre", category="mall")
+    short = fixture("Lantern", category="cafe")
+    assert ids(search(Repository([short, long]), query, "en")) == [{"long": long, "short": short}[expected]["id"]]
+
+
+def test_equal_source_name_spans_preserve_distinct_source_records_and_alias_evidence():
+    from astana_retrieval.names import NameMention, maximal_source_mentions
+
+    found = {"long": [NameMention(0, 20, None), NameMention(0, 20, "name:en")],
+             "same_name_branch": [NameMention(0, 20, None)],
+             "short": [NameMention(0, 8, None), NameMention(25, 33, None)]}
+    before = deepcopy(found)
+    result = maximal_source_mentions(found)
+    assert result["long"] == found["long"]
+    assert result["same_name_branch"] == found["same_name_branch"]
+    assert result["short"] == [NameMention(25, 33, None)]
+    assert found == before
+
+
+def test_source_name_priority_keeps_independently_requested_food_and_types_strict():
+    garden = fixture("Botanical Garden", category="park")
+    cafe = fixture("Garden", category="cafe", cuisine="sushi")
+    repository = Repository([cafe, garden])
+    assert ids(search(repository, "visit Botanical Garden", "en", categories=["park", "garden"])) == [garden["id"]]
+    assert not search(repository, "Botanical Garden", "en", named_place="Botanical Garden", categories=["restaurant"])["hits"]
+    assert not search(repository, "Botanical Garden", "en", named_place="Botanical Garden", cuisine="sushi")["hits"]
+    assert ids(search(repository, "Botanical Garden and sushi", "en", categories=["cafe"], cuisine="sushi")) == [cafe["id"]]
+
+
 def test_semantic_place_type_cannot_match_incidental_description_word():
     cafe = fixture("Coffee", category="cafe", description="Next to a postcard shop and swimming pool")
     assert not search(Repository([cafe]), "postcard shop", categories=["gift_shop"])["hits"]
