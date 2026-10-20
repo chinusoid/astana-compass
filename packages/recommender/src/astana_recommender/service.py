@@ -131,6 +131,7 @@ class DefaultRecommendationService:
         candidate_limit: int = 24,
         radius_meters: float = 10_000,
         timeout_seconds: float = 8,
+        planner_timeout_seconds: float | None = None,
         request_budget_seconds: float = 26,
         default_visit_seconds: int = 1_200,
         route_concurrency: int = 4,
@@ -150,6 +151,11 @@ class DefaultRecommendationService:
             or isinstance(timeout_seconds, bool)
             or not math.isfinite(timeout_seconds)
             or timeout_seconds <= 0
+            or (planner_timeout_seconds is not None and (
+                isinstance(planner_timeout_seconds, bool)
+                or not math.isfinite(planner_timeout_seconds)
+                or planner_timeout_seconds <= 0
+            ))
             or isinstance(request_budget_seconds, bool)
             or not math.isfinite(request_budget_seconds)
             or request_budget_seconds <= 0
@@ -163,6 +169,7 @@ class DefaultRecommendationService:
         self.candidate_limit = candidate_limit
         self.radius_meters = radius_meters
         self.timeout_seconds = timeout_seconds
+        self.planner_timeout_seconds = planner_timeout_seconds if planner_timeout_seconds is not None else timeout_seconds
         self.request_budget_seconds = request_budget_seconds
         self.default_visit_seconds = default_visit_seconds
         self.route_concurrency = route_concurrency
@@ -182,8 +189,8 @@ class DefaultRecommendationService:
         budget = _WORK_BUDGET.get()
         return budget is None or budget.remaining() > 0
 
-    async def _await(self, operation: Callable[[], Awaitable[_Result]]) -> _Result:
-        timeout = self.timeout_seconds
+    async def _await(self, operation: Callable[[], Awaitable[_Result]], *, timeout_seconds: float | None = None) -> _Result:
+        timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
         budget = _WORK_BUDGET.get()
         request_limited = False
         if budget is not None:
@@ -556,7 +563,10 @@ class DefaultRecommendationService:
         planned_degraded = False
         if self.planner is not None:
             try:
-                plan = await self._await(lambda: self.planner.plan(request["query"], request["locale"]))
+                plan = await self._await(
+                    lambda: self.planner.plan(request["query"], request["locale"]),
+                    timeout_seconds=self.planner_timeout_seconds,
+                )
                 validate_payload("JourneyPlan", plan)
                 if any(stage["source_quote"] not in request["query"] or (
                     stage["named_place"] is not None and stage["named_place"] not in stage["source_quote"]

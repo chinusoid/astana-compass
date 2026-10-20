@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+import time
 import uuid
 
 from fastapi import FastAPI, Request, Query
@@ -67,6 +68,7 @@ class BoundaryMiddleware:
             return await self.app(scope, receive, send)
         request_id = str(uuid.uuid4())
         scope.setdefault("state", {})["request_id"] = request_id
+        scope["state"]["started_at"] = time.monotonic()
         chunks, size = [], 0
         # Read with a deadline: Content-Length alone does not bound chunked bodies.
         try:
@@ -221,6 +223,16 @@ def create_app(settings=None, services=None):
 
     @app.exception_handler(APIError)
     async def api_error(request, exc):
+        if exc.code == "provider_unavailable":
+            # The support number must identify the failure without logging the
+            # wish, exact location, credentials or exception/provider contents.
+            logger.warning(
+                "API unavailable: request_id=%s route=%s reason=%s elapsed_ms=%d",
+                request.state.request_id,
+                getattr(request.scope.get("route"), "path", "unknown"),
+                getattr(request.state, "failure_reason", "unavailable"),
+                max(0, round((time.monotonic() - request.state.started_at) * 1000)),
+            )
         return error_response(request.state.request_id, exc.code)
 
     @app.exception_handler(RequestValidationError)
@@ -244,18 +256,25 @@ def create_app(settings=None, services=None):
 
     async def call(request, operation):
         if app.state.services is None:
+            request.state.failure_reason = "not_ready"
             raise APIError("provider_unavailable")
         await acquire_gate()
         try:
             async with asyncio.timeout(settings.request_timeout_seconds):
                 return await operation(app.state.services)
         except RecommenderError as exc:
+            request.state.failure_reason = "recommender_error"
             raise APIError(exc.code if exc.code in STATUS else "provider_unavailable") from None
         except APIError:
             raise
-        except (TimeoutError, ContractValidationError):
+        except TimeoutError:
+            request.state.failure_reason = "deadline"
+            raise APIError("provider_unavailable") from None
+        except ContractValidationError:
+            request.state.failure_reason = "invalid_dependency_response"
             raise APIError("provider_unavailable") from None
         except Exception:
+            request.state.failure_reason = "dependency_error"
             raise APIError("provider_unavailable") from None
         finally:
             app.state.gate.release()

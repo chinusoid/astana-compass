@@ -150,7 +150,13 @@ async def build_services(settings, stack, *, progress=None):
             ))
             validate_port(planner, JourneyPlanner)
         progress.enter("recommender")
-        recommender = DefaultRecommendationService(repository, retriever, context, generator=generator, planner=planner)
+        recommender = DefaultRecommendationService(
+            repository, retriever, context, generator=generator, planner=planner,
+            planner_timeout_seconds=10,
+            # Leave time for final contract checks/serialization before the
+            # outer HTTP deadline; a longer model plan shares this same budget.
+            request_budget_seconds=min(26, max(0.1, settings.request_timeout_seconds - 2)),
+        )
         validate_port(recommender, RecommendationService)
         progress.enter("intent")
         from astana_ai_providers.intents import create_intent_analyzer

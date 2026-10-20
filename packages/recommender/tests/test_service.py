@@ -1332,6 +1332,26 @@ class BudgetClock:
 
 
 class RequestBudgetTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
+    async def test_more_thoughtful_planner_gets_its_own_limit_inside_shared_budget(self):
+        planner = Planner([])
+        original = planner.plan
+
+        async def thoughtful_plan(query, locale):
+            await asyncio.sleep(0.06)
+            return await original(query, locale)
+
+        planner.plan = thoughtful_plan
+        self.setup_service([place(1)], planner=planner, timeout_seconds=0.02,
+                           planner_timeout_seconds=0.5, request_budget_seconds=1)
+        result = await self.service.recommend(request())
+        self.assertEqual(result["journey_plan"], planner.value)
+        self.assertEqual(len(result["recommendations"]), 1)
+
+    async def test_planner_limit_rejects_nonpositive_or_nonfinite_values(self):
+        for value in (0, -1, True, math.inf, math.nan):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.setup_service(planner_timeout_seconds=value)
+
     async def test_fast_clock_bounds_retry_waves_and_keeps_completed_stage(self):
         clock = BudgetClock()
         stages = [planned_stage("coffee"), planned_stage("museum")]
