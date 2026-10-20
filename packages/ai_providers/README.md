@@ -62,6 +62,14 @@ For a true named destination, incidental category hints are cleared only when
 the text outside its exact name contains solely visit/order/preposition filler.
 Independent wording such as `cafe Mega` or `watch a movie at MEGA` keeps its type
 constraint. Generic type-only labels keep their category constraints as well.
+
+Indefinite wishes such as a cultural/art place, somewhere to read books or a
+shopping centre are actionable without a venue name or narrower subtype. An
+unresolved stage is normalized only when its complete source quote is a known
+generic type/purpose plus visit/indefinite context. Unknown remaining words,
+proper names, exclusions and ambiguous relations stay unresolved. This narrow
+correction adds search categories, never venue facts, and retains plan questions
+and warnings. It does not veto unfamiliar activities already understood by the model.
 A broad discovery walk can keep `stages: []` to allow diverse recommendations.
 Explicit sequences take precedence over suggested logical ordering, while
 unsupported or ambiguous wishes remain visible as `unresolved` stages with a

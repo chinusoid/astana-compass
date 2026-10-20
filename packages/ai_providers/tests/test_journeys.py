@@ -629,6 +629,106 @@ def test_independent_cafe_type_outside_museum_name_is_not_weakened_by_name_hint_
     asyncio.run(check())
 
 
+@pytest.mark.parametrize("query,locale,categories", [
+    ("сходить в какое-нибудь место культурного искусства", "ru", ["museum", "gallery", "arts_centre", "theatre"]),
+    ("Visit some cultural art place", "en", ["museum", "gallery", "arts_centre", "theatre"]),
+    ("бір өнер орынға барғым келеді", "kk", ["museum", "gallery", "arts_centre", "theatre"]),
+    ("Хочу зайти в какой-нибудь торговый центр", "ru", ["mall"]),
+    ("go shopping somewhere", "en", ["mall", "shop"]),
+    ("Хочу куда-нибудь за покупками", "ru", ["mall", "shop"]),
+    ("Хочу где-нибудь почитать книги", "ru", ["library"]),
+    ("somewhere to read books", "en", ["library"]),
+    ("кітап оқу", "kk", ["library"]),
+])
+def test_clear_broad_category_goal_is_actionable_even_when_hosted_labels_it_unresolved(query, locale, categories):
+    answer = plan([stage(query, kind="unresolved")], questions=["Please clarify the subtype."])
+    result = hosted(query, answer, locale=locale)
+    assert result["provider"] == "openai"
+    assert result["stages"][0] == stage(query, kind="activity", categories=categories)
+    assert result["clarification_questions"] == answer["clarification_questions"]
+
+
+@pytest.mark.parametrize("query,named", [
+    ("Visit the Library of Quantum Oracles", None),
+    ("Хочу в музей неизвестного назначения", None),
+    ("Visit the shopping mall named Mystery", None),
+    ('Visit "Art"', None),
+    ("Visit 'Art'", None),
+    ("Visit Art Mystery", "Art Mystery"),
+    ("understand quantum harmony", None),
+    ("art or something completely different", None),
+    ("before the museum", None),
+])
+def test_normalization_cannot_resolve_unknown_names_purposes_or_relations(query, named):
+    answer = plan([stage(query, kind="unresolved", named=named)], questions=["Which activity or destination?"])
+    result = hosted(query, answer)
+    assert result["stages"][0]["kind"] == "unresolved"
+    assert result["clarification_questions"]
+
+
+def test_broad_goal_recovery_does_not_fill_an_unknown_independent_goal():
+    query = "Visit a library and understand quantum harmony"
+    answer = plan([stage("Visit a library", kind="unresolved"), stage("understand quantum harmony", kind="unresolved")],
+                  questions=["What is the second activity?"])
+    result = hosted(query, answer)
+    assert result["provider"] == "openai"
+    assert [item["kind"] for item in result["stages"]] == ["activity", "unresolved"]
+    assert result["stages"][0]["categories"] == ["library"]
+    assert result["stages"][1]["categories"] == []
+
+
+@pytest.mark.parametrize("query", [
+    "Visit only a library", "Хочу только музей", "Visit art without a museum",
+    "not a museum", "не хочу музей", "кроме музея",
+])
+def test_broad_goal_recovery_never_drops_negation_or_exclusivity(query):
+    answer = plan([stage(query, kind="unresolved")], questions=["Please clarify."])
+    result = hosted(query, answer)
+    assert not any(item["kind"] != "unresolved" for item in result["stages"])
+
+
+def test_original_three_goal_query_recovers_source_backed_cultural_goal_without_extra_model_calls():
+    from datetime import datetime, timedelta
+    from pathlib import Path
+    from astana_city_data import SnapshotRepository
+    from astana_recommender import DefaultRecommendationService
+    from astana_retrieval import LexicalRetriever
+    from packages.recommender.tests.test_service import Context, request
+
+    path = Path(__file__).resolve().parents[3] / "data/samples/astana-osm.json"
+    snapshot = json.loads(path.read_text(encoding="utf-8"))
+    now = max(datetime.fromisoformat(item["retrieved_at"].replace("Z", "+00:00"))
+              for source in snapshot["places"] for item in source["evidence"]) + timedelta(hours=1)
+    query = "Хочу сходить покушать пиццу а потом в ботанический сад. А потом сходить в какое-нибудь место культурного искусства"
+    answer = plan([
+        stage("покушать пиццу", "пицца", kind="meal", cuisine="pizza", categories=["restaurant", "cafe"]),
+        stage("в ботанический сад", "ботанический сад", categories=["botanical_garden"]),
+        stage("сходить в какое-нибудь место культурного искусства", kind="unresolved"),
+    ], order="explicit", questions=["Какой вид искусства интересен?"])
+
+    async def check():
+        repository, context, calls = SnapshotRepository(path, clock=lambda: now), Context(), []
+        def handler(payload):
+            calls.append(True)
+            return httpx.Response(200, json=envelope(answer))
+        async with create_journey_planner("openai", "gpt-6-luna", SECRET, transport=httpx.MockTransport(handler)) as planner:
+            service = DefaultRecommendationService(repository, LexicalRetriever(repository), context,
+                                                   planner=planner, clock=lambda: now)
+            result = await service.recommend(request(query=query, locale="ru", available_seconds=60))
+        validate_payload("RecommendationResponse", result)
+        assert result["journey_plan"]["provider"] == "openai"
+        assert all(item["kind"] != "unresolved" for item in result["journey_plan"]["stages"])
+        core = {place["id"]: place for place in result["places"]}
+        ids = [item["place_id"] for item in result["recommendations"]]
+        assert len(ids) == 3 and len(set(ids)) == 3
+        assert ids[1] == "osm:way/1196402246"
+        assert {"museum", "gallery", "arts_centre", "theatre"}.intersection(core[ids[2]]["categories"])
+        assert len(calls) == 1 and len(context.routes) == 3
+        assert result["journey_plan"]["clarification_questions"] == answer["clarification_questions"]
+        assert all(not place["is_synthetic"] for place in result["places"])
+    asyncio.run(check())
+
+
 @pytest.mark.parametrize("query,first,second", [
     ("Хочу в музей а по пути зайти в библиотеку", "библиотеку", "музей"),
     ("По пути в музей, зайти в библиотеку", "библиотеку", "музей"),

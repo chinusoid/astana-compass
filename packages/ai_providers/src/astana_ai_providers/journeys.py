@@ -119,6 +119,26 @@ _DISCOVERY_WORDS = frozenset(
     "жай қызықты серуен серуендеу серуендегім келеді ұсыныңыз ұсын бағыт қала қаланы астана астанада "
     "мен маған біз бізге бүгін".split()
 )
+_BROAD_GOAL_CONTEXT = _NAME_VISIT_CONTEXT | frozenset(
+    "some somewhere anywhere any place places something "
+    "какое какой какую каком какой-нибудь какое-нибудь куда где место месте любое любой "
+    "нибудь кое за книги книгу зайти попасть "
+    "бір қандай да жерге жерде орын орынға барғым келеді".replace("-", " ").split()
+)
+_BROAD_GOALS = [
+    ((category,), "meal" if category in {"cafe", "restaurant"} else "activity",
+     re.compile(r"(?<!\w)(?:" + "|".join(re.escape(alias) for alias in aliases.split("|")) + r")(?!\w)", re.I))
+    for category, aliases in _GENERIC_TYPES.items()
+] + [
+    (("museum", "gallery", "arts_centre", "theatre"), "activity", re.compile(
+        r"(?<!\w)(?:культурн(?:ого|ое|ый|ую|ом|ой|ые|ых)(?:\s+искусств(?:а|о|у|ом)?)?|"
+        r"искусств(?:а|о|у|ом)?|cultur(?:e|al)(?:\s+art)?|art(?:\s+and\s+culture)?|"
+        r"мәдени(?:ет)?(?:\s+өнер)?|өнер)(?!\w)", re.I)),
+    (("library",), "activity", re.compile(
+        r"(?<!\w)(?:read\s+(?:some\s+)?books?|почитать(?:\s+книг[иу])?|читать\s+книг[иу]|кітап\s+оқу)(?!\w)", re.I)),
+    (("mall", "shop"), "activity", re.compile(
+        r"(?<!\w)(?:shopping|покупк(?:и|ами|ам)|сауда\s+жасау)(?!\w)", re.I)),
+]
 _COPY = {
     "rules": (
         "Этапы выделены локальными правилами; смысл и порядок требуют проверки.",
@@ -350,6 +370,37 @@ def _normalize_types(stages: list[dict[str, Any]]) -> None:
         stage["categories"] = categories
 
 
+def _normalize_actionable_goals(stages: list[dict[str, Any]]) -> None:
+    """Recover only complete generic wishes; unknown names/purposes stay unresolved.
+
+    These positive patterns are normalization aids, never a vocabulary that can
+    veto an unfamiliar activity interpreted by the model. Every non-context word
+    must belong to the same recognized goal, and no named destination is invented.
+    """
+    for stage in stages:
+        quote = stage["source_quote"]
+        if (stage["kind"] != "unresolved" or stage["named_place"] is not None
+                or stage["cuisine"] is not None or len(quote) > 300
+                or any(char in quote for char in "\"'«»“”‘’")
+                or _NEGATION_WORD.search(quote) or _relative_markers(quote) or _VIA.search(quote)):
+            continue
+        matches = sorted(((-len(match.group()), match.start(), match.end(), categories, kind)
+                          for categories, kind, pattern in _BROAD_GOALS for match in pattern.finditer(quote)))
+        covered: list[tuple[int, int]] = []
+        goals = set()
+        remainder = list(quote)
+        for _, start, end, categories, kind in matches:
+            if any(start < right and left < end for left, right in covered):
+                continue
+            covered.append((start, end))
+            goals.add((categories, kind))
+            remainder[start:end] = " " * (end - start)
+        if len(goals) != 1 or _concepts("".join(remainder)).difference(_BROAD_GOAL_CONTEXT):
+            continue
+        categories, kind = goals.pop()
+        stage.update(kind=kind, named_place=None, cuisine=None, categories=list(categories), search_query=quote)
+
+
 def _rules(query: str, locale: str) -> dict[str, Any]:
     stages = []
     relative_order = bool(_relative_markers(query))
@@ -440,8 +491,15 @@ _INSTRUCTIONS = (
     "category. Named destinations may use an empty categories array when their type "
     "is not established by the user's text. Every property must be returned. "
     "kind meal is for eating/drinking wishes, named_place for an explicit destination, "
-    "activity for other clear activities, unresolved for ambiguity. Any cuisine requires "
-    "kind meal. Preserve explicit order even if inconvenient; understand before/after "
+    "activity for other clear activities, unresolved for ambiguity. Any cuisine requires kind meal. "
+    "A broad but actionable category wish is activity, not unresolved: asking for "
+    "some cultural/art place, somewhere to read books, or a shopping centre does not "
+    "require a venue name, exhibition, item to buy or narrower subtype. Use category "
+    "filters and let later source retrieval establish available candidates. Indefinite "
+    "words such as any, somewhere and какое-нибудь permit that later source selection; "
+    "they do not make the user's activity unclear. Preserve "
+    "unknown proper names and genuinely unclear purposes for clarification. "
+    "Preserve explicit order even if inconvenient; understand before/after "
     "and reversed sentence order. An intermediate stop described with по пути, "
     "on the way, en route or жолай must come BEFORE the final destination even "
     "when mentioned after it. For 'destination, and on the way intermediate', "
@@ -646,6 +704,7 @@ def _ground(raw: Any, query: str, provider: str, locale: str) -> dict[str, Any]:
     for value in result["clarification_questions"] + result["warnings"]:
         if not value.strip() or not _safe_text(value):
             raise ValueError("invalid planning text")
+    _normalize_actionable_goals(result["stages"])
     if any(stage["kind"] == "unresolved" for stage in result["stages"]) and not result["clarification_questions"]:
         raise ValueError("unresolved goal needs clarification")
     _normalize_types(result["stages"])
