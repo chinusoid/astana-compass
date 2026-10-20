@@ -215,6 +215,7 @@ export default function CompassApp({
     plannerSnapshot.current = { form, selected };
   }, [form, selected]);
   const geoVersion = useRef(0);
+  const geoMapFixVersion = useRef(-1);
   const resultHeading = useRef<HTMLHeadingElement>(null);
   const planHeading = useRef<HTMLHeadingElement>(null);
 
@@ -636,14 +637,18 @@ export default function CompassApp({
         setPicking(false);
       },
       (error) => {
-        if (version === geoVersion.current)
-          setGeoState(
-            error.code === 1
-              ? "denied"
-              : error.code === 3
-                ? "timeout"
-                : "unavailable",
-          );
+        if (version !== geoVersion.current) return;
+        if (error.code !== 1 && geoMapFixVersion.current === version) {
+          setGeoState("idle");
+          return;
+        }
+        setGeoState(
+          error.code === 1
+            ? "denied"
+            : error.code === 3
+              ? "timeout"
+              : "unavailable",
+        );
       },
     );
   }
@@ -2163,8 +2168,7 @@ export default function CompassApp({
             enabled={mapEnabled}
             provider={mapProvider}
             onLocationFound={() => {
-              geoVersion.current++;
-              geoCancel.current?.();
+              geoMapFixVersion.current = geoVersion.current;
               setGeoState("idle");
             }}
             onEnable={() => setMapEnabled(true)}

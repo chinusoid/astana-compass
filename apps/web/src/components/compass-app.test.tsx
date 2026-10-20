@@ -238,7 +238,7 @@ it("geolocation success clears an earlier denial and ignores callbacks after a m
   expect(container.querySelector(".start-card .warning-text")).toBeNull();
 });
 
-it("a map fix cancels pending planner geolocation so stale errors cannot return or replace a manual start", async () => {
+it("a map fix suppresses later temporary planner errors without replacing a manual start", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => Response.json({ places: [], next_cursor: null })),
@@ -288,7 +288,7 @@ it("a map fix cancels pending planner geolocation so stale errors cannot return 
       } as GeolocationPosition);
       attempts[1].fail({ code: 1 } as GeolocationPositionError);
     });
-    expect(attempts).toHaveLength(2);
+    expect(attempts).toHaveLength(3);
     expect(container.querySelector(".start-card .warning-text")).toBeNull();
     expect(
       screen.getByRole("spinbutton", { name: t("ru", "latitude") }),
@@ -302,11 +302,58 @@ it("a map fix cancels pending planner geolocation so stale errors cannot return 
     );
     // A later user request still reports its own real permission denial.
     fireEvent.click(screen.getByRole("button", { name: t("ru", "locate") }));
-    act(() => attempts[2].fail({ code: 1 } as GeolocationPositionError));
+    fireEvent.click(screen.getByRole("button", { name: "Map location found" }));
+    act(() => attempts[3].fail({ code: 1 } as GeolocationPositionError));
     expect(screen.getByText(t("ru", "geoPermissionDenied"))).toBeVisible();
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("ordinary map fixes preserve the manual start while a pending planner fix can still apply requested GPS coordinates", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json({ places: [], next_cursor: null })),
+  );
+  let accept!: PositionCallback;
+  vi.stubGlobal("navigator", {
+    geolocation: {
+      getCurrentPosition: vi.fn((ok) => {
+        accept = ok;
+      }),
+    },
+  });
+  const user = userEvent.setup();
+  render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Map pick" }));
+  await user.click(screen.getByRole("button", { name: "Map location found" }));
+  expect(screen.getByTestId("map")).toHaveAttribute(
+    "data-origin",
+    JSON.stringify({ lat: 51.09, lon: 71.42 }),
+  );
+  await user.click(screen.getByRole("button", { name: t("ru", "locate") }));
+  await user.click(screen.getByRole("button", { name: "Map location found" }));
+  expect(screen.getByTestId("map")).toHaveAttribute(
+    "data-origin",
+    JSON.stringify({ lat: 51.09, lon: 71.42 }),
+  );
+  act(() =>
+    accept({
+      coords: { latitude: 51.123456, longitude: 71.456789 },
+    } as GeolocationPosition),
+  );
+  expect(screen.getByTestId("map")).toHaveAttribute(
+    "data-origin",
+    JSON.stringify({ lat: 51.123456, lon: 71.456789 }),
+  );
+  expect(screen.getByTestId("map")).toHaveAttribute("data-location-found", "1");
+  expect(screen.getByRole("button", { name: t("ru", "locate") })).toBeEnabled();
 });
 
 it("automatically connects all three recommendations and keeps the whole path while browsing", async () => {
