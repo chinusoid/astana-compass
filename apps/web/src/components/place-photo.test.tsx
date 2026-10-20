@@ -161,3 +161,29 @@ it("cancels obsolete lookups and cannot render an old place photograph", async (
     screen.getByText("Иллюстрация категории", { exact: false }),
   ).toBeVisible();
 });
+
+it("clears a photograph when a record loses its source identity under the same ID", async () => {
+  fetcher.mockResolvedValue(photo);
+  const place = realPlace();
+  const { rerender } = render(<PlacePhoto place={place} locale="ru" />);
+  await waitFor(() => expect(document.querySelector("img")).not.toBeNull());
+  fireEvent.load(document.querySelector("img")!);
+  expect(screen.getByRole("img")).toBeVisible();
+  rerender(<PlacePhoto place={{ ...place, facts: [] }} locale="ru" />);
+  expect(document.querySelector("img")).toBeNull();
+  expect(
+    screen.getByText("Иллюстрация категории", { exact: false }),
+  ).toBeVisible();
+  expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it("does not refetch or abort a photograph merely because a parent copied the same place record", async () => {
+  fetcher.mockResolvedValue(photo);
+  const place = realPlace();
+  const { rerender } = render(<PlacePhoto place={place} locale="ru" />);
+  await waitFor(() => expect(document.querySelector("img")).not.toBeNull());
+  const signal = fetcher.mock.calls[0][2];
+  rerender(<PlacePhoto place={structuredClone(place)} locale="ru" />);
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(signal.aborted).toBe(false);
+});

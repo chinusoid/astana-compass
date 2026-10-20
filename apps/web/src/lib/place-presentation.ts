@@ -4,6 +4,43 @@ import { label, locales, t, type Locale } from "./i18n";
 export type PlaceFact = Place["facts"][number];
 type Translations = readonly [string, string, string];
 const labels: Record<string, Translations> = {
+  "official:website": ["Официальный сайт", "Ресми сайт", "Official website"],
+  "official:phone": [
+    "Контактный телефон",
+    "Байланыс телефоны",
+    "Contact phone",
+  ],
+  "official:address": [
+    "Адрес по официальному источнику",
+    "Ресми дереккөздегі мекенжай",
+    "Official source address",
+  ],
+  "official:ticket_office_hours": [
+    "Часы кассы",
+    "Касса уақыты",
+    "Ticket office hours",
+  ],
+  "osm:phone": [
+    "Телефон из источника",
+    "Дереккөздегі телефон",
+    "Source-listed phone",
+  ],
+  "osm:contact:phone": [
+    "Телефон из контактов источника",
+    "Дереккөздің байланыс телефоны",
+    "Source-listed contact phone",
+  ],
+  "osm:email": ["Электронная почта", "Электрондық пошта", "Email"],
+  "osm:contact:email": [
+    "Электронная почта из источника",
+    "Дереккөздегі электрондық пошта",
+    "Source-listed email",
+  ],
+  "osm:website:menu": [
+    "Меню из источника",
+    "Дереккөздегі мәзір",
+    "Source-listed menu",
+  ],
   "official:waterfront": ["У воды", "Су жағасында", "Waterfront"],
   "official:walking_paths": [
     "Прогулочные дорожки",

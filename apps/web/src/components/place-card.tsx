@@ -15,6 +15,7 @@ import { Sources, RouteNotes, Warnings } from "./details";
 import OsmAttribution from "./osm-attribution";
 import PlaceOverview from "./place-overview";
 import PlacePhoto from "./place-photo";
+import PlaceVisitGuide from "./place-visit-guide";
 import TimeBudgetNote from "./time-budget-note";
 import { factLabel, placeText } from "@/lib/place-presentation";
 
@@ -132,6 +133,7 @@ export default function PlaceCard({
           <Bookmark size={20} fill={saved ? "currentColor" : "none"} />
         </button>
       </div>
+      <PlaceVisitGuide place={place} locale={locale} compact />
       {item ? (
         <>
           <div className="timings">
@@ -212,7 +214,7 @@ export default function PlaceCard({
           </div>
         </>
       ) : null}
-      <PlaceOverview place={place} locale={locale} />
+      <PlaceOverview place={place} locale={locale} showSummary={false} />
       {!place.is_synthetic &&
         place.evidence.some(
           (e) => e.source_type === "osm" && !e.is_synthetic,

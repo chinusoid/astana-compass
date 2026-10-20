@@ -27,11 +27,28 @@ const copy = {
 type Props = { place: Place; locale: Locale; detailed?: boolean };
 
 export default function PlacePhoto(props: Props) {
-  // Reset asynchronously obtained metadata before a different identity can render.
-  return <PhotoCover key={`${props.place.id}:${props.locale}`} {...props} />;
+  const eligible = hasPhotoIdentity(props.place);
+  const qid = props.place.facts.find(
+    (fact) => fact.key === "osm:wikidata",
+  )?.value;
+  // A record can be replaced under the same ID. Revoked identity or renamed
+  // records must not retain an earlier photograph/alt text while rerendering.
+  const key = JSON.stringify([
+    props.place.id,
+    props.locale,
+    props.place.name,
+    eligible,
+    qid,
+  ]);
+  return <PhotoCover key={key} {...props} eligible={eligible} />;
 }
 
-function PhotoCover({ place, locale, detailed = false }: Props) {
+function PhotoCover({
+  place,
+  locale,
+  detailed = false,
+  eligible,
+}: Props & { eligible: boolean }) {
   const frame = useRef<HTMLElement | null>(null);
   const gradient = useId();
   const [photo, setPhoto] = useState<PlacePhotoResponse["photo"]>(null);
@@ -67,7 +84,7 @@ function PhotoCover({ place, locale, detailed = false }: Props) {
   const visiblePhoto = photo && !failed;
 
   useEffect(() => {
-    if (!hasPhotoIdentity(place)) return;
+    if (!eligible) return;
     const controller = new AbortController();
     let started = false;
     const load = () => {
@@ -98,7 +115,7 @@ function PhotoCover({ place, locale, detailed = false }: Props) {
       controller.abort();
       observer?.disconnect();
     };
-  }, [place, locale]);
+  }, [place.id, locale, eligible]);
 
   return (
     <figure

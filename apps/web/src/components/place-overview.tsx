@@ -15,10 +15,12 @@ export default function PlaceOverview({
   place,
   locale,
   detailed = false,
+  showSummary = true,
 }: {
   place: Place;
   locale: Locale;
   detailed?: boolean;
+  showSummary?: boolean;
 }) {
   const description = sourceDescription(place, locale);
   const address = ["osm:addr:street", "osm:addr:housenumber", "osm:addr:city"]
@@ -60,7 +62,7 @@ export default function PlaceOverview({
       ) : detailed ? (
         <p className="field-hint">{placeText(locale, "noDescription")}</p>
       ) : null}
-      {(address || facts.length > 0) && (
+      {showSummary && (address || facts.length > 0) && (
         <div className="source-summary">
           <p className="overview-label">{placeText(locale, "summary")}</p>
           <dl>

@@ -16,6 +16,9 @@ import {
 } from "@/lib/place-presentation";
 import PlaceOverview from "./place-overview";
 import PlaceDirectory from "./place-directory";
+import PlaceVisitGuide from "./place-visit-guide";
+import { visitText } from "@/lib/place-visit-guide";
+import guideStyles from "./place-visit-guide.module.css";
 
 export function ErrorNotice({
   error,
@@ -155,9 +158,11 @@ export function RouteNotes({
 export function PlaceFacts({
   place,
   locale,
+  visitSeconds,
 }: {
   place: Place;
   locale: Locale;
+  visitSeconds?: number;
 }) {
   const mainFacts = place.facts
     .filter((fact) => primaryFact(fact) && fact.status !== "unknown")
@@ -217,11 +222,27 @@ export function PlaceFacts({
   };
   return (
     <>
-      <PlaceOverview place={place} locale={locale} detailed />
-      <PlaceDirectory placeId={place.id} locale={locale} />
-      <h3>{placeText(locale, "amenities")}</h3>
+      <PlaceOverview
+        place={place}
+        locale={locale}
+        detailed
+        showSummary={false}
+      />
+      <PlaceVisitGuide
+        place={place}
+        locale={locale}
+        visitSeconds={visitSeconds}
+      />
       <p className="field-hint">{placeText(locale, "sourceClaim")}</p>
-      <div className="fact-list">{mainFacts.map(factRecord)}</div>
+      {mainFacts.some((fact) => fact.status === "conflicting") && (
+        <section className={guideStyles.conflicts}>
+          <h3>{visitText(locale, "conflicts")}</h3>
+          {mainFacts
+            .filter((fact) => fact.status === "conflicting")
+            .map(factRecord)}
+        </section>
+      )}
+      <PlaceDirectory placeId={place.id} locale={locale} />
       {unknownFacts.length > 0 && (
         <details
           className="other-source-facts"
@@ -238,17 +259,27 @@ export function PlaceFacts({
           {unknownFacts.map(factRecord)}
         </details>
       )}
-      {otherFacts.length > 0 && (
-        <details className="other-source-facts">
-          <summary>
-            {placeText(locale, "otherFacts")} · {otherFacts.length}
-          </summary>
-          {otherFacts.map(factRecord)}
-        </details>
-      )}
-      <h3>{t(locale, "sources")}</h3>
-      <p className="small muted">{t(locale, "freshness")}</p>
-      <Sources evidence={place.evidence} locale={locale} />
+      <details
+        className={guideStyles.recordsDisclosure}
+        data-testid="place-source-records"
+      >
+        <summary>{visitText(locale, "records")}</summary>
+        <h3>{placeText(locale, "amenities")}</h3>
+        <div className="fact-list">
+          {mainFacts.filter((fact) => fact.status === "known").map(factRecord)}
+        </div>
+        {otherFacts.length > 0 && (
+          <details className="other-source-facts">
+            <summary>
+              {placeText(locale, "otherFacts")} · {otherFacts.length}
+            </summary>
+            {otherFacts.map(factRecord)}
+          </details>
+        )}
+        <h3>{t(locale, "sources")}</h3>
+        <p className="small muted">{t(locale, "freshness")}</p>
+        <Sources evidence={place.evidence} locale={locale} />
+      </details>
     </>
   );
 }
