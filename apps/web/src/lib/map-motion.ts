@@ -417,6 +417,7 @@ export function startMapMotion(
   let previous = 0;
   let lastWrite = 0;
   let disposed = false;
+  let dirty = true;
   let lastStatus: MotionStatus | null = null;
   const report = (status: MotionStatus) => {
     if (status !== lastStatus) {
@@ -451,7 +452,8 @@ export function startMapMotion(
     if (!paused() && paths.length) frame = requestAnimationFrame(tick);
   };
   const refresh = () => {
-    if (disposed) return;
+    if (disposed || !dirty) return;
+    dirty = false;
     try {
       const next =
         map.getZoom() >= 14
@@ -484,8 +486,19 @@ export function startMapMotion(
       updateRunning();
     }
   };
+  const viewChanged = () => {
+    dirty = true;
+    refresh();
+  };
+  const sourceChanged = (event: { sourceId?: string }) => {
+    // Our animated GeoJSON source emits data/idle events too. Only real road
+    // tile changes require another geometry scan, batched until the next idle.
+    if (event.sourceId === vectorSource) dirty = true;
+  };
   map.on("idle", refresh);
-  map.on("moveend", refresh);
+  map.on("moveend", viewChanged);
+  map.on("resize", viewChanged);
+  map.on("sourcedata", sourceChanged);
   preference.addEventListener("change", updateRunning);
   document.addEventListener("visibilitychange", updateRunning);
   refresh();
@@ -495,7 +508,9 @@ export function startMapMotion(
     disposed = true;
     if (frame !== null) cancelAnimationFrame(frame);
     map.off("idle", refresh);
-    map.off("moveend", refresh);
+    map.off("moveend", viewChanged);
+    map.off("resize", viewChanged);
+    map.off("sourcedata", sourceChanged);
     preference.removeEventListener("change", updateRunning);
     document.removeEventListener("visibilitychange", updateRunning);
     try {

@@ -250,7 +250,7 @@ it("pauses for reduced motion and hidden pages, then removes animation and liste
   vi.stubGlobal("cancelAnimationFrame", (key: number) => frames.delete(key));
   const data = { setData: vi.fn() };
   const layers = new Map<string, { id: string; type: string }>();
-  const listeners = new Map<string, () => void>();
+  const listeners = new Map<string, (event?: { sourceId?: string }) => void>();
   let source = false;
   let panY = 0;
   const map = {
@@ -278,12 +278,13 @@ it("pauses for reduced motion and hidden pages, then removes animation and liste
     removeLayer: (id: string) => layers.delete(id),
     getZoom: () => 15.5,
     getCanvas: () => ({ clientWidth: 300, clientHeight: 300 }),
-    project: (point: [number, number]) => {
+    project: vi.fn((point: [number, number]) => {
       const projected = viewport.project(point);
       return { x: projected.x, y: projected.y + panY };
-    },
+    }),
     querySourceFeatures: vi.fn(() => [road(elbow)]),
-    on: (name: string, listener: () => void) => listeners.set(name, listener),
+    on: (name: string, listener: (event?: { sourceId?: string }) => void) =>
+      listeners.set(name, listener),
     off: (name: string) => listeners.delete(name),
   };
   const status = vi.fn();
@@ -298,17 +299,40 @@ it("pauses for reduced motion and hidden pages, then removes animation and liste
     sourceLayer: "transportation",
   });
   const writes = data.setData.mock.calls.length;
+  const projections = map.project.mock.calls.length;
   listeners.get("idle")!();
   expect(data.setData).toHaveBeenCalledTimes(writes);
+  expect(map.querySourceFeatures).toHaveBeenCalledTimes(1);
+  expect(map.project).toHaveBeenCalledTimes(projections);
   panY = 100;
   listeners.get("moveend")!();
   expect(data.setData).toHaveBeenCalledTimes(writes + 1);
   listeners.get("idle")!();
   expect(data.setData).toHaveBeenCalledTimes(writes + 1);
+  expect(map.querySourceFeatures).toHaveBeenCalledTimes(2);
+  const afterPanProjections = map.project.mock.calls.length;
   reduce = false;
   for (const listener of mediaListeners) listener();
   expect(status).toHaveBeenLastCalledWith("running");
   expect(frames.size).toBe(1);
+  const [frameId, animate] = [...frames.entries()][0];
+  frames.delete(frameId);
+  animate(200);
+  listeners.get("sourcedata")!({ sourceId: "compass-simulated-motion" });
+  listeners.get("sourcedata")!({ sourceId: "unrelated-vector-source" });
+  listeners.get("idle")!();
+  expect(map.querySourceFeatures).toHaveBeenCalledTimes(2);
+  expect(map.project).toHaveBeenCalledTimes(afterPanProjections);
+  // Tile arrivals still refresh once; successive source events are batched.
+  listeners.get("sourcedata")!({ sourceId: "openmaptiles" });
+  listeners.get("sourcedata")!({ sourceId: "openmaptiles" });
+  expect(map.querySourceFeatures).toHaveBeenCalledTimes(2);
+  listeners.get("idle")!();
+  listeners.get("idle")!();
+  expect(map.querySourceFeatures).toHaveBeenCalledTimes(3);
+  listeners.get("resize")!();
+  listeners.get("idle")!();
+  expect(map.querySourceFeatures).toHaveBeenCalledTimes(4);
   hidden = true;
   document.dispatchEvent(new Event("visibilitychange"));
   expect(status).toHaveBeenLastCalledWith("paused");
