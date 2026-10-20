@@ -135,10 +135,17 @@ def test_real_recommendations_and_itinerary_without_keys(offline_live, query, lo
     result = response.json()
     validate_payload("RecommendationResponse", result)
     assert 1 <= len(result["recommendations"]) <= 3
-    assert all(categories.intersection(place["categories"]) and not place["is_synthetic"] for place in result["places"])
+    by_id = {place["id"]: place for place in result["places"]}
+    core_ids = {item["place_id"] for item in result["recommendations"]}
+    idea_ids = {item["place_id"] for item in result.get("suggestions", [])}
+    assert not core_ids.intersection(idea_ids)
+    assert set(by_id) == core_ids | idea_ids
+    assert all(not place["is_synthetic"] for place in by_id.values())
+    core_places = [by_id[item["place_id"]] for item in result["recommendations"]]
+    assert all(categories.intersection(place["categories"]) for place in core_places)
     if query == "серуен":
-        assert any({"park", "garden"}.intersection(place["categories"]) for place in result["places"])
-        assert any({"theatre", "attraction", "viewpoint", "artwork"}.intersection(place["categories"]) for place in result["places"])
+        assert any({"park", "garden"}.intersection(place["categories"]) for place in core_places)
+        assert any({"theatre", "attraction", "viewpoint", "artwork"}.intersection(place["categories"]) for place in core_places)
     assert result["warnings"]  # Local search and unavailable model remain disclosed.
     for item in result["recommendations"]:
         assert item["route"]["method"] == "approximate"
