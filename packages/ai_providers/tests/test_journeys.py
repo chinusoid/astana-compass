@@ -83,8 +83,8 @@ def test_query_only_payload_reuses_bounded_private_transport(provider):
         if provider == "openai":
             assert str(request.url) == "https://api.openai.com/v1/responses"
             assert payload["store"] is False
-            assert payload["reasoning"] == {"effort": "none"}
-            assert payload["max_output_tokens"] == 3072
+            assert payload["reasoning"] == {"effort": "low"}
+            assert payload["max_output_tokens"] == 4096
             assert payload["text"]["format"]["strict"] is True
             schema = payload["text"]["format"]["schema"]
             assert schema["properties"]["stages"]["maxItems"] == 8
@@ -96,6 +96,7 @@ def test_query_only_payload_reuses_bounded_private_transport(provider):
         else:
             assert str(request.url) == "https://integrate.api.nvidia.com/v1/chat/completions"
             assert payload["max_tokens"] == 3072 and payload["stream"] is False
+            assert "reasoning" not in payload
             data = json.loads(payload["messages"][1]["content"])
         assert data == {"query": query, "locale": "ru"}
         assert SECRET not in request.content.decode()
@@ -482,3 +483,123 @@ def test_unrepresentable_exclusion_marks_stage_unresolved_instead_of_executing_w
         assert result["clarification_questions"]
         assert any("exclusions" in warning for warning in result["warnings"])
         validate_payload("JourneyPlan", result)
+
+
+def test_stronger_luna_settings_are_scoped_to_journey_planning():
+    from astana_ai_providers.intents import create_intent_analyzer
+
+    async def check():
+        async with create_journey_planner("openai", "gpt-6-luna", SECRET) as planner:
+            assert planner._hosted.timeout_seconds == 10
+            assert planner._hosted.max_output_tokens == 4096
+        async with create_journey_planner("nvidia", "gpt-6-luna", SECRET) as planner:
+            assert planner._hosted.timeout_seconds == 7
+            assert planner._hosted.max_output_tokens == 3072
+        async with create_generator("openai", "gpt-6-luna", SECRET) as generator:
+            assert generator._openai_model_options() == {"reasoning": {"effort": "none"}}
+        async with create_intent_analyzer("openai", "gpt-6-luna", SECRET) as analyzer:
+            assert analyzer._hosted._openai_model_options() == {"reasoning": {"effort": "none"}}
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("generic,category,kind", [
+    ("shopping mall", "mall", "activity"), ("торговый центр", "mall", "activity"),
+    ("сауда орталығы", "mall", "activity"), ("museum", "museum", "activity"),
+    ("музея", "museum", "activity"), ("кітапхана", "library", "activity"),
+    ("библиотека", "library", "activity"), ("кинотеатр", "cinema", "activity"),
+    ("театр", "theatre", "activity"), ("park", "park", "activity"),
+    ("gallery", "gallery", "activity"), ("coffee shop", "cafe", "meal"),
+])
+def test_generic_place_types_are_search_categories_not_invented_proper_names(generic, category, kind):
+    answer = plan([stage(generic, kind="named_place", named=generic, categories=["park"])])
+    result = hosted(generic, answer)
+    assert result["provider"] == "openai"
+    assert result["stages"][0]["named_place"] is None
+    assert result["stages"][0]["kind"] == kind
+    assert result["stages"][0]["categories"] == [category]
+
+
+@pytest.mark.parametrize("name", ["Mall of Astana", "Museum of Science and Technology", "Ботанический сад", "Central Park", "On the Way Cafe"])
+def test_compound_proper_names_survive_type_and_intermediate_marker_normalization(name):
+    result = hosted("Visit " + name, plan([stage(name, kind="named_place", named=name)]))
+    assert result["provider"] == "openai"
+    assert result["stages"][0]["named_place"] == name
+
+
+def test_shopping_mall_alias_is_canonicalized_without_vetoing_other_categories():
+    result = hosted("go shopping", plan([stage("shopping", categories=["shopping_mall", "future_place_type"])]))
+    assert result["provider"] == "openai"
+    assert result["stages"][0]["categories"] == ["mall", "future_place_type"]
+
+
+@pytest.mark.parametrize("query,first,second", [
+    ("Хочу в музей а по пути зайти в библиотеку", "библиотеку", "музей"),
+    ("По пути в музей, зайти в библиотеку", "библиотеку", "музей"),
+    ("Go to the museum and on the way visit a library", "library", "museum"),
+    ("Visit a library on the way to the museum", "library", "museum"),
+    ("En route to the museum, visit a library", "library", "museum"),
+    ("Go to the museum, en route visit a library", "library", "museum"),
+    ("Мұражайға барамын, жолай кітапханаға кіремін", "кітапханаға", "Мұражайға"),
+    ("Кітапханаға жолай кіріп, мұражайға барамын", "Кітапханаға", "мұражайға"),
+])
+def test_intermediate_stop_precedes_final_destination_even_when_mentioned_after_it(query, first, second):
+    correct = [stage(first), stage(second)]
+    assert hosted(query, plan(correct, order="explicit"))["provider"] == "openai"
+    assert hosted(query, plan(list(reversed(correct)), order="explicit"))["provider"] == "rules"
+    assert hosted(query, plan(correct, order="suggested"))["provider"] == "rules"
+
+
+def test_exact_mall_scenario_has_generic_mall_before_the_named_destination():
+    query = "Хочу в ботанический сад а по пути зайти в торговый центр красивый"
+    stages = [stage("торговый центр", kind="named_place", named="торговый центр", categories=["shopping_mall"]),
+              stage("ботанический сад", kind="named_place", named="ботанический сад")]
+    result = hosted(query, plan(stages, order="explicit"))
+    assert result["provider"] == "openai"
+    assert result["stages"][0]["named_place"] is None
+    assert result["stages"][0]["categories"] == ["mall"]
+    assert result["stages"][1]["named_place"] == "ботанический сад"
+    fallback = rules_journey_plan(query, "ru")
+    assert fallback["order"] == "explicit" and len(fallback["stages"]) == 2
+    assert "торговый центр" in fallback["stages"][0]["source_quote"]
+    assert "ботанический сад" in fallback["stages"][1]["source_quote"]
+
+
+@pytest.mark.parametrize("query", [
+    "First a museum, then on the way visit a library",
+    "Хочу в музей а по пути в библиотеку и кафе",
+    "Visit a museum, on the way a library, en route a cafe",
+])
+def test_conflicting_or_ambiguous_intermediate_chains_need_clarification(query):
+    result = rules_journey_plan(query, "en")
+    assert result["stages"] and all(item["kind"] == "unresolved" for item in result["stages"])
+    assert result["clarification_questions"]
+
+
+def test_marker_inside_a_quoted_proper_name_does_not_reorder_another_goal():
+    query = 'Visit "on the way" and a museum'
+    stages = [stage("on the way", kind="named_place", named="on the way"), stage("museum")]
+    result = hosted(query, plan(stages))
+    assert result["provider"] == "openai" and result["order"] == "suggested"
+    assert [item["source_quote"] for item in result["stages"]] == ["on the way", "museum"]
+
+
+@pytest.mark.parametrize("query,quotes", [
+    ("Go to the museum and stop at a library on the way to it", ["museum", "library"]),
+    ("Хочу в музей и в библиотеку по пути к нему", ["музей", "библиотеку"]),
+    ("Хочу в музей а по пути в библиотеку", ["музей", "библиотеку"]),
+])
+def test_unverified_pronouns_and_elliptical_destination_attachments_require_clarification(query, quotes):
+    for ordered in (quotes, list(reversed(quotes))):
+        result = hosted(query, plan([stage(quote) for quote in ordered], order="explicit"))
+        assert result["provider"] == "rules"
+        assert result["stages"] and all(item["kind"] == "unresolved" for item in result["stages"])
+        assert result["clarification_questions"]
+
+
+def test_first_then_conflict_cannot_be_overridden_by_a_hosted_intermediate_order():
+    query = "First a museum, then on the way visit a library"
+    for quotes in (["museum", "library"], ["library", "museum"]):
+        result = hosted(query, plan([stage(quote) for quote in quotes], order="explicit"))
+        assert result["provider"] == "rules"
+        assert all(item["kind"] == "unresolved" for item in result["stages"])
+        assert result["clarification_questions"]

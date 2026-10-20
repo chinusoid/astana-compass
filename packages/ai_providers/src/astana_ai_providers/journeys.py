@@ -50,6 +50,27 @@ _DURATION_CONTEXT = re.compile(
 _RELATIVE_ORDER = re.compile(
     r"(?<!\w)(?:перед|прежде\s+чем|после(?!\s+этого)|before|after(?!\s+that)|дейін|кейін)(?!\w)", re.I,
 )
+_VIA = re.compile(r"(?<!\w)(?:по\s+пути|on\s+the\s+way|en\s+route|жолай|жол\s+жөнекей)(?!\w)", re.I)
+_VIA_TO = re.compile(r"^\s+(?:to|towards?|к|ко|в)(?!\w)", re.I)
+_GENERIC_TYPES = {
+    "mall": "mall|shopping mall|shopping center|shopping centre|торговый центр|торгового центра|торговом центре|сауда орталығы|сауда орталығына|сауда орталығында",
+    "museum": "museum|музей|музея|музее|музеем|мұражай|мұражайға|мұражайда",
+    "library": "library|библиотека|библиотеку|библиотеки|библиотеке|кітапхана|кітапханаға|кітапханада",
+    "cinema": "cinema|movie theater|movie theatre|кинотеатр|кинотеатра|кинотеатре|кинотеатрға|кинотеатрда",
+    "theatre": "theatre|theater|театр|театра|театре|театрға|театрда",
+    "park": "park|парк|парка|парке|саябақ|саябаққа|саябақта",
+    "garden": "garden|сад|сада|саду|бақ|баққа|бақта",
+    "gallery": "gallery|art gallery|галерея|галерею|галереи|галерее|көркемсурет галереясы",
+    "arts_centre": "arts centre|arts center|art center|art centre|центр искусств|центр искусства|өнер орталығы",
+    "cafe": "cafe|café|coffee shop|кафе|кофейня|кофейню|кофейни|кофейне|дәмхана",
+    "restaurant": "restaurant|ресторан|ресторана|ресторане|мейрамхана|мейрамханаға|мейрамханада",
+    "bookshop": "bookshop|bookstore|book shop|book store|книжный магазин|книжного магазина|кітап дүкені",
+    "shop": "shop|store|магазин|магазина|магазине|дүкен|дүкенге|дүкенде",
+    "swimming_pool": "swimming pool|pool|бассейн|бассейна|бассейне|жүзу бассейні",
+    "playground": "playground|детская площадка|детскую площадку|ойын алаңы",
+}
+_GENERIC_LABELS = {alias: category for category, aliases in _GENERIC_TYPES.items() for alias in aliases.split("|")}
+_CATEGORY_ALIASES = {"shopping_mall": "mall", "shopping_center": "mall", "shopping_centre": "mall"}
 _UNSAFE_TEXT = re.compile(r"https?://|www\.|[\x00-\x08\x0b-\x1f\x7f]", re.I)
 _FILLER = frozenset(
     "хочу хотим нужно надо мне нам пожалуйста затем потом сначала можно хочу бы хочу хотели "
@@ -244,6 +265,67 @@ def _relative_markers(query: str) -> list[re.Match[str]]:
             and not _TIME_REFERENCE.search(query[marker.end():])]
 
 
+def _via_markers(query: str, protected: list[tuple[int, int]]) -> list[re.Match[str]]:
+    quoted = [(match.start(1), match.end(1)) for match in re.finditer(r'["«“]([^"»”]+)["»”]', query)]
+    return [marker for marker in _VIA.finditer(query)
+            if not any(left <= marker.start() < right for left, right in [*protected, *quoted])]
+
+
+def _via_pair(query: str, stages: list[dict[str, Any]], protected: list[tuple[int, int]]) -> tuple[int, int] | None:
+    markers = _via_markers(query, protected)
+    if not markers:
+        return None
+    if len(markers) != 1 or len(stages) != 2 or any(stage["kind"] == "unresolved" for stage in stages):
+        raise ValueError("ambiguous intermediate stops need clarification")
+    marker = markers[0]
+    clauses = _clauses(query, protected)
+    owned = [index for index, stage in enumerate(stages) if any(
+        left <= marker.start() < right and stage["source_quote"] in text for left, right, text in clauses
+    )]
+    spans = [(query.index(stage["source_quote"]), index) for index, stage in enumerate(stages)]
+    following = sorted((start, index) for start, index in spans if start >= marker.end())
+    direction = _VIA_TO.search(query[marker.end():])
+    if direction is not None:
+        marker_clause = next((index for index, (left, right, _) in enumerate(clauses)
+                              if left <= marker.start() < right), None)
+        prefix = marker_clause is not None and not query[clauses[marker_clause][0]:marker.start()].strip()
+        # Russian "а по пути в X" can introduce the intermediate stop rather
+        # than a new final destination. Only a leading "По пути в X, ..."
+        # establishes this attachment without relying on semantic guesswork.
+        if direction.group().strip().casefold() == "в" and marker_clause != 0:
+            raise ValueError("ambiguous intermediate-stop destination attachment")
+        if prefix and len(owned) == 1:
+            destination = owned[0]
+        elif following:
+            destination = following[0][1]
+        else:
+            # "library on the way to it" does not ground the pronoun's
+            # destination in a following stage. Do not invert that library.
+            raise ValueError("unverified intermediate-stop destination")
+        return 1 - destination, destination
+    if len(owned) == 1:
+        return owned[0], 1 - owned[0]
+    preceding = [(start, index) for start, index in spans if start < marker.start()]
+    if len(preceding) == len(following) == 1:
+        return following[0][1], preceding[0][1]
+    raise ValueError("unverified intermediate-stop relation")
+
+
+def _normalize_types(stages: list[dict[str, Any]]) -> None:
+    for stage in stages:
+        categories = list(dict.fromkeys(_CATEGORY_ALIASES.get(value, value) for value in stage.get("categories", [])))
+        named = stage["named_place"]
+        generic = _GENERIC_LABELS.get(" ".join(named.casefold().split())) if named is not None else None
+        if generic is not None:
+            stage["named_place"] = None
+            categories = [generic]
+            if stage["kind"] == "named_place":
+                stage["kind"] = "meal" if generic in {"cafe", "restaurant"} else "activity"
+            if stage["cuisine"] is not None and generic not in {"cafe", "restaurant"}:
+                raise ValueError("a generic place type does not establish a cuisine")
+        stage["categories"] = categories
+
+
 def _rules(query: str, locale: str) -> dict[str, Any]:
     stages = []
     relative_order = bool(_relative_markers(query))
@@ -267,6 +349,17 @@ def _rules(query: str, locale: str) -> dict[str, Any]:
         # A generic meal-first suggestion applies to any unordered wish list;
         # no destination, dish or source venue is special-cased or invented.
         stages.sort(key=lambda stage: stage["kind"] != "meal")
+    if _via_markers(query, []):
+        try:
+            pair = _via_pair(query, stages, [])
+            if pair is not None:
+                if explicit and pair[0] > pair[1]:
+                    raise ValueError("conflicting explicit intermediate order")
+                stages = [stages[pair[0]], stages[pair[1]]]
+                explicit = True
+        except ValueError:
+            for stage in stages:
+                stage.update(kind="unresolved", named_place=None, cuisine=None, categories=[])
     warnings = [_text("rules", locale)]
     questions = []
     if len(stages) > 8:
@@ -308,7 +401,11 @@ _INSTRUCTIONS = (
     "It may normalize paraphrases but must never introduce an unrequested business, "
     "brand, cuisine, amenity or specific destination. named_place must be null or an "
     "exact user-supplied substring within source_quote; distinguish visiting a place "
-    "from merely searching nearby it. cuisine is null or the conventional lower-case "
+    "from merely searching nearby it. Generic place types are NOT proper names: "
+    "shopping mall / торговый центр / сауда орталығы must use named_place null and "
+    "categories [mall], never shopping_mall. The same applies to generic museum, "
+    "library, cinema, park and other types. Preserve real compound proper names. "
+    "cuisine is null or the conventional lower-case "
     "ASCII cuisine/food identifier explicitly requested, never an invented venue fact. "
     "For a drink request do not invent a dish cuisine (coffee does not request sushi). "
     "categories contains semantic place-type search filters, not facts about a venue. "
@@ -321,7 +418,13 @@ _INSTRUCTIONS = (
     "kind meal is for eating/drinking wishes, named_place for an explicit destination, "
     "activity for other clear activities, unresolved for ambiguity. Any cuisine requires "
     "kind meal. Preserve explicit order even if inconvenient; understand before/after "
-    "and reversed sentence order. Mark order explicit only when user specified a "
+    "and reversed sentence order. An intermediate stop described with по пути, "
+    "on the way, en route or жолай must come BEFORE the final destination even "
+    "when mentioned after it. For 'destination, and on the way intermediate', "
+    "return intermediate then destination. For 'intermediate on the way to destination', "
+    "keep intermediate then destination. Such a relation is explicit; conflicting "
+    "first/then instructions or ambiguous chains require unresolved stages and a "
+    "clarification, not an invented sequence. Mark order explicit only when user specified a "
     "sequence. For an unordered wish list, choose a logical sequence and mark order "
     "suggested; eating before a walk can be sensible but must never override explicit "
     "order. Shared context such as available time, starting point, companions and "
@@ -474,6 +577,14 @@ def _validate_order(query: str, result: dict[str, Any], protected: list[tuple[in
             raise ValueError("unverified relative sequence needs clarification")
         if result["order"] != "explicit" or pair[0] >= pair[1]:
             raise ValueError("relative order changed")
+    try:
+        via = _via_pair(query, stages, protected)
+    except ValueError:
+        if not stages or any(stage["kind"] != "unresolved" for stage in stages):
+            raise
+    else:
+        if via is not None and (result["order"] != "explicit" or via[0] >= via[1]):
+            raise ValueError("intermediate stop must precede the final destination")
 
 
 def _ground(raw: Any, query: str, provider: str, locale: str) -> dict[str, Any]:
@@ -505,6 +616,7 @@ def _ground(raw: Any, query: str, provider: str, locale: str) -> dict[str, Any]:
             raise ValueError("invalid planning text")
     if any(stage["kind"] == "unresolved" for stage in result["stages"]) and not result["clarification_questions"]:
         raise ValueError("unresolved goal needs clarification")
+    _normalize_types(result["stages"])
     protected = _compound_names(query, result["stages"])
     _validate_coverage(query, result, protected)
     _validate_order(query, result, protected)
@@ -540,13 +652,16 @@ class JourneyPlanner:
         data = json_dumps({"query": query, "locale": locale})
         schema = _schema(self._hosted.provider)
         if self._hosted.provider == "openai":
+            options = self._hosted._openai_model_options()
+            if self._hosted.model == "gpt-6-luna":
+                options["reasoning"] = {"effort": "low"}
             return {
                 "model": self._hosted.model, "store": False,
                 "instructions": _INSTRUCTIONS,
                 "input": [{"role": "user", "content": data}],
-                "max_output_tokens": 3072,
+                "max_output_tokens": 4096,
                 "text": {"format": {"type": "json_schema", "name": "city_journey", "strict": True, "schema": schema}},
-                **self._hosted._openai_model_options(),
+                **options,
             }
         return {
             "model": self._hosted.model,
@@ -573,7 +688,7 @@ class JourneyPlanner:
 
 def create_journey_planner(
     provider: JourneyProvider = "rules", model: str | None = None, api_key: str | None = None, *,
-    timeout_seconds: float = 7.0, transport: httpx.AsyncBaseTransport | None = None,
+    timeout_seconds: float | None = None, transport: httpx.AsyncBaseTransport | None = None,
     budget: RequestBudget | None = None,
 ) -> JourneyPlanner:
     """Construct without I/O; absent configuration selects honest local rules."""
@@ -581,8 +696,9 @@ def create_journey_planner(
         raise ValueError("unsupported journey provider")
     if provider == "rules" or not model or not api_key:
         return JourneyPlanner()
+    timeout = (10.0 if provider == "openai" else 7.0) if timeout_seconds is None else timeout_seconds
     return JourneyPlanner(HostedExplanationGenerator(
-        provider, model, api_key, timeout_seconds=timeout_seconds,
-        max_response_bytes=65_536, max_output_tokens=3072,
+        provider, model, api_key, timeout_seconds=timeout,
+        max_response_bytes=65_536, max_output_tokens=4096 if provider == "openai" else 3072,
         transport=transport, budget=budget,
     ))

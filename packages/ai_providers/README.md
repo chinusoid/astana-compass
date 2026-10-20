@@ -24,11 +24,14 @@ async with create_journey_planner(
 The planner sends only `query` and `locale` in one bounded hosted request. It
 does not receive coordinates, history, POIs or database facts. OpenAI uses
 Responses with `store: false`, the canonical schema specialized for that
-provider, strict structured output, a seven-second deadline and at most 3072
-output tokens. The existing fixed-endpoint HTTP transport enforces response
-size, identity encoding, refusal/tool rejection and the shared request quota.
-NVIDIA uses its existing bounded JSON response path with the same local
-validation. Construction and rules mode make no network request.
+provider, strict structured output, a ten-second deadline and at most 4096
+output tokens. The exact `gpt-6-luna` journey model uses `reasoning.effort: low`
+to allow more interpretation work within that bounded request. The existing
+fixed-endpoint HTTP transport enforces response size, identity encoding,
+refusal/tool rejection and the shared request quota.
+NVIDIA retains its seven-second/3072-token JSON response path and the same local
+validation. Intent review and explanation selection keep their existing Luna
+`none` reasoning setting. Construction and rules mode make no network request.
 
 Each independent concrete goal gets a separate ordered stage, with an exact
 `source_quote` and a normalized `search_query`. Names must be literal excerpts
@@ -40,6 +43,11 @@ are not limited to a finite list of activities and cannot establish that a
 matching venue exists. Strict provider schemas require every stage property,
 including `categories`, while the public schema keeps that field optional for
 older adapters.
+Exact multilingual generic labels such as `торговый центр`, `shopping mall`
+and `сауда орталығы` become category `mall` with no proper-name filter.
+`shopping_mall` is normalized to the source category `mall`; true compound
+proper names remain literal source excerpts. This small type ontology does
+not veto unknown category tokens or claim that a matching venue exists.
 A broad discovery walk can keep `stages: []` to allow diverse recommendations.
 Explicit sequences take precedence over suggested logical ordering, while
 unsupported or ambiguous wishes remain visible as `unresolved` stages with a
@@ -67,6 +75,14 @@ both hosted and rules modes, preserving global exclusions after decomposition.
 If the 300-character search bound cannot retain all exclusions, that stage
 becomes unresolved and asks for clarification. Spelled-out duration budgets,
 companions and basic mobility context do not become extra stops.
+
+For an unambiguous pair, `по пути`, `on the way`, `en route` and `жолай`
+place the intermediate stop before the final destination even when the final
+destination is mentioned first. Hosted output is checked against that source
+relation, and local fallback handles ordinary two-clause pairs without a
+venue-specific branch. Conflicting first/then instructions and ambiguous
+chains retain unresolved stages and ask for clarification. Markers inside a
+grounded or quoted proper name do not create a route dependency.
 
 ```python
 import os
