@@ -33,7 +33,18 @@ function fixture(reduced = false) {
   vi.stubGlobal("requestAnimationFrame", request);
   vi.stubGlobal("cancelAnimationFrame", cancel);
   const setData = vi.fn();
-  const map = { getSource: vi.fn(() => ({ setData })), fitBounds: vi.fn() };
+  const host = document.createElement("div");
+  Object.defineProperties(host, {
+    clientWidth: { value: 390 },
+    clientHeight: { value: 170 },
+  });
+  const map = {
+    getSource: vi.fn(() => ({ setData })),
+    fitBounds: vi.fn(),
+    getContainer: () => host,
+    getPadding: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+    resize: vi.fn(),
+  };
   return {
     map: map as unknown as LibreMap,
     setData,
