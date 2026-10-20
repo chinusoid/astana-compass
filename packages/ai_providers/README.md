@@ -6,6 +6,50 @@ the actual explanation in `ru`, `kk`, or `en` and applies its own validation.
 `IntentAnalyzer` also extracts reviewable preferences through local rules and
 optional hosted extraction. Neither adapter is a trained Astana model.
 
+`JourneyPlanner` separately interprets the complete outing scenario into the
+canonical `JourneyPlan`, before the recommender retrieves real places. Its
+semantic activities are open ended: normalized search phrases are not vetoed
+by the intent review screen's finite amenity/category vocabulary.
+
+```python
+from astana_ai_providers import create_journey_planner
+
+async with create_journey_planner(
+    provider="openai", model="gpt-6-luna", api_key=server_side_key,
+    budget=shared_llm_request_budget,
+) as planner:
+    journey = await planner.plan(user_query, "ru")
+```
+
+The planner sends only `query` and `locale` in one bounded hosted request. It
+does not receive coordinates, history, POIs or database facts. OpenAI uses
+Responses with `store: false`, the canonical schema specialized for that
+provider, strict structured output, a seven-second deadline and at most 3072
+output tokens. The existing fixed-endpoint HTTP transport enforces response
+size, identity encoding, refusal/tool rejection and the shared request quota.
+NVIDIA uses its existing bounded JSON response path with the same local
+validation. Construction and rules mode make no network request.
+
+Each independent concrete goal gets a separate ordered stage, with an exact
+`source_quote` and a normalized `search_query`. Names must be literal excerpts
+of that stage's quoted user text; cuisine identifiers describe a requested
+food, never a confirmed venue menu. A single concrete goal produces one stage.
+A broad discovery walk can keep `stages: []` to allow diverse recommendations.
+Explicit sequences take precedence over suggested logical ordering, while
+unsupported or ambiguous wishes remain visible as `unresolved` stages with a
+clarification question. Venue selection and source-backed name/cuisine checks
+belong to retrieval, after planning.
+
+Missing configuration, provider failure or invalid output returns a visibly
+limited local fallback. It separates ordinary clauses and conjunctions without
+special treatment for a named destination or cuisine; uncertain relative order
+and long fragments remain unresolved. Local validation rejects invented source
+quotes/names, cropped negation, omitted independent lexical clauses, duplicate
+stages and extra fields. These checks establish text provenance and basic
+coverage, not proof that arbitrary semantics were understood correctly. The
+fallback and planner warnings are intended to remain visible to users. Neither
+mocked tests nor a well-formed plan establish live model quality or POI coverage.
+
 ```python
 import os
 from astana_ai_providers import create_generator
