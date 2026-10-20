@@ -1,5 +1,6 @@
 import type { JourneyPlan } from "@astana/api-client";
 import type { Locale } from "@/lib/i18n";
+import styles from "./scenario-plan.module.css";
 
 const copy = {
   ru: {
@@ -36,7 +37,7 @@ export default function ScenarioPlan({
   const text = copy[locale];
   return (
     <section
-      className="notice"
+      className={styles.plan}
       aria-label={text.title}
       data-testid="scenario-plan"
     >
