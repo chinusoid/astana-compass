@@ -10,6 +10,11 @@ import { t } from "../../apps/web/src/lib/i18n";
 const sheet = (page: Page) => page.locator(".app-shell");
 const handle = (page: Page) => page.locator("[data-sheet-handle]");
 
+async function activate(control: ReturnType<Page["locator"]>, touch: boolean) {
+  if (touch) await control.tap();
+  else await control.click();
+}
+
 async function settled(page: Page) {
   await expect(page.locator("[data-mobile-sheet]")).not.toHaveAttribute(
     "data-sheet-preview",
@@ -27,8 +32,8 @@ async function dragSheet(page: Page, target: "expanded" | "collapsed") {
   const x = box.x + box.width / 2;
   const start = box.y + box.height / 2;
   const end = target === "expanded" ? 16 : page.viewportSize()!.height - 80;
-  // Playwright's public touchscreen API supports taps only. Native pointer
-  // dragging exercises the same sheet path in WebKit without synthetic capture.
+  // Only the desktop WebKit phone-viewport profile uses native mouse drags.
+  // Playwright's public touchscreen API supports taps, not finger dragging.
   await page.mouse.move(x, start);
   await page.mouse.down();
   await expect(page.locator("[data-mobile-sheet]")).toHaveAttribute(
@@ -49,8 +54,32 @@ async function dragSheet(page: Page, target: "expanded" | "collapsed") {
   await settled(page);
 }
 
-async function openPlanner(page: Page) {
-  await page.getByRole("link", { name: "Открыть планирование" }).tap();
+async function changeSheet(
+  page: Page,
+  target: "expanded" | "collapsed",
+  touch: boolean,
+) {
+  if (!touch) return dragSheet(page, target);
+  await settled(page);
+  if (target === "expanded") {
+    if ((await sheet(page).getAttribute("data-sheet-snap")) === "collapsed") {
+      await handle(page).tap();
+      await expect(sheet(page)).toHaveAttribute("data-sheet-snap", "half");
+      await settled(page);
+    }
+    await handle(page).tap();
+  } else {
+    await page.getByRole("button", { name: "К карте", exact: true }).tap();
+  }
+  await expect(sheet(page)).toHaveAttribute("data-sheet-snap", target);
+  await settled(page);
+}
+
+async function openPlanner(page: Page, touch: boolean) {
+  await activate(
+    page.getByRole("link", { name: "Открыть планирование" }),
+    touch,
+  );
   await expect(sheet(page)).toHaveAttribute("data-sheet-snap", "expanded");
   await expect(page.locator('textarea[name="query"]')).toBeVisible();
 }
@@ -108,10 +137,13 @@ test.afterEach(async ({ page }, testInfo) => {
   }
 });
 
-test("iPhone WebKit accepts touch controls and smooth sheet pointer gestures", async ({
+test("WebKit phone layout supports every sheet snap with its native input controls", async ({
   page,
+  hasTouch,
 }, testInfo) => {
-  expect(await page.evaluate(() => navigator.userAgent)).toContain("iPhone");
+  const userAgent = await page.evaluate(() => navigator.userAgent);
+  if (hasTouch) expect(userAgent).toContain("iPhone");
+  else expect(userAgent).not.toContain("iPhone");
   await page.evaluate(() => {
     document.addEventListener(
       "touchstart",
@@ -139,16 +171,17 @@ test("iPhone WebKit accepts touch controls and smooth sheet pointer gestures", a
     /viewport-fit=cover/,
   );
 
-  await handle(page).tap();
-  await expect(page.locator("html")).toHaveAttribute(
-    "data-trusted-touch",
-    "true",
-  );
+  await activate(handle(page), hasTouch);
+  if (hasTouch)
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-trusted-touch",
+      "true",
+    );
   await expect(sheet(page)).toHaveAttribute("data-sheet-snap", "half");
   await settled(page);
-  await dragSheet(page, "expanded");
-  await dragSheet(page, "collapsed");
-  await openPlanner(page);
+  await changeSheet(page, "expanded", hasTouch);
+  await changeSheet(page, "collapsed", hasTouch);
+  await openPlanner(page, hasTouch);
   expect(
     await page
       .locator('textarea[name="query"]')
@@ -156,7 +189,10 @@ test("iPhone WebKit accepts touch controls and smooth sheet pointer gestures", a
         Number.parseFloat(getComputedStyle(element).fontSize),
       ),
   ).toBeGreaterThanOrEqual(16);
-  await page.getByRole("button", { name: "К карте", exact: true }).tap();
+  await activate(
+    page.getByRole("button", { name: "К карте", exact: true }),
+    hasTouch,
+  );
   await expect(sheet(page)).toHaveAttribute("data-sheet-snap", "collapsed");
   expect(
     await page.evaluate(
@@ -170,8 +206,9 @@ test("iPhone WebKit accepts touch controls and smooth sheet pointer gestures", a
   });
 });
 
-test("iPhone WebKit builds a fixture walk and preserves it through gestures and explicit edits", async ({
+test("WebKit phone layout preserves a routed fixture walk through sheet controls and explicit edits", async ({
   page,
+  hasTouch,
 }, testInfo) => {
   const requests: ItineraryRequest[] = [];
   page.on("request", (request) => {
@@ -202,14 +239,14 @@ test("iPhone WebKit builds a fixture walk and preserves it through gestures and 
     payload.route!.geometry = { type: "LineString", coordinates };
     await intercept.fulfill({ response: actual, json: payload });
   });
-  await openPlanner(page);
+  await openPlanner(page, hasTouch);
   const advanced = page.locator("details.advanced-origin");
-  await advanced.locator("summary").tap();
+  await activate(advanced.locator("summary"), hasTouch);
   await page.locator('textarea[name="query"]').fill("Прогулка без спешки");
   await page.locator('input[name="latitude"]').fill("51.090");
   await page.locator('input[name="longitude"]').fill("71.420");
-  await advanced.getByRole("button").tap();
-  await page.locator(".filter-toggle").tap();
+  await activate(advanced.getByRole("button"), hasTouch);
+  await activate(page.locator(".filter-toggle"), hasTouch);
   await page.locator('input[name="start"]').fill("2026-10-19T12:00");
   await page.locator('input[name="minutes"]').fill("180");
   const response = page.waitForResponse(
@@ -217,7 +254,7 @@ test("iPhone WebKit builds a fixture walk and preserves it through gestures and 
       entry.url().endsWith("/itineraries") &&
       entry.request().method() === "POST",
   );
-  await page.locator(".find-button").tap();
+  await activate(page.locator(".find-button"), hasTouch);
   const built = await response;
   expect(built.ok()).toBe(true);
   expect(built.headers()["x-astana-data-mode"]).toBe("fixture");
@@ -243,7 +280,7 @@ test("iPhone WebKit builds a fixture walk and preserves it through gestures and 
   const originalPlan = await page.locator(".itinerary-result").textContent();
   const ids = requests[0].place_ids;
 
-  await dragSheet(page, "expanded");
+  await changeSheet(page, "expanded", hasTouch);
   await expect(page.getByTestId("map-panel")).toHaveAttribute(
     "data-route-geometry",
     "routed",
@@ -254,8 +291,8 @@ test("iPhone WebKit builds a fixture walk and preserves it through gestures and 
   expect(await page.locator(".itinerary-result").textContent()).toBe(
     originalPlan,
   );
-  await dragSheet(page, "collapsed");
-  await openPlanner(page);
+  await changeSheet(page, "collapsed", hasTouch);
+  await openPlanner(page, hasTouch);
   expect(requests).toHaveLength(1);
   await expect(page.locator('textarea[name="query"]')).toHaveValue(
     "Прогулка без спешки",
@@ -276,10 +313,12 @@ test("iPhone WebKit builds a fixture walk and preserves it through gestures and 
       entry.url().endsWith("/itineraries") &&
       entry.request().method() === "POST",
   );
-  await page
-    .locator(".journey")
-    .getByRole("button", { name: t("ru", "buildPlan"), exact: true })
-    .tap();
+  await activate(
+    page
+      .locator(".journey")
+      .getByRole("button", { name: t("ru", "buildPlan"), exact: true }),
+    hasTouch,
+  );
   expect((await rebuilt).ok()).toBe(true);
   expect(requests).toHaveLength(2);
   expect(requests[1].place_ids).toEqual(ids);
@@ -289,7 +328,7 @@ test("iPhone WebKit builds a fixture walk and preserves it through gestures and 
     "data-route-geometry",
     "routed",
   );
-  await openPlanner(page);
+  await openPlanner(page, hasTouch);
   await expect(
     page.getByTestId("selected-stops").locator("li strong"),
   ).toHaveText(names);
@@ -298,4 +337,29 @@ test("iPhone WebKit builds a fixture walk and preserves it through gestures and 
     body: await page.screenshot(),
     contentType: "image/png",
   });
+});
+
+test("a simulated keyboard viewport resize keeps the focused wish and search visible", async ({
+  page,
+  hasTouch,
+}) => {
+  // Viewport resizing checks responsive layout only. This is not a physical
+  // iOS keyboard/finger-drag test; those require a real device.
+  const original = page.viewportSize()!;
+  await openPlanner(page, hasTouch);
+  const query = page.locator('textarea[name="query"]');
+  await query.fill("Хочу в музей и на кофе");
+  await expect(query).toBeFocused();
+  await page.setViewportSize({ width: original.width, height: 420 });
+  await expect(sheet(page)).toHaveAttribute("data-keyboard-open", "true");
+  await expect(query).toBeFocused();
+  await expect(query).toBeInViewport({ ratio: 1 });
+  await expect(page.locator(".find-button")).toBeInViewport({ ratio: 1 });
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  await query.evaluate((element) => element.blur());
+  await page.setViewportSize(original);
+  await expect(query).toHaveValue("Хочу в музей и на кофе");
+  await expect(query).toBeVisible();
+  await expect(handle(page)).toBeVisible();
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
 });

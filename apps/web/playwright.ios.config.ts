@@ -17,6 +17,18 @@ export default defineConfig({
       name: "iPhone WebKit",
       use: { ...devices["iPhone 13"], browserName: "webkit" },
     },
+    {
+      // Linux mobile WebKit does not deliver a complete native mouse stream.
+      // This profile covers real pointer drags in the same responsive layout;
+      // the iPhone profile independently covers trusted touchscreen controls.
+      name: "Phone viewport WebKit pointer",
+      use: {
+        browserName: "webkit",
+        viewport: { width: 390, height: 844 },
+        isMobile: false,
+        hasTouch: false,
+      },
+    },
   ],
   use: {
     baseURL: "http://127.0.0.1:43106",
