@@ -20,7 +20,7 @@ from astana_contracts import (
 )
 
 from .explanations import ExplanationGenerator, GroundedExplanation, GroundedReason
-from .journey import journey_stages
+from .journey import botanical_destination, food_intent, journey_stages, pizza_fact, stage_matches
 from .preferences import walking_preference
 from .text import TEXT, label
 
@@ -196,6 +196,7 @@ class DefaultRecommendationService:
             candidates = [
                 deepcopy(places[h["place_id"]])
                 for h in _diverse_lexical_hits(result["hits"][:limit], places)
+                if stage_matches(places[h["place_id"]], request["query"])
             ]
             return candidates, list(result["warnings"]), False
         except Exception:
@@ -218,7 +219,7 @@ class DefaultRecommendationService:
             seen = set()
             for place in nearby[:limit]:
                 validate_payload("Place", place)
-                if place["id"] not in seen:
+                if place["id"] not in seen and stage_matches(place, request["query"]):
                     candidates.append(deepcopy(place))
                     seen.add(place["id"])
             return candidates, warnings, True
@@ -432,6 +433,12 @@ class DefaultRecommendationService:
             ("architecture", {"architecture"}), ("history", {"historic", "monument", "memorial"}),
             ("viewpoint", {"viewpoint"}),
         ) if categories.intersection(values)), None)
+        cuisine = pizza_fact(place) if food_intent(request["query"]) == "pizza" else None
+        if cuisine:
+            purpose = "pizza"
+            why = " ".join(filter(None, [why, self._render_reason(
+                place, GroundedReason(cuisine["key"], tuple(cuisine["evidence_ids"])), locale,
+            )]))
         activity = text[result.suggested_activity]
         if purpose:
             why = " ".join(filter(None, [text[f"{purpose}_reason"].format(name=place["name"]), why]))
@@ -502,24 +509,38 @@ class DefaultRecommendationService:
         selected = []
         selected_stage_orders: list[int] = []
         pace = walking_preference(request["query"])
+        origin = request["origin"]
+
+        def proximity(item: tuple[JSON, list[JSON]], anchor: JSON = origin) -> float:
+            location = item[0]["location"]
+            return math.hypot(
+                location["lat"] - anchor["lat"],
+                (location["lon"] - anchor["lon"]) * math.cos(math.radians(anchor["lat"])),
+            )
+
         if pace:
             # Use a geographic heuristic only to choose the small shortlist;
             # it is never presented as a route. Keep normal provider call
             # counts, then rank the returned options by measured route length.
-            origin = request["origin"]
-
-            def proximity(item: tuple[JSON, list[JSON]], anchor: JSON = origin) -> float:
-                location = item[0]["location"]
-                return math.hypot(
-                    location["lat"] - anchor["lat"],
-                    (location["lon"] - anchor["lon"]) * math.cos(math.radians(anchor["lat"])),
-                )
-
             if not stages:
                 eligible = sorted(eligible[:9], key=proximity, reverse=pace == "long_walk")
         if stages:
             by_id = {place["id"]: (place, evaluations) for place, evaluations in eligible}
             groups = [[by_id[place_id] for place_id in ids if place_id in by_id] for ids in stage_ids]
+            if len(groups) == 2:
+                # Select the food stop as part of this journey, rather than an
+                # isolated highly ranked cafe across town. Coordinates only
+                # choose the bounded shortlist; only the context provider may
+                # claim a walking route. Explicit stage order stays unchanged.
+                garden_index = next((index for index, stage in enumerate(active_stages)
+                                     if botanical_destination(stage)), None)
+                if garden_index is not None and groups[garden_index]:
+                    food_index = 1 - garden_index
+                    if food_intent(active_stages[food_index]):
+                        anchors = [groups[garden_index][0][0]["location"]]
+                        if food_index == 0 or request["return_to_origin"]:
+                            anchors.append(origin)
+                        groups[food_index].sort(key=lambda item: sum(proximity(item, anchor) for anchor in anchors))
             if pace:
                 groups = [group[:9] for group in groups]
             offsets = [0] * len(groups)

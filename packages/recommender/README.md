@@ -29,6 +29,17 @@ Importing the package creates no clients, makes no requests and reads no secrets
   requested limit of three). Two stages produce two stops. Ordinary mixed
   wishes retain normal relevance/diversity ranking. The same required-condition
   checks and soft time preference apply; no additional LLM parsing is used.
+- A Botanical Garden plus food wish joined by `и`, `and` or `және` also forms
+  two core stages: food before the named garden. Explicit order takes priority.
+  Generic mixed wishes, negation and food searches near the landmark do not
+  trigger this inference. The named garden must match a known source name or
+  alias; another park cannot fill that stage. Pizza requires a known, cited
+  cuisine value `pizza` or `italian_pizza` at a cafe or restaurant. A venue name
+  or description alone cannot establish cuisine. The food shortlist accounts
+  for the onward garden location using a geographic heuristic. Recommendation
+  cards keep their routes from the original start; `build_itinerary` constructs
+  the connected route in returned stage order. Two recommendation routes plus
+  that itinerary use three route calls when the providers succeed.
 - An empty, unmatched or unroutable sequence stage is disclosed as an
   incomplete plan, with its original stage number. Available stops remain a
   partial result; if none are available, the response needs clarification.
@@ -102,7 +113,10 @@ Or:
 
     pytest packages/recommender/tests
 
-The tests use explicitly synthetic local ports. They exercise required/preferred
+The tests use explicitly synthetic local ports. Named garden and food regressions
+also exercise the checked-in 628-place OSM snapshot with local lexical retrieval;
+their route provider remains synthetic and makes no network requests.
+They exercise required/preferred
 semantics, unknown/conflicting facts, dynamic enrichment, bool/number equality,
 source references, budgets and return trips, itinerary order, timeouts,
 cancellation, invalid provider output, generator grounding and all three locales.
