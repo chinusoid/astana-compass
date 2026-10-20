@@ -10,6 +10,20 @@ Live recommendations first interpret a scenario through the query-only `JourneyP
 
 `RecommendationRequest.limit` still limits discovery alternatives to three. A concrete `journey_plan` can cover up to six requested goals, independently of that alternative count. Its ordered recommendations and their source quotes are validated together. One concrete goal selects one stop; broad discovery can retain three varied alternatives. More than six concrete goals produces an explicit coverage warning. `ItineraryRequest.limit` and `place_ids` allow six selected stops; the complete itinerary preserves their order and includes every selected leg. Older responses without a `journey_plan` retain the original alternative-limit semantics.
 
+`RecommendationResponse.suggestions` is an optional list of separately labelled ideas, each
+`PlaceSuggestion {place_id, why, suggested_activity, constraint_evaluations}`. These
+are never requested stages, ranked recommendations or already selected stops. They
+resolve to additional source places in `places`; core and suggestion IDs are unique
+and disjoint, their exact union equals the returned places, and the total cannot
+exceed six. Suggestions require nonempty core results and are empty for `no_match`
+or `needs_clarification`. Required predicates are checked on every suggestion too.
+The current service offers at most two varied cultural ideas after all explicit
+stages are covered, using one bounded local source lookup near the final stop.
+A one-kilometre straight-line candidate bound is not a verified walking detour.
+No extra model, context or route call is made for ideas; a user explicitly adds one
+before its complete route and duration are calculated. A timed-out idea lookup
+leaves the core result intact. Older responses may omit this field.
+
 The live composition uses the configured server-side LLM and a shared request budget. Missing credentials, refusals, invalid extraction or provider failures select a clearly disclosed local-rules fallback. Synthetic fixture mode retains its deterministic discovery adapter; offline semantic tests use MockTransport and the real checked-in catalog. Neither those fixtures nor schema validation prove arbitrary language will always be understood.
 
 | Method/path | Request | Success | Notes |
@@ -34,11 +48,11 @@ Errors use `ErrorResponse`: `invalid_request` (422), `unsupported_transport` (42
 - `walking` must work initially. Accept `cycling`/`driving` as recognized request values but return `unsupported_transport` until implemented. Never silently route as walking.
 - `origin` uses named latitude/longitude. GeoJSON geometry uses `[longitude, latitude]`. A routed `LineString` is allowed only for an actual route calculation. Approximate estimates always have `geometry: null` and nonempty assumptions. Never draw a straight line as a pedestrian route.
 - `return_to_origin` covers the complete return trip. A recommendation route covers origin → its place → origin when requested. An itinerary route covers origin → all ordered stops → origin when requested. Travel duration must include every leg. Visit duration is explicitly an estimate.
-- `ItineraryRequest.place_ids` is a required ordered list of 1–3 selected IDs. Preserve that order and every selected stop; never silently drop or replace a selected place. If the whole trip cannot meet required constraints, return `no_match` with an explanation. Exceeding `available_seconds` alone never removes a stop or rejects the trip. The list length cannot exceed `limit`.
+- `ItineraryRequest.place_ids` is a required ordered list of 1–6 selected IDs. Preserve that order and every selected stop; never silently drop or replace a selected place. If the whole trip cannot meet required constraints, return `no_match` with an explanation. Exceeding `available_seconds` alone never removes a stop or rejects the trip. The list length cannot exceed `limit`.
 - A recommendation's total is travel + visit. An itinerary's total is complete travel + the sum of every visit. `available_seconds` is a duration target: longer trips are allowed, marked `partial`, and carry a localized warning with full duration and extra time. Recommendation alternatives are not summed into one itinerary.
 - `known` facts require a nonnull value and supporting evidence. `unknown` facts have null value and no evidence claim. `conflicting` facts have null value and at least two evidence IDs. Unknown/conflicting does not mean false. Source freshness is not a truth guarantee.
 - Evidence records retain actual source identity, URL, record ID and retrieval time. An LLM is not a source for a place fact. Synthetic evidence and places must be explicitly marked and use `synthetic:` IDs; do not put synthetic data into the live dataset.
-- Every place fact/evaluation references evidence in that place. Every recommendation/stop/hit resolves to a returned place. Duplicate IDs, duplicate fact keys and duplicate constraint keys are invalid. Responses contain only their referenced places.
+- Every place fact/evaluation references evidence in that place. Every recommendation/stop/hit/suggestion resolves to a returned place. Duplicate IDs, duplicate fact keys and duplicate constraint keys are invalid. Responses contain only their referenced places.
 - Constraints are predicates expressed as `{key, value, strength}`. In v0.1, a key matches the same place fact key and comparison is exact JSON value equality (booleans are distinct from numbers). Do not introduce undocumented range or fuzzy semantics. Suggested predicate keys: `indoor`, `wheelchair_accessible`, `child_friendly`, `free_entry`, `open_at_requested_time`. Time-dependent predicates are computed from source schedules for the request instant before evaluation, retaining schedule evidence and an explanatory note.
 - Every requested constraint gets one evaluation per candidate. A required constraint must be **known and satisfied**, with its fact evidence cited. An absent or conflicting required fact excludes the place. Preferred unknown/unsatisfied constraints may remain, but must be explained. Relaxing a required constraint requires a new user request.
 - The plain UI amenity controls submit `preferred`; only an explicit mandatory choice submits `required`. Free-text destination intent is primary in ranking. Preferences may break equal-relevance ties, but cannot replace the requested goal. Diversity operates within comparable relevance and does not relax required predicates or invent evidence. This is selection policy, not a new wire field or fuzzy constraint comparison.

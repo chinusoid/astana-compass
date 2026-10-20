@@ -5,6 +5,11 @@ astana_recommender.DefaultRecommendationService(repository, retriever, context,
 generator=None, planner=None). Dependencies implement the async ports from astana_contracts.
 Importing the package creates no clients, makes no requests and reads no secrets.
 
+`planner_timeout_seconds` can give semantic planning a different per-port limit
+from other provider work; it still shares `request_budget_seconds`. API wiring
+uses 11 seconds for the planner port, leaving room for the hosted ten-second
+deadline and its local fallback, inside a 26-second total work budget.
+
 ## Implemented behavior
 
 - Validates requests, dependency boundaries and final responses against the
@@ -137,7 +142,7 @@ Or:
     pytest packages/recommender/tests
 
 The tests use explicitly synthetic local ports. Named garden and food regressions
-also exercise the checked-in 628-place OSM snapshot with local lexical retrieval;
+also exercise the checked-in 682-place OSM snapshot with local lexical retrieval;
 their route provider remains synthetic and makes no network requests.
 They exercise required/preferred
 semantics, unknown/conflicting facts, dynamic enrichment, bool/number equality,
@@ -154,3 +159,15 @@ has a total duration rather than per-leg arrival times; a future canonical
 extension is needed for arrival-aware itinerary schedule guarantees. The service
 does not parse additional hard constraints out of free text: the API/input layer
 must make such constraints explicit in the canonical request.
+
+## Optional nearby ideas
+
+After every explicit core stage is covered, a bounded source lookup can propose
+up to two diverse cultural stops as separate `suggestions`, never as silently
+inserted recommendations. Required facts are rechecked, core IDs/names and nearby
+duplicates are excluded, and unsupported exclusions suppress extras. The single
+lookup uses the final stop as its local anchor, considers at most 12 candidates
+within 1 km straight-line, and has a 2-second cap within the remaining request
+budget. This is a candidate bound, not a pedestrian detour estimate. No model,
+context or route calls are added. An optional failure preserves the core result;
+an explicit user add triggers the ordinary complete itinerary calculation.

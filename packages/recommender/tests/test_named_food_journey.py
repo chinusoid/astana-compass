@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
+import json
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,11 @@ from packages.recommender.tests.test_service import Context, Repository, constra
 ROOT = Path(__file__).resolve().parents[3]
 BOTANICAL_ID = "osm:way/1196402246"
 ACTUAL_QUERY = "хочу в ботанический сад сходить и пицу покушать"
-NOW = datetime(2026, 10, 20, 7, tzinfo=timezone.utc)
+_SNAPSHOT = json.loads((ROOT / "data/samples/astana-osm.json").read_text(encoding="utf-8"))
+# Catalog refreshes must not look like future data to a pre-import fixed clock.
+# Dedicated repository tests separately cover rejection of future timestamps.
+NOW = max(datetime.fromisoformat(evidence["retrieved_at"].replace("Z", "+00:00"))
+          for venue in _SNAPSHOT["places"] for evidence in venue["evidence"]) + timedelta(hours=1)
 
 
 class RecordingRetriever:

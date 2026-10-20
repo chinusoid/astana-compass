@@ -152,7 +152,9 @@ async def build_services(settings, stack, *, progress=None):
         progress.enter("recommender")
         recommender = DefaultRecommendationService(
             repository, retriever, context, generator=generator, planner=planner,
-            planner_timeout_seconds=10,
+            # The hosted planner has a 10s deadline; allow its local fallback
+            # to finish before the port deadline cancels the whole plan.
+            planner_timeout_seconds=11,
             # Leave time for final contract checks/serialization before the
             # outer HTTP deadline; a longer model plan shares this same budget.
             request_budget_seconds=min(26, max(0.1, settings.request_timeout_seconds - 2)),

@@ -308,6 +308,6 @@ def test_recommendation_work_leaves_headroom_inside_http_deadline(outer, budget)
         async with AsyncExitStack() as stack:
             services = await build_services(Settings(request_timeout_seconds=outer), stack)
             assert services.recommender.request_budget_seconds == budget
-            assert services.recommender.planner_timeout_seconds == 10
+            assert services.recommender.planner_timeout_seconds == 11
             assert budget < outer
     asyncio.run(check())

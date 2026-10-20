@@ -47,7 +47,7 @@ def test_live_snapshot_is_ready_and_attributes_its_real_catalogue(offline_live):
     assert offline_live.get("/v1/health/ready").status_code == 200
     status = offline_live.get("/v1/data-status").json()
     validate_payload("DataStatusResponse", status)
-    assert status["total_places"] == 628
+    assert status["total_places"] == 682
     assert len(status["sources"]) == 18
     assert status["sources"][0]["status"] in {"ready", "stale"}
     assert status["sources"][0]["source_url"] == "https://www.openstreetmap.org/copyright"

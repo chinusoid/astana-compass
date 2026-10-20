@@ -449,3 +449,45 @@ test("a general four-activity scenario reaches every requested stop automaticall
     animations: "disabled",
   });
 });
+
+test("a shopping centre on the way comes before the named final garden", async ({
+  page,
+  request,
+}, testInfo) => {
+  const botanicalId = "osm:way/1196402246";
+  const botanical = (await (
+    await request.get(`/api/v1/places/${encodeURIComponent(botanicalId)}`)
+  ).json()) as Place;
+  await page.goto("/");
+  await fillWalk(
+    page,
+    botanical,
+    "Хочу в ботанический сад а по пути зайти в торговый центр красивый",
+  );
+  await page.locator('input[name="minutes"]').fill("");
+  const recommendation = page.waitForResponse(
+    (res) => res.url().endsWith("/recommendations") && res.request().method() === "POST",
+  );
+  const built = page.waitForResponse(
+    (res) => res.url().endsWith("/itineraries") && res.request().method() === "POST",
+  );
+  await page.locator('textarea[name="query"]').press("Enter");
+  const result = (await (await recommendation).json()) as RecommendationResponse;
+  const ids = result.recommendations.map((item) => item.place_id);
+  expect(ids).toHaveLength(2);
+  const mall = result.places.find((place) => place.id === ids[0])!;
+  expect(mall.categories).toContain("mall");
+  expect(mall.is_synthetic).toBe(false);
+  expect(ids[1]).toBe(botanicalId);
+  const itinerary = (await (await built).json()) as ItineraryResponse;
+  expect(itinerary.stops.map((stop) => stop.place_id)).toEqual(ids);
+  await expect(page.locator(".journey-preview .journey-stop strong")).toHaveText([
+    mall.name, botanical.name,
+  ]);
+  await expect(page.getByTestId("map-journey-summary")).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("mall-on-the-way-to-botanical-garden.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+});

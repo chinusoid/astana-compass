@@ -10,6 +10,39 @@ From repository root, `uv sync --locked`, then `uv run uvicorn astana_api.app:cr
 
 `ASTANA_MODE=live` loads the team factories below. Missing imports/configuration result in liveness 200 and readiness/API 503. It never substitutes fixture data. All returned place payloads reject synthetic markers in live mode. In live mode readiness requires a populated source with a successful import (ready or explicitly stale), a positive total count, and a valid non-synthetic sample place. It does not probe the retrieval index. Essential readiness probes repository data status; it does not guarantee every external provider is up. Optional generation failures produce a clearly reported deterministic fallback. See the [project README](../../README.md) for the published demo and deployment context; availability of individual providers requires separate live checks.
 
+Recommendations and itineraries share one per-request work deadline, normally
+26 seconds within the outer 30-second HTTP limit. Every phase and route retry
+uses the remaining allowance; finished recommendations survive a slow provider
+as a disclosed partial result. A selected itinerary still needs its complete
+ordered route. OpenAI journey planning has a ten-second hosted deadline and an
+eleven-second port limit so its local fallback can finish. Shorter configured
+HTTP limits also shorten the work budget. Concurrent requests have independent
+budgets, and external cancellation propagates.
+
+Unavailable operations log the response's support `request_id`, route template,
+fixed failure category and elapsed milliseconds. Raw wishes, coordinates,
+credentials, exception text and provider bodies are not logged. A support number
+from a version before this diagnostic change cannot retroactively identify a
+failure whose category was not recorded.
+
+## Optional ideas beside a planned walk
+
+A completely covered concrete scenario can return `suggestions` separately from
+its requested `recommendations`. The service performs at most one extra local
+retrieval (12 source candidates, at most two varied cultural ideas within one
+kilometre straight-line of the final stop). This optional phase has a two-second
+cap, respects the remaining request budget and preserves finish headroom. It
+makes no additional model, provider-enrichment or routing request. Failure leaves
+the requested route unchanged. Unresolved/unfinished scenarios and unsupported
+negative or exclusive wishes do not receive speculative extras.
+
+Each idea resolves to an attributed real catalog place and carries its own
+constraint evaluations. Missing required facts exclude it. It is a proposal for
+an activity, not evidence of amenities, opening at arrival, admission, or a
+verified detour. The UI labels ideas separately and initially selects only core
+recommendations; adding an idea explicitly rebuilds the complete ordered route.
+The collapsed phone sheet shows the available idea count.
+
 ## Factory contract for teams
 
 Factories may return their resource directly or an awaitable. Composition verifies required callable methods and inspectable signatures before reporting readiness; invalid factory products fail closed and partially created clients are closed. It does not make trial provider calls. Correct wrappers returning awaitables remain supported. Define keyword arguments exactly:

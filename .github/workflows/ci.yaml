@@ -546,7 +546,7 @@ jobs:
                   time.sleep(1)
 
           status = get("/v1/data-status", "DataStatusResponse")
-          assert status["total_places"] == 628, status["total_places"]
+          assert status["total_places"] == 682, status["total_places"]
           assert status["sources"]
           assert all(source["status"] in {"ready", "stale"} for source in status["sources"])
           catalog = get("/v1/places?categories=museum&limit=3", "PlaceListResponse")
@@ -556,7 +556,7 @@ jobs:
           facts = {fact["key"]: fact for fact in detail["facts"]}
           assert facts["has_wifi"]["status"] == "known" and facts["has_wifi"]["value"] is True
           assert facts["toilets"]["status"] == "known" and facts["toilets"]["value"] is True
-          print("Render live image passed: non-root installed runtime, dynamic PORT, 628 real POIs and verified details, no provider network or keys.")
+          print("Render live image passed: non-root installed runtime, dynamic PORT, 682 real POIs and verified details, no provider network or keys.")
           PY
       - name: Logs on failure
         if: failure()
