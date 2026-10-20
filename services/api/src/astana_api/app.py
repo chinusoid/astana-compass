@@ -20,6 +20,7 @@ from starlette.responses import JSONResponse
 from astana_contracts import ContractValidationError, load_schema, validate_payload
 from astana_recommender import RecommenderError
 from .composition import StartupProgress, build_services
+from .contract_diagnostics import diagnostic
 from .demo_examples import request_examples
 from .sandbox import sandbox_router
 from .settings import Settings
@@ -270,7 +271,13 @@ def create_app(settings=None, services=None):
         except TimeoutError:
             request.state.failure_reason = "deadline"
             raise APIError("provider_unavailable") from None
-        except ContractValidationError:
+        except ContractValidationError as error:
+            details = diagnostic(error)
+            logger.warning(
+                "API contract rejected: request_id=%s definition=%s code=%s stage=%s path=%s rule=%s",
+                request.state.request_id, details["definition"], details["code"],
+                details["stage"], details["path"], details["rule"],
+            )
             request.state.failure_reason = "invalid_dependency_response"
             raise APIError("provider_unavailable") from None
         except Exception:
