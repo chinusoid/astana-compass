@@ -11,7 +11,7 @@ from typing import Any
 
 from astana_contracts import JSON, PlaceRepository, validate_payload
 
-from .lexicon import CATEGORY_GROUPS, LEXICON_VERSION, document_terms, normalize, understand
+from .lexicon import CATEGORY_GROUPS, FOOD_CATEGORIES, LEXICON_VERSION, document_terms, known_cuisines, normalize, understand
 from .names import goal_text, mentions, source_names, source_texts, typo_expansions, words
 
 DYNAMIC_KEYS = frozenset({"open_at_requested_time", "weather_suitable"})
@@ -119,6 +119,7 @@ class LexicalRetriever:
         aliases = {place["id"]: source_names(place) for place in source}
         goal, has_anchor = goal_text(request["query"], list(aliases.values()))
         name_mentions = {place_id: mentions(goal, names) for place_id, names in aliases.items()}
+        excluded_names = {place_id for place_id, names in aliases.items() if mentions(goal, names, excluded=True)}
         protected = list(goal)
         literal_terms = set()
         for found in name_mentions.values():
@@ -133,7 +134,9 @@ class LexicalRetriever:
         if not named_goal and query.diversify and "category:waterfront" in raw_query.terms:
             query = replace(query, terms=(query.terms - {"category:walk", "category:scenic"}) | {"category:waterfront"},
                             categories=CATEGORY_GROUPS["waterfront"])
-        named_only = named_goal and not query.terms
+        # Extra request wording/features do not broaden a literal destination to
+        # other gardens. An explicit second category/cuisine may add candidates.
+        named_only = named_goal and not (query.categories or query.cuisines)
         query = replace(query, terms=query.terms | literal_terms)
         corrections = typo_expansions(query.terms, list(aliases.values()))
         if corrections:
@@ -144,8 +147,13 @@ class LexicalRetriever:
         corpus = []
         for place in source:
             distance = distance_meters(request["origin"], place["location"])
+            if place["id"] in excluded_names:
+                continue
             if named_only and not name_mentions[place["id"]]:
                 continue
+            is_named = bool(name_mentions[place["id"]])
+            food_place = bool(FOOD_CATEGORIES.intersection(place["categories"]))
+            cuisines = known_cuisines(place) if food_place else frozenset()
             facts = {fact["key"]: fact for fact in place["facts"]}
             violated, deferred, matched = False, False, set()
             for constraint in request["constraints"]:
@@ -159,7 +167,21 @@ class LexicalRetriever:
                     violated = True
             if violated or query.excluded_categories.intersection(place["categories"]):
                 continue
-            if query.categories and not query.categories.intersection(place["categories"]):
+            if query.excluded_cuisines.intersection(cuisines):
+                continue
+            if query.cuisines:
+                # A garden plus pizza may retrieve both stages. Generic food
+                # categories still require explicit cuisine, including named cafes.
+                other_categories = query.categories - FOOD_CATEGORIES
+                food_categories = FOOD_CATEGORIES if "restaurant" in query.categories else query.categories & FOOD_CATEGORIES
+                cuisine_match = query.cuisines.intersection(cuisines) and (
+                    not food_categories or food_categories.intersection(place["categories"])
+                )
+                if not (is_named and not food_place) and not (
+                    other_categories.intersection(place["categories"]) or cuisine_match
+                ):
+                    continue
+            elif query.categories and not is_named and not query.categories.intersection(place["categories"]):
                 continue
             terms = document_terms(place)
             if any("category:" + theme in terms for theme in query.excluded_themes):
@@ -168,6 +190,9 @@ class LexicalRetriever:
                 fact = facts.get(key)
                 if fact and fact["status"] == "known" and fact["value"] is True:
                     matched.add(key)
+            if query.cuisines.intersection(cuisines):
+                matched.add("osm:cuisine")
+            matched.update(mention.key for mention in name_mentions[place["id"]] if mention.key)
             for name, key in aliases[place["id"]]:
                 if key and query.terms.intersection(words(name)):
                     matched.add(key)
@@ -191,7 +216,7 @@ class LexicalRetriever:
                 inverse = math.log1p((len(corpus) - frequencies[term] + 0.5) / (frequencies[term] + 0.5))
                 # A structured category matches equally whether its source has a
                 # short label or a richer description. BM25 length applies to words.
-                if term.startswith("category:"):
+                if term.startswith(("category:", "cuisine:")):
                     score += 1.0
                     continue
                 length = sum(terms.values())

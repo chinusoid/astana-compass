@@ -69,6 +69,12 @@ def _phrase_pattern(name: str) -> re.Pattern[str] | None:
         {term for term in understand(name).terms if ":" in term}
     )):
         return None
+    # Inflect only these complete, source-backed names. This does not translate
+    # a generic garden or turn a botanical description into a named destination.
+    if tokens == ("ботанический", "сад"):
+        return re.compile(r"(?<!\w)ботаническ(?:ий|ого|ому|им|ом)[\W_]+сад(?:а|у|ом|е)?(?!\w)")
+    if tokens == ("ботаникалық", "бақ"):
+        return re.compile(r"(?<!\w)ботаникалық[\W_]+бақ(?:қа|та|тан|тың|ты)?(?!\w)")
     suffix = r"(?:ға|ге|қа|ке|да|де|та|те|дан|ден|тан|тен|ның|нің)?" if (
         len(tokens[-1]) >= 5 and all("\u0400" <= char <= "\u052f" for char in tokens[-1])
     ) else ""
@@ -110,7 +116,7 @@ class NameMention:
     key: str | None
 
 
-def mentions(text: str, aliases: list[tuple[str, str | None]]) -> list[NameMention]:
+def mentions(text: str, aliases: list[tuple[str, str | None]], *, excluded: bool = False) -> list[NameMention]:
     result = []
     activities = [match.span() for pattern in ACTIVITIES.values() for match in pattern.finditer(text)]
     for name, key in aliases:
@@ -122,7 +128,7 @@ def mentions(text: str, aliases: list[tuple[str, str | None]]) -> list[NameMenti
                 if any(start <= match.start() and match.end() <= end and match.span() != (start, end)
                        for start, end in activities):
                     continue
-                if not negated(text, match.start(), match.end()):
+                if negated(text, match.start(), match.end()) == excluded:
                     result.append(NameMention(match.start(), match.end(), key))
     return result
 

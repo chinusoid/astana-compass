@@ -6,10 +6,10 @@ from dataclasses import dataclass
 import re
 import unicodedata
 
-LEXICON_VERSION = "ru-kk-en-4"
+LEXICON_VERSION = "ru-kk-en-5"
 CATEGORIES = {
     "cafe": r"кафе(?:ге|де|ден|ні|нің|лер(?:ге|де|ден|і|ін)?)?|кофе\w{0,12}|coffee|caf[eé]s?|cappuccino|капучино|латте",
-    "restaurant": r"рестора\w{0,12}|поесть|обед\w{0,12}|ужин\w{0,12}|еда|restaurants?|dining|lunch|dinner|eat|тамақ\w{0,12}|мейрамхана\w{0,12}",
+    "restaurant": r"рестора\w{0,12}|поесть|покушать|обед\w{0,12}|ужин\w{0,12}|еда|restaurants?|dining|lunch|dinner|eat|тамақ\w{0,12}|мейрамхана\w{0,12}",
     "museum": r"музе\w{0,12}|museums?|мұражай\w{0,12}",
     "park": r"парк\w{0,12}|сквер\w{0,12}|parks?|саябақ\w{0,12}",
     "garden": r"сад|сада|саду|ботаническ\w{0,12}|gardens?|botanical|бақ|баққа|ботаникалық",
@@ -46,6 +46,14 @@ FEATURES = {
     "wheelchair_accessible": r"безбарьер\w{0,12}|инвалид\w{0,12}\s+коляс\w{0,12}|wheelchair\w{0,12}|step.free|кедергісіз|мүгедек\w{0,12}\s+арб\w{0,12}",
     "free_entry": r"бесплат\w{0,12}|free\s+(?:entry|admission)|no\s+(?:entry\s+)?fee|тегін",
 }
+FOOD_CATEGORIES = frozenset({"cafe", "restaurant"})
+CUISINES = {
+    # Bounded forms include the common missing-ц typo and Kazakh case suffixes.
+    "pizza": r"pizzas?|pizzerias?|пицц?(?:[ауые]|ей|ами|ах|аны|аның|аға|ада|адан|алар(?:ды|дың|ға|да|дан)?)|пиццерия\w{0,6}",
+}
+CUISINE_PATTERNS = {
+    key: re.compile(r"(?<!\w)(?:" + pattern + r")(?!\w)", re.I) for key, pattern in CUISINES.items()
+}
 PATTERNS = {
     key: re.compile(r"(?<!\w)(?:" + pattern + r")(?!\w)", re.I)
     for key, pattern in {**CATEGORIES, **FEATURES}.items()
@@ -71,12 +79,13 @@ NEG_BEFORE = re.compile(r"(?<!\w)(?:не|без|not|no|without|avoid|don['’]?t
 # phrases must not negate a later goal: "no stairs museum", "без сахара кофе".
 NEG_BRIDGE = re.compile(
     r"\s*(?:(?:нуж\w{0,8}|хочу|хотим|надо|мне|нам|с|очень|тих\w{0,8}|спокойн\w{0,8}|"
-    r"need|want|like|a|an|the|any|to|for|very|quiet|peaceful|indoor|outdoor)\s+){0,6}", re.I,
+    r"в|во|на|к|до|идти|пойти|ходить|сходить|посетить|"
+    r"need|want|like|a|an|the|any|to|for|in|at|go|visit|eat|very|quiet|peaceful|indoor|outdoor)\s+){0,6}", re.I,
 )
 NEG_AFTER = re.compile(
     r"^\s*(?:(?:мне|нам|is|are)\s+)?(?:не\s+(?:нуж\w{0,12}|важ\w{0,12}|обязател\w{0,12}|хочу)|"
     r"(?:not|(?:isn|aren)['’]t)\s+(?:needed|required|important)|optional|doesn['’]t\s+matter|"
-    r"(?:керек|қажет|маңызды)\s+емес|емес)", re.I,
+    r"(?:керек|қажет|маңызды)\s+емес|емес|(?:барғым|барғымыз|жегім|жегіміз)\s+келмейді)", re.I,
 )
 WORDS = re.compile(r"[^\W_]+(?:['’][^\W_]+)*", re.UNICODE)
 STOPWORDS = frozenset("""
@@ -114,10 +123,13 @@ class Query:
     has_unresolved_anchor: bool
     diversify: bool = False
     excluded_themes: frozenset[str] = frozenset()
+    cuisines: frozenset[str] = frozenset()
+    excluded_cuisines: frozenset[str] = frozenset()
 
 
 def understand(text: str, *, named_goal: bool = False) -> Query:
     terms, positive, negative, features, negative_features = set(), set(), set(), set(), set()
+    cuisines, negative_cuisines = set(), set()
     walk_requested, has_anchor, activities = False, False, set()
     for clause in CLAUSE.split(normalize(text)):
         covered: set[int] = set()
@@ -141,6 +153,10 @@ def understand(text: str, *, named_goal: bool = False) -> Query:
                         (negative if is_negative else positive).add(key)
                 else:
                     (negative_features if is_negative else features).add(key)
+        for key, pattern in CUISINE_PATTERNS.items():
+            for match in pattern.finditer(clause):
+                covered.update(range(match.start(), match.end()))
+                (negative_cuisines if negated(clause, match.start(), match.end()) else cuisines).add(key)
         for match in WORDS.finditer(clause):
             token = match.group()
             if (
@@ -150,6 +166,7 @@ def understand(text: str, *, named_goal: bool = False) -> Query:
                 terms.add(token)
     positive -= negative
     features -= negative_features
+    cuisines -= negative_cuisines
     if not positive and not named_goal:
         positive.update(activities - negative)
     # A walk is an activity, not a competing park destination when the user
@@ -158,12 +175,28 @@ def understand(text: str, *, named_goal: bool = False) -> Query:
         positive.add("walk")
     terms.update("category:" + key for key in positive)
     terms.update("feature:" + key for key in features)
+    terms.update("cuisine:" + key for key in cuisines)
     return Query(
         frozenset(terms), frozenset().union(*(CATEGORY_GROUPS[k] for k in positive)),
         frozenset().union(*(CATEGORY_GROUPS[k] for k in negative - SOURCE_THEMES)), frozenset(features), has_anchor,
         not named_goal and (walk_requested or "scenic" in positive or len(positive) > 1),
         frozenset(negative & SOURCE_THEMES),
+        frozenset(cuisines), frozenset(negative_cuisines),
     )
+
+
+def known_cuisines(place: dict) -> frozenset[str]:
+    """Only explicit, known cuisine tags with present evidence establish a dish."""
+    evidence = {item["id"] for item in place["evidence"]}
+    cuisines = set()
+    for fact in place["facts"]:
+        if (fact["key"] != "osm:cuisine" or fact["status"] != "known" or not isinstance(fact["value"], str)
+                or not fact["evidence_ids"] or not set(fact["evidence_ids"]).issubset(evidence)):
+            continue
+        values = {value.strip() for value in re.split(r"[;,]", normalize(fact["value"]))}
+        if values.intersection({"pizza", "italian_pizza"}):
+            cuisines.add("pizza")
+    return frozenset(cuisines)
 
 
 def document_terms(place: dict) -> Counter[str]:
@@ -181,7 +214,8 @@ def document_terms(place: dict) -> Counter[str]:
         parsed = understand(text)
         # A lexical feature token from wording is not a matched_fact_keys claim.
         for term in parsed.terms:
-            terms[term] = max(terms[term], 1)
+            if not term.startswith("cuisine:"):
+                terms[term] = max(terms[term], 1)
         for key in SOURCE_THEMES:
             if any(not negated(text, match.start(), match.end()) for match in PATTERNS[key].finditer(text)):
                 source_themes.add(key)
@@ -197,4 +231,7 @@ def document_terms(place: dict) -> Counter[str]:
     for fact in place["facts"]:
         if fact["key"] in FEATURES and fact["status"] == "known" and fact["value"] is True:
             terms["feature:" + fact["key"]] += 2
+    if FOOD_CATEGORIES.intersection(place["categories"]):
+        for cuisine in known_cuisines(place):
+            terms["cuisine:" + cuisine] = 3
     return terms
