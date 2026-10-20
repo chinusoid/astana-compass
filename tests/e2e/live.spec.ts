@@ -252,6 +252,7 @@ test("official botanical visit details keep greenhouse hours separate and expose
   await page.screenshot({
     path: testInfo.outputPath("botanical-practical-card.png"),
     fullPage: true,
+    animations: "disabled",
   });
 });
 

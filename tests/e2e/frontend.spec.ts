@@ -259,6 +259,7 @@ test("the visible companion explains actual plan times and can search with less 
   await page.screenshot({
     path: testInfo.outputPath("walk-plan-brief.png"),
     fullPage: true,
+    animations: "disabled",
   });
   const original = await page.locator('textarea[name="query"]').inputValue();
   const next = page.waitForRequest(
