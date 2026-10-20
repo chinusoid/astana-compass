@@ -193,7 +193,8 @@ class DefaultRecommendationService:
         if stage is not None:
             # These are grounded extraction filters, never model-generated POI
             # identities. The retriever verifies them against catalog sources.
-            payload.update(named_place=stage["named_place"], cuisine=stage["cuisine"])
+            payload.update(named_place=stage["named_place"], cuisine=stage["cuisine"],
+                           categories=deepcopy(stage.get("categories", [])))
         validate_payload("RetrievalRequest", payload)
         try:
             result = await asyncio.wait_for(
@@ -201,10 +202,12 @@ class DefaultRecommendationService:
             )
             validate_payload("RetrievalResponse", result)
             places = {p["id"]: p for p in result["places"]}
+            requested_categories = set(stage.get("categories", [])) if stage is not None else set()
             candidates = [
                 deepcopy(places[h["place_id"]])
                 for h in _diverse_lexical_hits(result["hits"][:limit], places)
-                if stage is not None or not apply_legacy_matching or stage_matches(places[h["place_id"]], request["query"])
+                if (not requested_categories or requested_categories.intersection(places[h["place_id"]]["categories"]))
+                and (stage is not None or not apply_legacy_matching or stage_matches(places[h["place_id"]], request["query"]))
             ]
             return candidates, list(result["warnings"]), False
         except Exception:
@@ -754,11 +757,14 @@ class DefaultRecommendationService:
             response["status"] = "partial" if degraded else "matched"
         else:
             response["warnings"].append(text["no_match"])
-            if missing_stages:
+            clarification_stages = missing_stages if plan is None else [
+                index for index in missing_stages if plan["stages"][index - 1]["kind"] == "unresolved"
+            ]
+            if clarification_stages or response["clarification_questions"]:
                 response["status"] = "needs_clarification"
                 response["clarification_questions"] = _dedupe([
                     *response["clarification_questions"],
-                    *(text["stage_missing"].format(order=index) for index in missing_stages),
+                    *(text["stage_missing"].format(order=index) for index in clarification_stages),
                 ])[:5]
         return self._finish(response)
 

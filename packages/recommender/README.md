@@ -28,11 +28,13 @@ Importing the package creates no clients, makes no requests and reads no secrets
   canonical `JourneyPlan` preserves source quotes, explicit or suggested order,
   named destinations, food goals and unresolved wishes. Invalid extraction or
   planner failure retains an unresolved goal and asks for clarification.
-- Each concrete goal retrieves independently with grounded `named_place` and
-  `cuisine` filters. The retrieval port must verify names against source aliases
+- Each concrete goal retrieves independently with grounded `named_place`,
+  `cuisine` and optional source `categories` filters. The retrieval port must verify names against source aliases
   and food against known, cited cuisine facts. A name or description cannot
   establish that a dish is served. The orchestration does not apply a separate
-  scenario-specific matching rule to planned stages.
+  scenario-specific matching rule to planned stages. It also rejects a returned
+  place whose source categories match none of the stage's requested categories;
+  incidental words in a restaurant description cannot satisfy a shop or pool goal.
 - A single concrete goal yields one stop. Multiple goals yield one distinct
   place per goal in plan order, up to six concrete stops, independently of the
   request's one-to-three discovery alternative limit. Unresolved stages do not
@@ -46,7 +48,8 @@ Importing the package creates no clients, makes no requests and reads no secrets
   and soft time preferences apply to plans and itineraries.
 - An empty, unmatched or unroutable sequence stage is disclosed as an
   incomplete plan, with its original stage number. Available stops remain a
-  partial result; if none are available, the response needs clarification.
+  partial result. If none are available, understood concrete goals return
+  `no_match`; unresolved wishes or planner questions return `needs_clarification`.
   A failed stage search never substitutes an arbitrary nearby place.
 - With no planner injected, the legacy API behavior remains available to direct
   package callers. Production wiring supplies the planner. Planned requests never

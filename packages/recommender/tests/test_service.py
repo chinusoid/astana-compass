@@ -1055,9 +1055,12 @@ class Planner:
         return deepcopy(self.value)
 
 
-def planned_stage(quote, *, search=None, kind="activity", name=None, cuisine=None):
-    return {"source_quote": quote, "search_query": search or quote, "kind": kind,
-            "named_place": name, "cuisine": cuisine}
+def planned_stage(quote, *, search=None, kind="activity", name=None, cuisine=None, categories=None):
+    stage = {"source_quote": quote, "search_query": search or quote, "kind": kind,
+             "named_place": name, "cuisine": cuisine}
+    if categories is not None:
+        stage["categories"] = categories
+    return stage
 
 
 class PlannedRetriever(Retriever):
@@ -1077,6 +1080,43 @@ class PlannedJourneyTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
         self.setup_service(list(venues.values()), planner=planner, **kwargs)
         self.service.retriever = self.retriever = PlannedRetriever(mapping)
         return planner
+
+    async def test_four_distinct_source_categories_are_forwarded_and_preserved(self):
+        stages = [
+            planned_stage("The Sphere", kind="named_place", name="The Sphere", categories=["attraction"]),
+            planned_stage("read somewhere", search="library", categories=["library"]),
+            planned_stage("sushi", kind="meal", cuisine="sushi", categories=["restaurant", "cafe"]),
+            planned_stage("watch a film", search="cinema", categories=["cinema"]),
+        ]
+        venues = [place(index) for index in range(1, 5)]
+        for venue, category in zip(venues, ("attraction", "library", "restaurant", "cinema"), strict=True):
+            venue["categories"] = [category]
+        venues[0]["name"] = "The Sphere"
+        venues[2]["facts"] = [fact("osm:cuisine", "sushi")]
+        planner = self.setup_planned(stages, {stage["search_query"]: [venue]
+                                           for stage, venue in zip(stages, venues, strict=True)})
+        query = "The Sphere then read somewhere then sushi then watch a film"
+        value = await self.service.recommend(request(query=query))
+        self.assertEqual([item["place_id"] for item in value["recommendations"]], [venue["id"] for venue in venues])
+        self.assertEqual([payload["categories"] for payload in self.retriever.requests],
+                         [stage["categories"] for stage in stages])
+        self.assertEqual(value["journey_plan"], planner.value)
+        self.assertEqual(len(self.context.routes), 4)
+
+    async def test_wrong_source_category_cannot_satisfy_activity_from_incidental_prose(self):
+        restaurant = place(1)
+        restaurant.update(categories=["restaurant"], description="Near the postcard shop and swimming pool.")
+        stages = [planned_stage("postcard shop", categories=["shop"]),
+                  planned_stage("swimming pool", categories=["swimming_pool"])]
+        self.setup_planned(stages, {stage["search_query"]: [restaurant] for stage in stages})
+        value = await self.service.recommend(request(query="postcard shop then swimming pool"))
+        self.assertEqual(value["status"], "no_match")
+        self.assertEqual(value["places"], [])
+        self.assertEqual(value["clarification_questions"], [])
+        self.assertFalse(self.context.routes)
+        self.assertFalse(self.context.context_requests)
+        self.assertIn("stage 1", " ".join(value["warnings"]))
+        self.assertIn("stage 2", " ".join(value["warnings"]))
 
     async def test_semantic_six_goal_plan_named_food_culture_coffee_shop_and_park(self):
         stages = [
@@ -1188,9 +1228,37 @@ class PlannedJourneyTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
         self.context.route_error = RuntimeError("private provider failure")
         value = await self.service.recommend(request(query="museum"))
         self.assertEqual(len(self.context.routes), 6)
-        self.assertEqual(value["status"], "needs_clarification")
+        self.assertEqual(value["status"], "no_match")
         self.assertEqual(value["places"], [])
         self.assertNotIn("private provider failure", json.dumps(value))
+
+    async def test_understood_goal_with_unknown_required_fact_is_no_match_not_ambiguity(self):
+        stage = planned_stage("Drinkit", kind="named_place", name="Drinkit", categories=["cafe"])
+        venue = place(1)
+        venue.update(name="Drinkit", categories=["cafe"])
+        self.setup_planned([stage], {"Drinkit": [venue]})
+        value = await self.service.recommend(request(query="Drinkit", constraints=[constraint("has_wifi")]))
+        self.assertEqual(value["status"], "no_match")
+        self.assertEqual(value["places"], [])
+        self.assertEqual(value["clarification_questions"], [])
+        self.assertIn("stage 1", " ".join(value["warnings"]))
+        self.assertFalse(self.context.routes)
+
+    async def test_understood_unavailable_activity_is_no_match_with_coverage_warning(self):
+        stage = planned_stage("underwater chess", categories=["chess_club"])
+        self.setup_planned([stage], {})
+        value = await self.service.recommend(request(query="underwater chess"))
+        self.assertEqual(value["status"], "no_match")
+        self.assertEqual(value["places"], [])
+        self.assertEqual(value["clarification_questions"], [])
+        self.assertIn("stage 1", " ".join(value["warnings"]))
+
+    async def test_planner_questions_still_require_clarification_when_no_results(self):
+        planner = self.setup_planned([planned_stage("museum")], {})
+        planner.value["clarification_questions"] = ["Which museum did you mean?"]
+        value = await self.service.recommend(request(query="museum"))
+        self.assertEqual(value["status"], "needs_clarification")
+        self.assertEqual(value["clarification_questions"], ["Which museum did you mean?"])
 
     async def test_discovery_route_failures_are_also_bounded(self):
         self.setup_service([place(index) for index in range(1, 101)], planner=Planner([]), candidate_limit=100)
