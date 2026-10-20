@@ -46,8 +46,11 @@ Importing the package creates no clients, makes no requests and reads no secrets
   heuristic within the top nine retrieved candidates, then rank returned options
   by their actual route distance. Only the usual returned alternatives are routed;
   no extra LLM calls are added. The heuristic is never displayed as a route.
-  Conflicting or negated pace requests and explicit stage order preserve normal
-  relevance/order behavior. Durations remain a soft preference.
+  Conflicting or negated pace requests preserve normal relevance behavior.
+  Ordered stages retain their requested order; an explicit pace preference
+  selects within each stage using the previous chosen stop as its geographic
+  anchor. Only chosen stops are routed, with no claim of a globally shortest
+  path. Durations remain a soft preference.
 
 The default visit estimate is 1,200 seconds. A positive integer source fact named
 visit_duration_seconds can override it. Durations are not shortened simply to fit

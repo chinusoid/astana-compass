@@ -874,6 +874,62 @@ class ItineraryTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
 
 
 class PaceAndCategoryTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
+    async def test_shorter_ordered_coffee_park_keeps_stage_order_and_uses_previous_stop(self):
+        coffee_far, coffee_near, park_near_origin, park_near_coffee = [place(index) for index in (9, 4, 1, 3)]
+        for venue in (coffee_far, coffee_near):
+            venue["categories"] = ["cafe"]
+        for venue in (park_near_origin, park_near_coffee):
+            venue["categories"] = ["park"]
+        venues = [coffee_far, coffee_near, park_near_origin, park_near_coffee]
+        self.setup_service(venues)
+
+        class StageRetriever(Retriever):
+            async def retrieve(self, payload):
+                result = await super().retrieve(payload)
+                category = "cafe" if "coffee" in payload["query"] else "park"
+                result["places"] = [venue for venue in result["places"] if category in venue["categories"]]
+                allowed = {venue["id"] for venue in result["places"]}
+                result["hits"] = [hit for hit in result["hits"] if hit["place_id"] in allowed]
+                return result
+
+        self.service.retriever = StageRetriever(venues)
+        original = self.context.estimate_route
+
+        async def measured(**kwargs):
+            result = await original(**kwargs)
+            points = [kwargs["origin"], *kwargs["destinations"]]
+            if kwargs["return_to_origin"]:
+                points.append(kwargs["origin"])
+            # Synthetic routed measurements deliberately differ by leg. The
+            # recommender must use the returned values without inventing paths.
+            result["distance_meters"] = round(sum(
+                abs(second["lat"] - first["lat"]) * 100_000
+                for first, second in zip(points, points[1:])
+            ))
+            result["duration_seconds"] = result["distance_meters"]
+            return result
+
+        self.context.estimate_route = measured
+        baseline = await self.service.recommend(request(query="First coffee then park"))
+        baseline_ids = [item["place_id"] for item in baseline["recommendations"]]
+        self.assertEqual(baseline_ids, [coffee_far["id"], park_near_origin["id"]])
+        baseline_trip = await self.service.build_itinerary(request(query="First coffee then park", place_ids=baseline_ids))
+        self.assertEqual(len(self.context.routes), 3)  # two selected alternatives and one complete itinerary
+        self.context.routes.clear()
+
+        query = "First coffee then park. I would like less walking and short transfers between stops."
+        refined = await self.service.recommend(request(query=query))
+        refined_ids = [item["place_id"] for item in refined["recommendations"]]
+        self.assertEqual(refined_ids, [coffee_near["id"], park_near_coffee["id"]])
+        self.assertEqual([item["rank"] for item in refined["recommendations"]], [1, 2])
+        self.assertTrue(refined["recommendations"][0]["why"].startswith("Stage 1"))
+        self.assertTrue(refined["recommendations"][1]["why"].startswith("Stage 2"))
+        self.assertEqual([item["route"]["distance_meters"] for item in refined["recommendations"]], [800, 600])
+        refined_trip = await self.service.build_itinerary(request(query=query, place_ids=refined_ids))
+        self.assertEqual(len(self.context.routes), 3)
+        self.assertLess(refined_trip["route"]["distance_meters"], baseline_trip["route"]["distance_meters"])
+        self.assertEqual([stop["place_id"] for stop in refined_trip["stops"]], refined_ids)
+
     async def test_enriched_green_themes_do_not_crowd_out_comparable_discovery_categories(self):
         parks = [place(index) for index in (1, 2, 3)]
         for park, description in zip(parks, (

@@ -501,34 +501,47 @@ class DefaultRecommendationService:
         offset = 0
         selected = []
         selected_stage_orders: list[int] = []
-        pace = walking_preference(request["query"]) if not stages else None
+        pace = walking_preference(request["query"])
         if pace:
             # Use a geographic heuristic only to choose the small shortlist;
             # it is never presented as a route. Keep normal provider call
             # counts, then rank the returned options by measured route length.
             origin = request["origin"]
-            longitude_scale = math.cos(math.radians(origin["lat"]))
 
-            def proximity(item: tuple[JSON, list[JSON]]) -> float:
+            def proximity(item: tuple[JSON, list[JSON]], anchor: JSON = origin) -> float:
                 location = item[0]["location"]
                 return math.hypot(
-                    location["lat"] - origin["lat"],
-                    (location["lon"] - origin["lon"]) * longitude_scale,
+                    location["lat"] - anchor["lat"],
+                    (location["lon"] - anchor["lon"]) * math.cos(math.radians(anchor["lat"])),
                 )
 
-            eligible = sorted(eligible[:9], key=proximity, reverse=pace == "long_walk")
+            if not stages:
+                eligible = sorted(eligible[:9], key=proximity, reverse=pace == "long_walk")
         if stages:
             by_id = {place["id"]: (place, evaluations) for place, evaluations in eligible}
             groups = [[by_id[place_id] for place_id in ids if place_id in by_id] for ids in stage_ids]
+            if pace:
+                groups = [group[:9] for group in groups]
             offsets = [0] * len(groups)
             completed = {}
             used: set[str] = set()
             while True:
                 batch = []
                 reserved = set(used)
+                anchor = request["origin"]
                 for index, group in enumerate(groups):
                     if index in completed:
+                        anchor = completed[index][0]["location"]
                         continue
+                    if pace:
+                        # Prefer shorter/longer transfers within this stage,
+                        # anchored to the preceding chosen stop. This only
+                        # selects candidates; measured routes remain explicit
+                        # and the requested stage order is never changed.
+                        group[offsets[index]:] = sorted(
+                            group[offsets[index]:], key=lambda item: proximity(item, anchor),
+                            reverse=pace == "long_walk",
+                        )
                     while offsets[index] < len(group) and group[offsets[index]][0]["id"] in reserved:
                         offsets[index] += 1
                     if offsets[index] < len(group) and len(batch) < self.route_concurrency:
@@ -536,6 +549,7 @@ class DefaultRecommendationService:
                         offsets[index] += 1
                         batch.append((index, item))
                         reserved.add(item[0]["id"])
+                        anchor = item[0]["location"]
                 if not batch:
                     break
                 routes = await asyncio.gather(*(self._route([item[0]], request) for _, item in batch))
@@ -569,7 +583,7 @@ class DefaultRecommendationService:
                 visit = self._visit_seconds(place)
                 total = route["duration_seconds"] + visit
                 selected.append((place, evaluations, route, visit, total))
-        if pace:
+        if pace and not stages:
             selected.sort(key=lambda item: item[2]["distance_meters"], reverse=pace == "long_walk")
         # Only the final (at most three) alternatives get generated text. Run
         # their bounded calls together so three slow providers use one timeout
