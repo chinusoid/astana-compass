@@ -107,6 +107,12 @@ export default function CityMap(props: Props) {
   const stopMotion = useRef<(() => void) | null>(null);
   const stopJourney = useRef<(() => void) | null>(null);
   const retryJourneyFit = useRef<(() => void) | null>(null);
+  const lastJourneyFit = useRef<{
+    map: LibreMap;
+    geometry: typeof geometry;
+    points: Location[];
+    overview: number | undefined;
+  } | null>(null);
   const stopTraffic = useRef<(() => void) | null>(null);
   const trafficRequest = useRef<AbortController | null>(null);
   const lastTrafficRequest = useRef(0);
@@ -749,13 +755,30 @@ export default function CityMap(props: Props) {
   useEffect(() => {
     retryJourneyFit.current = null;
     const map = mapRef.current;
-    if (!ready || !map || !hasJourney) return;
+    if (!ready || !map || !hasJourney) {
+      lastJourneyFit.current = null;
+      return;
+    }
+    const previous = lastJourneyFit.current;
+    // A sheet resize updates framing once without a second camera animation.
+    const animate =
+      !previous ||
+      previous.map !== map ||
+      previous.geometry !== geometry ||
+      previous.points !== journeyPoints ||
+      previous.overview !== props.overviewRequest;
+    lastJourneyFit.current = {
+      map,
+      geometry,
+      points: journeyPoints,
+      overview: props.overviewRequest,
+    };
     const fit = () => {
       retryJourneyFit.current = fitJourney(
         map,
         geometry,
         journeyPoints,
-        true,
+        animate,
         props.bottomInset,
       )
         ? null

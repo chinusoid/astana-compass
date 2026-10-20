@@ -428,6 +428,42 @@ it("fits all three stops and origin without inventing a line for approximate rou
   expect(map.fitBounds).toHaveBeenCalledTimes(count + 2);
 });
 
+it("reframes sheet insets immediately while explicit route overview still animates", async () => {
+  vi.mocked(window.matchMedia).mockReturnValue({
+    matches: false,
+  } as MediaQueryList);
+  const seed = structuredClone(
+    examples.cases.find((entry) => entry.name === "place_valid")!.instance,
+  ) as Place;
+  const route = (
+    examples.cases.find((entry) => entry.name === "recommendations_valid")!
+      .instance as { recommendations: { route: RouteEstimate }[] }
+  ).recommendations[0].route;
+  const config = { ...props(), places: [seed], route, routeStopIds: [seed.id] };
+  const view = render(
+    <CityMap {...config} bottomInset={132} overviewRequest={0} />,
+  );
+  const map = await loadMap();
+  await waitFor(() =>
+    expect(map.fitBounds).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ duration: 750 }),
+    ),
+  );
+  const count = map.fitBounds.mock.calls.length;
+  view.rerender(<CityMap {...config} bottomInset={450} overviewRequest={0} />);
+  expect(map.fitBounds).toHaveBeenCalledTimes(count + 1);
+  expect(map.fitBounds).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({ duration: 0 }),
+  );
+  view.rerender(<CityMap {...config} bottomInset={450} overviewRequest={1} />);
+  expect(map.fitBounds).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({ duration: 750 }),
+  );
+});
+
 it("fits the latest journey once a hidden mobile map becomes visible without recentering later resizes", async () => {
   const width = vi
     .spyOn(HTMLElement.prototype, "clientWidth", "get")
