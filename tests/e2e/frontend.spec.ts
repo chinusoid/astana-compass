@@ -1053,6 +1053,14 @@ for (const [locale, name] of [
       await page.locator(".language-select select").selectOption(locale);
       await fill(page);
       await search(page);
+      if (width <= 760) {
+        await expect(page.locator(".app-shell")).toHaveAttribute(
+          "data-sheet-snap",
+          "collapsed",
+        );
+        await page.getByTestId("mobile-sheet-controls").locator("a").click();
+        await expect(page.locator('textarea[name="query"]')).toBeVisible();
+      }
       await expect(page.locator("html")).toHaveAttribute("lang", locale);
       expect(
         await page.evaluate(
