@@ -23,7 +23,7 @@ from astana_contracts import (
     validate_payload,
 )
 
-from .explanations import ExplanationGenerator, GroundedExplanation, GroundedReason
+from .explanations import ExplanationGenerator, GroundedExplanation, GroundedReason, RouteExplanation
 from .journey import botanical_destination, cuisine_fact, food_intent, journey_stages, pizza_fact, stage_matches
 from .preferences import walking_preference
 from .suggestions import retrieval_request as suggestion_request, safe_query, select_suggestions
@@ -568,6 +568,66 @@ class DefaultRecommendationService:
     async def recommend(self, request: JSON) -> JSON:
         return await self._with_budget(lambda: self._recommend(request))
 
+    async def _personalize_recommendations(
+        self, response: JSON, plan: JSON | None, stage_orders: list[int],
+    ) -> None:
+        """Explain the final selection once, without changing stops or policy.
+
+        The legacy fact selector remains compatible. A hosted generator may also
+        write bounded advice from the applied wish and public place information;
+        private origins, routes and social data never enter this boundary.
+        """
+        generate = getattr(self.generator, "generate_route_explanations", None)
+        items = response["recommendations"][:6]
+        if self.planner is None or not callable(generate) or not items:
+            return
+        budget = _WORK_BUDGET.get()
+        remaining = budget.remaining() if budget is not None else self.request_budget_seconds
+        # Copy is optional: leave room for final validation and preserve a usable
+        # route even if the model is slow, rate limited or returns invalid prose.
+        timeout = min(6.0, remaining - 0.75)
+        warning = TEXT[response["request"]["locale"]]["personalization_unavailable"]
+        if timeout < 0.5:
+            response["warnings"].append(warning)
+            return
+        places = {place["id"]: place for place in response["places"]}
+        stops = []
+        for index, item in enumerate(items):
+            purpose = ""
+            if plan is not None and index < len(stage_orders):
+                stage = plan["stages"][stage_orders[index] - 1]
+                purpose = stage.get("source_quote") or stage["search_query"]
+            stops.append({"place": deepcopy(places[item["place_id"]]), "purpose": purpose})
+        try:
+            generated = await self._await(
+                lambda: generate(
+                    locale=response["request"]["locale"],
+                    query=response["request"]["query"], stops=stops,
+                ),
+                timeout_seconds=timeout,
+            )
+            if not isinstance(generated, dict):
+                raise ValueError("invalid route explanations")
+        except Exception:
+            response["warnings"].append(warning)
+            return
+        for item in items:
+            explanation = generated.get(item["place_id"])
+            if (
+                not isinstance(explanation, RouteExplanation)
+                or not isinstance(explanation.why, str)
+                or not 20 <= len(explanation.why.strip()) <= 1200
+                or not isinstance(explanation.suggested_activity, str)
+                or not 5 <= len(explanation.suggested_activity.strip()) <= 500
+            ):
+                item["warnings"].append(warning)
+                response["warnings"].append(warning)
+                continue
+            # Replace after stage/time/category rendering, so the card receives
+            # the actual generated explanation, without a template prefix.
+            item["why"] = explanation.why.strip()
+            item["suggested_activity"] = explanation.suggested_activity.strip()
+
     async def _optional_suggestions(self, response: JSON, plan: JSON | None, missing: list[int]) -> None:
         """Spend only spare local-search time after completing requested goals."""
         # A fully covered core may be partial only because of soft time or
@@ -891,6 +951,7 @@ class DefaultRecommendationService:
                     *response["clarification_questions"],
                     *(text["stage_missing"].format(order=index) for index in clarification_stages),
                 ])[:5]
+        await self._personalize_recommendations(response, plan, selected_stage_orders)
         await self._optional_suggestions(response, plan, missing_stages)
         return self._finish(response)
 

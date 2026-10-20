@@ -2,6 +2,7 @@
 
 TEXT = {
     "ru": {
+        "personalization_unavailable": "ИИ-пояснение пока недоступно; показана краткая информация из каталога. Маршрут сохранён.",
         "clarification_pending": "Часть пожеланий требует уточнения; подтверждённые результаты сохранены.",
         "work_deadline": "Лимит времени обработки запроса исчерпан. Проверенные результаты сохранены; оставшиеся этапы или сведения не удалось подтвердить вовремя.",
         "plan_failed": "Не удалось надёжно разобрать пожелание. Запрос сохранён как неуточнённый этап; случайные места не добавлены.",
@@ -63,6 +64,7 @@ TEXT = {
         "take_break": "Если обстановка позволяет, сделайте небольшую паузу.",
     },
     "kk": {
+        "personalization_unavailable": "ЖИ түсіндірмесі әзірге қолжетімсіз; каталогтағы қысқаша мәлімет көрсетілді. Маршрут сақталды.",
         "clarification_pending": "Қалаудың бір бөлігін нақтылау керек; расталған нәтижелер сақталды.",
         "work_deadline": "Сұрауды өңдеу уақытының шегі аяқталды. Тексерілген нәтижелер сақталды; қалған кезеңдер не мәліметтер уақытында расталмады.",
         "plan_failed": "Қалауды сенімді талдау мүмкін болмады. Сұрау нақтыланбаған кезең ретінде сақталды; кездейсоқ орындар қосылмады.",
@@ -124,6 +126,7 @@ TEXT = {
         "take_break": "Жағдай мүмкіндік берсе, аздап үзіліс жасаңыз.",
     },
     "en": {
+        "personalization_unavailable": "The AI explanation is temporarily unavailable; brief catalog information is shown. Your route is retained.",
         "clarification_pending": "Part of the request still needs clarification; confirmed results are retained.",
         "work_deadline": "The request processing time budget was reached. Verified results were retained; remaining stages or details could not be confirmed in time.",
         "plan_failed": "Your wish could not be reliably interpreted. It was kept as an unresolved stage; no arbitrary places were added.",
