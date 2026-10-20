@@ -31,6 +31,7 @@ import { dateTime, duration } from "@/lib/format";
 import { label, t, type Locale } from "@/lib/i18n";
 import { Sources, Warnings } from "./details";
 import TimeBudgetNote from "./time-budget-note";
+import { recommendationRationale } from "@/lib/recommendation-rationale";
 
 const copy = {
   intro: [
@@ -1005,7 +1006,7 @@ function PartyRoom({
                       <h3>{place.name}</h3>
                       <div className="why-summary">
                         <strong>{t(locale, "why")}</strong>
-                        <p>{item.why}</p>
+                        <p>{recommendationRationale(place, item, response.request.query, locale, response.journey_plan)}</p>
                       </div>
                       <p className="small">{item.suggested_activity}</p>
                       <p className="party-timing">

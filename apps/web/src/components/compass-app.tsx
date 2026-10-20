@@ -909,6 +909,8 @@ export default function CompassApp({
       key={place.id}
       place={place}
       recommendation={recommendation}
+      requestQuery={recommendation ? result?.request.query : undefined}
+      journeyPlan={recommendation ? result?.journey_plan : undefined}
       budgetSeconds={
         recommendation ? result?.request.available_seconds : undefined
       }

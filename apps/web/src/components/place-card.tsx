@@ -8,7 +8,7 @@ import {
   Footprints,
   Plus,
 } from "lucide-react";
-import type { Place, Recommendation } from "@astana/api-client";
+import type { JourneyPlan, Place, Recommendation } from "@astana/api-client";
 import { duration } from "@/lib/format";
 import { t, label, type Locale } from "@/lib/i18n";
 import { Sources, RouteNotes, Warnings } from "./details";
@@ -18,6 +18,7 @@ import PlacePhoto from "./place-photo";
 import PlaceVisitGuide from "./place-visit-guide";
 import TimeBudgetNote from "./time-budget-note";
 import { factLabel, placeText } from "@/lib/place-presentation";
+import { recommendationRationale } from "@/lib/recommendation-rationale";
 
 const cardCopy = {
   ru: {
@@ -56,6 +57,8 @@ type Props = {
   place: Place;
   recommendation?: Recommendation;
   budgetSeconds?: number;
+  requestQuery?: string;
+  journeyPlan?: JourneyPlan;
   locale: Locale;
   active: boolean;
   selected: boolean;
@@ -70,6 +73,8 @@ export default function PlaceCard({
   place,
   recommendation: item,
   budgetSeconds,
+  requestQuery,
+  journeyPlan,
   locale,
   active,
   selected,
@@ -176,7 +181,7 @@ export default function PlaceCard({
           </span>
           <div className="why-summary">
             <strong>{t(locale, "why")}</strong>
-            <p>{item.why}</p>
+            <p>{recommendationRationale(place, item, requestQuery, locale, journeyPlan)}</p>
           </div>
           {item.constraint_evaluations.some(
             (e) => e.outcome !== "satisfied",
