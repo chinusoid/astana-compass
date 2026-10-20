@@ -22,7 +22,8 @@ _BOTANICAL = re.compile(
     r"botanic(?:al)?\s+gardens?|ботаникалық\s+бақ(?:қа|та|ты|тан|тың)?)(?!\w)", re.IGNORECASE,
 )
 _PIZZA = re.compile(
-    r"(?<!\w)(?:pizzas?|пиц{1,2}(?:а|у|ы|е|ой|ей|ам|ами|ах|аны|анық|аға|ада|адан))(?!\w)",
+    r"(?<!\w)(?:pizzas?|pizzerias?|пиц{1,2}(?:а|у|ы|е|ой|ей|ам|ами|ах|аны|анық|аға|ада|адан)|"
+    r"пиццери(?:я|ю|и|й|ей|ям|ями|ях|яға|яда|ядан))(?!\w)",
     re.IGNORECASE,
 )
 _COFFEE = re.compile(r"(?<!\w)(?:кофе|кафе|coffee|caf[eé]s?|кофе\s+іш\w*|кафеге)(?!\w)", re.IGNORECASE)
@@ -33,10 +34,11 @@ _MEAL = re.compile(
 _NEGATIVE = re.compile(r"(?<!\w)(?:не|без|not|no|without|avoid|don['’]?t|емес)(?!\w)", re.IGNORECASE)
 _NEGATIVE_AFTER = re.compile(
     r"^\s*(?:не\s+(?:хочу|нуж\w*)|(?:is\s+)?not\s+(?:wanted|needed)|(?:керек\s+)?емес|"
-    r"(?:же|іш)\w*(?:май|мей)\w*|бар\w*\s+келм\w*)", re.IGNORECASE,
+    r"(?:же|іш)\w*(?:май|мей)\w*|(?:бар|же|іш)\w*\s+келм\w*)", re.IGNORECASE,
 )
 _SPATIAL_BEFORE = re.compile(
-    r"(?<!\w)(?:near|by|beside|around|next\s+to|close\s+to|у|возле|около|рядом\s+с|недалеко\s+от)\s*$",
+    r"(?<!\w)(?:near|by|beside|around|next\s+to|close\s+to|у|возле|около|рядом\s+с|недалеко\s+от)"
+    r"\s+(?:(?:a|an|the)\s+)?$",
     re.IGNORECASE,
 )
 _SPATIAL_AFTER = re.compile(r"^\s*(?:маң\w*|жан\w*|қас\w*|жақын\w*)", re.IGNORECASE)
@@ -94,9 +96,16 @@ def pizza_fact(place: dict) -> dict | None:
 
 def stage_matches(place: dict, query: str) -> bool:
     """Fail closed on the specific named destination and pizza cuisine intent."""
-    if food_intent(query) == "pizza" and pizza_fact(place) is None:
+    food = food_intent(query)
+    garden = botanical_destination(query)
+    if garden and food:
+        # A mixed query that was not split into stages has several candidate
+        # kinds. Do not require one POI to be both a garden and a pizza venue.
+        # Retrieval owns that union; cuisine still qualifies any food venue.
+        return food != "pizza" or not {"restaurant", "cafe"}.intersection(place["categories"]) or pizza_fact(place) is not None
+    if food == "pizza" and pizza_fact(place) is None:
         return False
-    if botanical_destination(query):
+    if garden:
         if not {"park", "garden"}.intersection(place["categories"]):
             return False
         names = [place["name"]]

@@ -45,6 +45,9 @@ def test_clause_count_stays_bounded_for_long_input():
     ("Ботаникалық баққа барғым келеді және пицца жегім келеді", ("пицца жегім келеді", "Ботаникалық бақ")),
     ("Мен Ботаникалық баққа барғым келеді және пицца жегім келеді", ("пицца жегім келеді", "Ботаникалық бақ")),
     ("Botanical Garden, and pizza", ("pizza", "Botanical Garden")),
+    ("Хочу в Ботанический сад и в пиццерию", ("в пиццерию", "Ботанический сад")),
+    ("Ботанический сад и поесть в пиццерии", ("поесть в пиццерии", "Ботанический сад")),
+    ("Botanical Garden and a pizzeria", ("a pizzeria", "Botanical Garden")),
     ("Ботанический сад и кофе", ("кофе", "Ботанический сад")),
     ("First Botanical Garden and pizza", ("Botanical Garden", "pizza")),
     ("Сначала ботанический сад, потом пицца", ("ботанический сад", "пицца")),
@@ -61,6 +64,8 @@ def test_named_garden_and_food_form_core_stages_while_explicit_order_wins(query,
     "Ботаникалық бақ және пицца керек емес", "Ботанический сад и пицца жемеймін",
     "Pizza and near Botanical Garden", "Pizza and not Botanical Garden", "Пицца и не ботанический сад",
     "Мен ботаникалық баққа барғым келмейді және пицца",
+    "Ботаникалық бақ және пицца жегім келмейді", "Ботаникалық бақ және кофе ішкім келмейді",
+    "coffee near the Botanical Garden", "pizza near a Botanical Garden", "Pizza and near the Botanical Garden",
     "ботанический сад и парк и кофе", "хочу поесть пиццу в ботаническом саду",
 ])
 def test_single_destinations_negations_and_landmark_searches_do_not_invent_a_journey(query):

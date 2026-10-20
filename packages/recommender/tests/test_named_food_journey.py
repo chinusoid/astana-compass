@@ -73,9 +73,12 @@ def ordered_places(response):
 @pytest.mark.parametrize(("query", "locale"), [
     (ACTUAL_QUERY, "ru"),
     ("Хочу поесть пиццу и сходить в ботанический сад", "ru"),
+    ("Хочу в Ботанический сад и в пиццерию", "ru"),
+    ("Ботанический сад и поесть в пиццерии", "ru"),
     ("Botanical Garden and pizza", "en"),
     ("Pizza and Botanical Garden", "en"),
     ("Botanical Garden, pizza", "en"),
+    ("Botanical Garden and a pizzeria", "en"),
     ("Ботаникалық бақ және пицца", "kk"),
     ("Пицца және Ботаникалық бақ", "kk"),
 ])
@@ -98,6 +101,9 @@ def test_local_catalog_compound_pizza_keeps_both_stops_in_food_then_garden_order
 
 @pytest.mark.parametrize(("query", "locale"), [
     ("Ботанический сад и поесть", "ru"),
+    ("Ботанический сад и перекусить", "ru"),
+    ("Ботанический сад и пообедать", "ru"),
+    ("Ботанический сад и поужинать", "ru"),
     ("Botanical Garden and coffee", "en"),
     ("Ботаникалық бақ және тамақ", "kk"),
 ])
@@ -152,6 +158,32 @@ def test_exact_single_named_garden_does_not_add_food_or_another_park(catalog, qu
 ])
 def test_generic_mixed_spatial_and_negated_food_queries_do_not_invent_a_journey(query):
     assert journey_stages(query) == ()
+
+
+@pytest.mark.parametrize("query", ["coffee near the Botanical Garden", "pizza near a Botanical Garden"])
+def test_english_article_in_landmark_search_keeps_food_candidates(catalog, query):
+    async def scenario():
+        service, _, _ = setup_service(catalog)
+        selected = ordered_places(await service.recommend(request(query=query)))
+        assert selected
+        assert all({"cafe", "restaurant"}.intersection(venue["categories"]) for venue in selected)
+        assert BOTANICAL_ID not in {venue["id"] for venue in selected}
+        if query.startswith("pizza"):
+            assert all(is_source_pizza(venue) for venue in selected)
+
+    asyncio.run(scenario())
+
+
+def test_unparsed_multiple_wishes_do_not_require_one_place_to_be_both_garden_and_pizza(catalog):
+    async def scenario():
+        service, _, _ = setup_service(catalog)
+        query = "Хочу в Ботанический сад, пиццу и фонтан"
+        assert journey_stages(query) == ()
+        selected = ordered_places(await service.recommend(request(query=query, locale="ru")))
+        assert BOTANICAL_ID in {venue["id"] for venue in selected}
+        assert any(is_source_pizza(venue) for venue in selected)
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("return_to_origin", [False, True])
