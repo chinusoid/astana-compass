@@ -3,8 +3,8 @@ import path from "node:path";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { Place } from "@astana/api-client";
 import { expect, it, vi } from "vitest";
-import { locales } from "@/lib/i18n";
-import { placeText } from "@/lib/place-presentation";
+import { locales, t } from "@/lib/i18n";
+import { factLabel, placeText } from "@/lib/place-presentation";
 import { visitText } from "@/lib/place-visit-guide";
 import PlaceVisitGuide from "./place-visit-guide";
 import { PlaceFacts } from "./details";
@@ -104,4 +104,116 @@ it("uses the current plan visit estimate when it is supplied instead of showing 
     within(idea).getByText(visitText("ru", "planEstimateNote")),
   ).toBeVisible();
   expect(within(idea).queryByText("30–60 мин")).not.toBeInTheDocument();
+});
+
+it("keeps confirmed hours and amenities visible on compact cards, distinguishes a negative fact and links its evidence", () => {
+  const source = opera.evidence[0];
+  const place: Place = {
+    ...structuredClone(opera),
+    evidence: [source],
+    facts: [
+      {
+        key: "opening_hours",
+        status: "known",
+        value: "24/7",
+        evidence_ids: [source.id],
+      },
+      {
+        key: "has_wifi",
+        status: "known",
+        value: true,
+        evidence_ids: [source.id],
+      },
+      {
+        key: "toilets",
+        status: "known",
+        value: false,
+        evidence_ids: [source.id],
+      },
+      {
+        key: "has_power_outlets",
+        status: "unknown",
+        value: null,
+        evidence_ids: [],
+      },
+      {
+        key: "indoor",
+        status: "known",
+        value: true,
+        evidence_ids: ["not-present"],
+      },
+      {
+        key: "quiet",
+        status: "conflicting",
+        value: null,
+        evidence_ids: [source.id],
+      },
+    ],
+  };
+  render(<PlaceVisitGuide place={place} locale="ru" compact />);
+  const summary = screen.getByTestId("place-visit-summary");
+  expect(summary).toHaveTextContent("24/7");
+  expect(summary).toHaveTextContent("Wi-FiДа");
+  expect(summary).toHaveTextContent("ТуалетНет");
+  expect(
+    within(summary).getByRole("link", {
+      name: `Источники: Wi-Fi — ${source.source_name}`,
+    }),
+  ).toHaveAttribute("href", source.source_url);
+  expect(
+    within(summary).queryByText(factLabel("ru", "has_power_outlets")),
+  ).not.toBeInTheDocument();
+  expect(
+    within(summary).queryByText(factLabel("ru", "indoor")),
+  ).not.toBeInTheDocument();
+  expect(
+    within(summary).queryByText(factLabel("ru", "quiet")),
+  ).not.toBeInTheDocument();
+});
+
+it("renders an amenity-only compact summary without requiring an address or website", () => {
+  const source = opera.evidence[0];
+  const place: Place = {
+    ...structuredClone(opera),
+    evidence: [source],
+    facts: [
+      {
+        key: "has_wifi",
+        status: "known",
+        value: true,
+        evidence_ids: [source.id],
+      },
+    ],
+  };
+  render(<PlaceVisitGuide place={place} locale="en" compact />);
+  expect(screen.getByTestId("compact-place-amenities")).toHaveTextContent(
+    "Wi-FiYes",
+  );
+});
+
+it("keeps a conflicting operator contact visible while suppressing its call action", () => {
+  const source = opera.evidence[0];
+  const place: Place = {
+    ...structuredClone(opera),
+    evidence: [source],
+    facts: [
+      {
+        key: "official:phone",
+        status: "conflicting",
+        value: null,
+        evidence_ids: [source.id],
+      },
+    ],
+  };
+  render(<PlaceFacts place={place} locale="ru" />);
+  expect(screen.getByText(t("ru", "conflicting"))).toBeVisible();
+  expect(
+    screen.getByRole("heading", { name: visitText("ru", "conflicts") }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("link", { name: /^Позвонить/ }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByTestId("place-source-records")).not.toHaveAttribute(
+    "open",
+  );
 });

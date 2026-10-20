@@ -179,6 +179,51 @@
   font-weight: 500;
   color: #284c3a;
 }
+.amenityChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+.amenityChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid #d4e3d7;
+  border-radius: 9px;
+  background: #f0f7f1;
+  color: #31553c;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.amenityChip dt {
+  font-weight: 500;
+}
+.amenityChip dd {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-weight: 600;
+}
+.amenityChip a {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  min-height: 24px;
+  color: inherit;
+  border-radius: 5px;
+}
+.amenityChip a:focus-visible {
+  outline: 2px solid #bf9630;
+  outline-offset: 2px;
+}
+.amenityAbsent {
+  color: #754e39;
+  border-color: #e3d8ce;
+  background: #faf3ed;
+}
 .recordsDisclosure {
   border-top: 1px solid #dce5de;
   margin-top: 24px;

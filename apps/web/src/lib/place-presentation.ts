@@ -404,6 +404,17 @@ export function primaryFact(fact: PlaceFact): boolean {
   return (
     amenityKeys.includes(fact.key) ||
     overviewKeys.includes(fact.key) ||
+    [
+      "official:website",
+      "official:phone",
+      "official:address",
+      "official:ticket_office_hours",
+      "osm:phone",
+      "osm:contact:phone",
+      "osm:email",
+      "osm:contact:email",
+      "osm:website:menu",
+    ].includes(fact.key) ||
     /^osm:(addr:|website$|contact:website$)/.test(fact.key)
   );
 }

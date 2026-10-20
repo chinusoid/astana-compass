@@ -8,7 +8,7 @@ import {
   Utensils,
 } from "lucide-react";
 import type { Place } from "@astana/api-client";
-import type { Locale } from "@/lib/i18n";
+import { t, type Locale } from "@/lib/i18n";
 import { duration, safeUrl } from "@/lib/format";
 import { placeText } from "@/lib/place-presentation";
 import {
@@ -105,6 +105,7 @@ export default function PlaceVisitGuide({
     compact &&
     !guide.address &&
     guide.hours.length === 0 &&
+    guide.amenities.length === 0 &&
     compactActions.length === 0
   )
     return null;
@@ -124,6 +125,44 @@ export default function PlaceVisitGuide({
           <p className={styles.compactFact}>
             <b>{guide.hours[0].label}:</b> {guide.hours[0].value}
           </p>
+        )}
+        {guide.amenities.length > 0 && (
+          <dl
+            className={styles.amenityChips}
+            aria-label={visitText(locale, "amenities")}
+            data-testid="compact-place-amenities"
+          >
+            {guide.amenities.map((item) => {
+              const absent =
+                place.facts.find((fact) => fact.key === item.key)?.value ===
+                false;
+              const source = item.evidence
+                .map((entry) => ({ ...entry, href: safeUrl(entry.source_url) }))
+                .find((entry) => Boolean(entry.href));
+              return (
+                <div
+                  className={`${styles.amenityChip}${absent ? ` ${styles.amenityAbsent}` : ""}`}
+                  key={item.key}
+                >
+                  <dt>{item.label}</dt>
+                  <dd>
+                    <span>{item.value}</span>
+                    {source?.href && (
+                      <a
+                        href={source.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={source.source_name}
+                        aria-label={`${t(locale, "sources")}: ${item.label} — ${source.source_name}`}
+                      >
+                        <ExternalLink size={11} aria-hidden="true" />
+                      </a>
+                    )}
+                  </dd>
+                </div>
+              );
+            })}
+          </dl>
         )}
         <ActionLinks actions={compactActions} />
       </div>
