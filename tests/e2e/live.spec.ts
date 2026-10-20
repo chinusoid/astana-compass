@@ -10,6 +10,9 @@ import type { Place } from "../../packages/api_client/src/generated";
 import { locales, t } from "../../apps/web/src/lib/i18n";
 
 async function searchCatalog(page: Page, name: string) {
+  // On phones the first view is the map; open the discover sheet as a user would.
+  if (!(await page.locator("#catalog-query").isVisible()))
+    await page.getByRole("navigation").locator('a.rail-link[href="/"]').click();
   await page.locator("#catalog-query").fill(name);
   await page.locator(".catalog-search button[type=submit]").click();
 }
