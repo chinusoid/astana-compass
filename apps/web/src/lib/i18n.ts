@@ -432,6 +432,7 @@ const messages = {
   park: ["Парк", "Саябақ", "Park"],
   cafe: ["Кафе", "Кафе", "Café"],
   restaurant: ["Ресторан", "Мейрамхана", "Restaurant"],
+  mall: ["Торговый центр", "Сауда орталығы", "Shopping centre"],
   attraction: ["Достопримечательность", "Көрікті жер", "Attraction"],
   library: ["Библиотека", "Кітапхана", "Library"],
   garden: ["Сад", "Бақ", "Garden"],

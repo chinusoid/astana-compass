@@ -123,6 +123,16 @@ const labels: Record<string, Translations> = {
     "Ғимараттың бастапқы белгісі",
     "Original indoor tag",
   ],
+  "osm:building": [
+    "Отметка здания в источнике",
+    "Дереккөздегі ғимарат белгісі",
+    "Source building tag",
+  ],
+  "osm:shop": [
+    "Тип магазина в источнике",
+    "Дереккөздегі дүкен түрі",
+    "Source shop type",
+  ],
   "osm:fee": [
     "Исходная отметка оплаты",
     "Төлемнің бастапқы белгісі",
@@ -281,6 +291,12 @@ export function factLabel(locale: Locale, key: string): string {
     )
   )
     return `${placeText(locale, "aliases")} (${key})`;
+  if (key.startsWith("osm:"))
+    return [
+      "Сведения источника OpenStreetMap",
+      "OpenStreetMap дереккөзінің мәліметтері",
+      "OpenStreetMap source field",
+    ][locales.indexOf(locale)];
   return label(locale, key);
 }
 export function rawFactValue(fact: PlaceFact): string {
@@ -292,6 +308,7 @@ export function factValue(locale: Locale, fact: PlaceFact): string {
   if (typeof fact.value === "boolean")
     return t(locale, fact.value ? "yes" : "no");
   const raw = rawFactValue(fact);
+  if (fact.key === "osm:shop" && raw === "mall") return label(locale, "mall");
   if (fact.key === "osm:cuisine")
     return raw
       .split(";")
