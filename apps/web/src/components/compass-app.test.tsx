@@ -594,6 +594,127 @@ function journeyPlaces() {
   }));
 }
 
+it.each([false, true])(
+  "keeps optional ideas out of the route until explicitly added, and removes only the extra (mobile=%s)",
+  async (mobile) => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: mobile && query.includes("max-width"),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    const places = journeyPlaces();
+    const submitted: ItineraryRequest[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("/api/v1/places?"))
+          return Response.json({ places: [], next_cursor: null });
+        const body = JSON.parse(String(init?.body));
+        if (url.endsWith("/recommendations")) {
+          const seed = scenarioResponse(body, "matched");
+          return Response.json({
+            ...seed,
+            places,
+            recommendations: places
+              .slice(0, 2)
+              .map((place, index) => ({
+                ...seed.recommendations[0],
+                place_id: place.id,
+                rank: index + 1,
+              })),
+            suggestions: [
+              {
+                place_id: places[2].id,
+                why: "Extra idea from the catalogue",
+                suggested_activity: "Look at the building",
+                constraint_evaluations: [],
+              },
+            ],
+          });
+        }
+        submitted.push(body);
+        return Response.json(orderedJourneyResponse(body, places));
+      }),
+    );
+    const user = userEvent.setup();
+    const { container } = render(
+      <CompassApp
+        initialStart="2026-10-19T12:00"
+        allowFixtures
+        mapProvider="none"
+      />,
+    );
+    if (mobile)
+      await user.click(
+        screen.getByRole("link", { name: "Открыть планирование" }),
+      );
+    await user.click(screen.getByRole("button", { name: "Map pick" }));
+    await user.type(
+      screen.getByRole("textbox", { name: t("ru", "query") }),
+      "Кофе, затем парк{Enter}",
+    );
+    const core = places.slice(0, 2).map((place) => place.id);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0].place_ids).toEqual(core);
+    expect(screen.getByTestId("map")).toHaveAttribute(
+      "data-selected",
+      core.join(","),
+    );
+    expect(
+      container.querySelectorAll(".result-cards [data-testid=place-card]"),
+    ).toHaveLength(2);
+    async function openIdeas() {
+      if (mobile) {
+        await waitFor(() =>
+          expect(container.querySelector(".app-shell")).toHaveAttribute(
+            "data-sheet-snap",
+            "collapsed",
+          ),
+        );
+        await user.click(
+          screen.getByRole("button", { name: "Идеи по пути: 1" }),
+        );
+        await waitFor(() =>
+          expect(
+            screen.getByRole("heading", { name: "Идеи по пути 1" }),
+          ).toHaveFocus(),
+        );
+      }
+    }
+    await openIdeas();
+    await user.click(
+      screen.getByRole("button", {
+        name: `Добавить в маршрут: ${places[2].name}`,
+      }),
+    );
+    await waitFor(() => expect(submitted).toHaveLength(2));
+    expect(submitted[1].place_ids).toEqual(places.map((place) => place.id));
+    await openIdeas();
+    expect(
+      screen.getByRole("button", { name: `Уже в маршруте: ${places[2].name}` }),
+    ).toBeDisabled();
+    await user.click(
+      within(screen.getByTestId("selected-stops")).getByRole("button", {
+        name: `${t("ru", "remove")}: ${places[2].name}`,
+      }),
+    );
+    await waitFor(() => expect(submitted).toHaveLength(3));
+    expect(submitted[2].place_ids).toEqual(core);
+    expect(
+      container.querySelectorAll(".result-cards [data-testid=place-card]"),
+    ).toHaveLength(2);
+    await openIdeas();
+    expect(
+      screen.getByRole("button", {
+        name: `Добавить в маршрут: ${places[2].name}`,
+      }),
+    ).toBeEnabled();
+  },
+);
+
 it("starts without active filters, a time target or a return journey", async () => {
   const requests: RecommendationRequest[] = [];
   vi.stubGlobal(

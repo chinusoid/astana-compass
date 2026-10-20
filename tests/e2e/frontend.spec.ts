@@ -152,6 +152,74 @@ test("mobile route failure keeps the planner open with the wish and filters", as
   await expect(page.locator(".selected-stops > li")).toHaveCount(3);
 });
 
+test("optional route ideas stay separate until explicitly added", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let coreIds: string[] = [];
+  let extraId = "";
+  await page.route("**/api/v1/recommendations", async (route) => {
+    const actual = await route.fetch();
+    const response = (await actual.json()) as RecommendationResponse;
+    expect(response.recommendations.length).toBeGreaterThanOrEqual(3);
+    const core = response.recommendations.slice(0, 2);
+    const extra = response.recommendations[2];
+    coreIds = core.map((item) => item.place_id);
+    extraId = extra.place_id;
+    await route.fulfill({
+      response: actual,
+      json: {
+        ...response,
+        recommendations: core,
+        places: response.places.filter((place) =>
+          [...coreIds, extraId].includes(place.id),
+        ),
+        suggestions: [
+          {
+            place_id: extraId,
+            why: "Дополнительная идея по данным каталога",
+            suggested_activity: "Рассмотрите здание",
+            constraint_evaluations: extra.constraint_evaluations,
+          },
+        ],
+      },
+    });
+  });
+  await fill(page);
+  const initial = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/itineraries") && request.method() === "POST",
+  );
+  await page.locator(".find-button").click();
+  expect((await initial).postDataJSON().place_ids).toEqual(coreIds);
+  await expect(cards(page)).toHaveCount(2);
+  await expect(page.locator(".app-shell")).toHaveAttribute(
+    "data-sheet-snap",
+    "collapsed",
+  );
+  await page.getByRole("button", { name: "Идеи по пути: 1" }).click();
+  const ideas = page.getByTestId("route-ideas");
+  await expect(ideas.getByText("Предложение", { exact: true })).toBeVisible();
+  const added = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/itineraries") &&
+      request.method() === "POST" &&
+      request.postDataJSON().place_ids.length === 3,
+  );
+  await ideas.getByRole("button", { name: /^Добавить в маршрут:/ }).click();
+  expect((await added).postDataJSON().place_ids).toEqual([...coreIds, extraId]);
+  await expect(page.locator(".app-shell")).toHaveAttribute(
+    "data-sheet-snap",
+    "collapsed",
+  );
+  await page.getByRole("button", { name: "Идеи по пути: 1" }).click();
+  await expect(
+    ideas.getByRole("button", { name: /^Уже в маршруте:/ }),
+  ).toBeDisabled();
+  await expect(cards(page)).toHaveCount(2);
+  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(3);
+});
+
 test("walk starts without filters and searches without adding a return or time target", async ({
   page,
 }) => {

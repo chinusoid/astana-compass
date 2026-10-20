@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { Locale } from "@/lib/i18n";
 import styles from "./mobile-sheet.module.css";
+import { ideasCopy } from "./route-ideas";
 
 export type SheetSnap = "collapsed" | "half" | "expanded";
 const snaps: SheetSnap[] = ["collapsed", "half", "expanded"];
@@ -72,6 +73,8 @@ export default function MobileSheet({
   locale,
   wish,
   summary,
+  ideasCount = 0,
+  onOpenIdeas,
 }: {
   snap: SheetSnap;
   onSnap: (snap: SheetSnap) => void;
@@ -79,6 +82,8 @@ export default function MobileSheet({
   locale: Locale;
   wish: string;
   summary: string;
+  ideasCount?: number;
+  onOpenIdeas?: () => void;
 }) {
   const text = copy[locale];
   const drag = useRef<{ y: number; moved: boolean } | null>(null);
@@ -171,6 +176,16 @@ export default function MobileSheet({
       </div>
       <div className={styles.summary}>
         <span role="status">{summary || text.ready}</span>
+        {ideasCount > 0 && onOpenIdeas && (
+          <button
+            type="button"
+            className={styles.ideasAction}
+            onClick={onOpenIdeas}
+            aria-controls="route-ideas"
+          >
+            {ideasCopy[locale].title}: {ideasCount}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onSnap(snap === "half" ? "expanded" : "half")}

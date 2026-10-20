@@ -83,6 +83,7 @@ import ScenarioPlan from "./scenario-plan";
 import scenarioStyles from "./scenario-feedback.module.css";
 import MobileSheet, { useMobileViewport, type SheetSnap } from "./mobile-sheet";
 import mobileStyles from "./mobile-sheet.module.css";
+import RouteIdeas from "./route-ideas";
 
 const CityMap = dynamic(() => import("./city-map"), { ssr: false });
 const FAVORITES_KEY = "astana-compass:favorites:v1";
@@ -1059,6 +1060,17 @@ export default function CompassApp({
             locale={locale}
             wish={form.query}
             summary={selected.length ? routeSummary : ""}
+            ideasCount={
+              view === "walk" ? (result?.suggestions?.length ?? 0) : 0
+            }
+            onOpenIdeas={() => {
+              resizeMobileSheet("expanded");
+              window.requestAnimationFrame?.(() => {
+                const heading = document.getElementById("route-ideas");
+                heading?.scrollIntoView?.({ block: "start" });
+                heading?.focus({ preventScroll: true });
+              });
+            }}
             onOpen={() => {
               resizeMobileSheet("expanded");
               window.requestAnimationFrame?.(() =>
@@ -1734,6 +1746,14 @@ export default function CompassApp({
                             return place && card(place, recommendation);
                           })}
                         </div>
+                        <RouteIdeas
+                          suggestions={result.suggestions ?? []}
+                          places={result.places}
+                          selectedIds={selected.map((place) => place.id)}
+                          locale={locale}
+                          onAdd={selectStop}
+                          onDetails={(id) => void showDetails(id)}
+                        />
                         <Warnings
                           warnings={result.warnings}
                           locale={locale}
