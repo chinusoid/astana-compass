@@ -26,6 +26,7 @@ from astana_contracts import (
 from .explanations import ExplanationGenerator, GroundedExplanation, GroundedReason
 from .journey import botanical_destination, cuisine_fact, food_intent, journey_stages, pizza_fact, stage_matches
 from .preferences import walking_preference
+from .suggestions import retrieval_request as suggestion_request, safe_query, select_suggestions
 from .text import TEXT, label
 
 
@@ -237,6 +238,7 @@ class DefaultRecommendationService:
             base.update(stops=[], route=None, total_duration_seconds=0)
         else:
             base["recommendations"] = []
+            base["suggestions"] = []
         return base
 
     @staticmethod
@@ -555,6 +557,43 @@ class DefaultRecommendationService:
     async def recommend(self, request: JSON) -> JSON:
         return await self._with_budget(lambda: self._recommend(request))
 
+    async def _optional_suggestions(self, response: JSON, plan: JSON | None, missing: list[int]) -> None:
+        """Spend only spare local-search time after completing requested goals."""
+        # A fully covered core may be partial only because of soft time or
+        # preference warnings. Optional ideas do not consume its visit budget.
+        if (plan is None or not plan["stages"] or missing or response["clarification_questions"]
+                or len(response["recommendations"]) != len(plan["stages"])
+                or len(response["recommendations"]) >= 6
+                or any(stage["kind"] == "unresolved" for stage in plan["stages"])):
+            return
+        request = response["request"]
+        if not safe_query(request["query"]) or any(not safe_query(stage["search_query"]) for stage in plan["stages"]):
+            return
+        budget = _WORK_BUDGET.get()
+        remaining = budget.remaining() if budget is not None else self.request_budget_seconds
+        timeout = min(2.0, self.timeout_seconds, remaining - 0.5)
+        if timeout <= 0.05:
+            return
+        core = deepcopy(response["places"])
+        payload = suggestion_request(request, core)
+        try:
+            validate_payload("RetrievalRequest", payload)
+            result = await self._await(lambda: self.retriever.retrieve(payload), timeout_seconds=timeout)
+            if (not isinstance(result, dict) or not isinstance(result.get("places"), list)
+                    or not isinstance(result.get("hits"), list) or len(result["places"]) > 12 or len(result["hits"]) > 12):
+                return
+            validate_payload("RetrievalResponse", result)
+            by_id = {place["id"]: place for place in result["places"]}
+            candidates = [by_id[hit["place_id"]] for hit in result["hits"][:12]]
+            suggestions, places = select_suggestions(candidates, core, request, self._evaluate)
+            # Optional adapter output cannot invalidate the completed core.
+            proposed = {**response, "suggestions": suggestions, "places": [*core, *places]}
+            validate_payload("RecommendationResponse", proposed)
+        except Exception:
+            return
+        response["suggestions"] = suggestions
+        response["places"].extend(places)
+
     async def _recommend(self, request: JSON) -> JSON:
         request = self._request("RecommendationRequest", request)
         response = self._base(request)
@@ -841,6 +880,7 @@ class DefaultRecommendationService:
                     *response["clarification_questions"],
                     *(text["stage_missing"].format(order=index) for index in clarification_stages),
                 ])[:5]
+        await self._optional_suggestions(response, plan, missing_stages)
         return self._finish(response)
 
     async def build_itinerary(self, request: JSON) -> JSON:

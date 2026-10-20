@@ -1100,7 +1100,7 @@ class PlannedJourneyTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
         query = "The Sphere then read somewhere then sushi then watch a film"
         value = await self.service.recommend(request(query=query))
         self.assertEqual([item["place_id"] for item in value["recommendations"]], [venue["id"] for venue in venues])
-        self.assertEqual([payload["categories"] for payload in self.retriever.requests],
+        self.assertEqual([payload["categories"] for payload in self.retriever.requests[:len(stages)]],
                          [stage["categories"] for stage in stages])
         self.assertEqual(value["journey_plan"], planner.value)
         self.assertEqual(len(self.context.routes), 4)
