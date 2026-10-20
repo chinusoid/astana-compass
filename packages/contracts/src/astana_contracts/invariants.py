@@ -100,7 +100,16 @@ def validate_invariants(definition: str, instance: dict[str, Any]) -> None:
     validate_invariants("ItineraryRequest" if definition == "ItineraryResponse" else "RecommendationRequest", request)
     key = "recommendations" if definition == "RecommendationResponse" else "stops"
     items = instance[key]
-    if len(items) > request["limit"]:
+    plan = instance.get("journey_plan") if definition == "RecommendationResponse" else None
+    if plan is not None:
+        for stage in plan["stages"]:
+            if stage["source_quote"] not in request["query"]:
+                raise ValueError("journey stage must cite the original query")
+            if stage["named_place"] is not None and stage["named_place"] not in stage["source_quote"]:
+                raise ValueError("named journey destination must be quoted by the user")
+    concrete_stages = sum(stage["kind"] != "unresolved" for stage in plan["stages"]) if plan else 0
+    limit = min(6, concrete_stages) if concrete_stages else request["limit"]
+    if len(items) > limit:
         raise ValueError("response exceeds requested limit")
     if request["transport"] != "walking":
         raise ValueError("initial release must return unsupported_transport ErrorResponse")

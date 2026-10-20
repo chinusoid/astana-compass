@@ -477,7 +477,7 @@
         "limit": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 3
+          "maximum": 6
         },
         "place_ids": {
           "type": "array",
@@ -487,7 +487,7 @@
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]*$"
           },
           "minItems": 1,
-          "maxItems": 3,
+          "maxItems": 6,
           "uniqueItems": true
         }
       },
@@ -710,7 +710,7 @@
         "rank": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 3
+          "maximum": 6
         },
         "why": {
           "type": "string",
@@ -796,7 +796,7 @@
           "items": {
             "$ref": "#/$defs/Recommendation"
           },
-          "maxItems": 3
+          "maxItems": 6
         },
         "clarification_questions": {
           "type": "array",
@@ -816,6 +816,9 @@
           "type": "string",
           "format": "date-time",
           "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "journey_plan": {
+          "$ref": "#/$defs/JourneyPlan"
         }
       },
       "required": [
@@ -926,7 +929,7 @@
         "order": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 3
+          "maximum": 6
         },
         "visit_duration_seconds": {
           "type": "integer",
@@ -1009,7 +1012,7 @@
           "items": {
             "$ref": "#/$defs/ItineraryStop"
           },
-          "maxItems": 3
+          "maxItems": 6
         },
         "route": {
           "anyOf": [
@@ -1153,6 +1156,29 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        },
+        "named_place": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cuisine": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -2808,6 +2834,111 @@
             }
           }
         }
+      ]
+    },
+    "JourneyStage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_quote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "search_query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "kind": {
+          "enum": [
+            "activity",
+            "meal",
+            "named_place",
+            "unresolved"
+          ]
+        },
+        "named_place": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cuisine": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "source_quote",
+        "search_query",
+        "kind",
+        "named_place",
+        "cuisine"
+      ]
+    },
+    "JourneyPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "enum": [
+            "rules",
+            "openai",
+            "nvidia"
+          ]
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JourneyStage"
+          },
+          "maxItems": 8
+        },
+        "order": {
+          "enum": [
+            "explicit",
+            "suggested"
+          ]
+        },
+        "clarification_questions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "maxItems": 5
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "maxItems": 8
+        }
+      },
+      "required": [
+        "provider",
+        "stages",
+        "order",
+        "clarification_questions",
+        "warnings"
       ]
     }
   }
