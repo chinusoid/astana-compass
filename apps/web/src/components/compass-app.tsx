@@ -1315,6 +1315,7 @@ export default function CompassApp({
                       <span>{t(locale, "query")}</span>
                       <textarea
                         name="query"
+                        enterKeyHint="search"
                         value={form.query}
                         required
                         maxLength={2000}
