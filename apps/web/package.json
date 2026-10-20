@@ -19,6 +19,7 @@
     "validators:generate": "node scripts/generate-validators.mjs",
     "validators:check": "node scripts/generate-validators.mjs --check",
     "test:e2e": "playwright test --config playwright.config.ts",
+    "test:ios": "playwright test --config playwright.ios.config.ts",
     "test:live": "playwright test --config playwright.live.config.ts",
     "test:live:local": "playwright test --config playwright.live-local.config.ts"
   },

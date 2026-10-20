@@ -117,9 +117,9 @@ jobs:
       - name: Production frontend build
         working-directory: apps/web
         run: pnpm build
-      - name: Install Chromium matching the locked Playwright version
+      - name: Install Chromium and WebKit matching the locked Playwright version
         working-directory: apps/web
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium webkit
       - name: Browser E2E against the fixture API
         shell: bash
         run: |
@@ -156,6 +156,7 @@ jobs:
           .venv/bin/python scripts/smoke.py --base-url http://127.0.0.1:8000
           cd apps/web
           pnpm test:e2e
+          pnpm test:ios
 
       - name: Browser E2E against the real, locally loaded catalog
         working-directory: apps/web
