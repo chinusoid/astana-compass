@@ -155,8 +155,8 @@ jobs:
           fi
           .venv/bin/python scripts/smoke.py --base-url http://127.0.0.1:8000
           cd apps/web
-          pnpm test:e2e
           pnpm test:ios
+          pnpm test:e2e
 
       - name: Browser E2E against the real, locally loaded catalog
         working-directory: apps/web

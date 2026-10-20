@@ -14,17 +14,36 @@ async function settled(page: Page) {
   await expect(page.locator("[data-mobile-sheet]")).not.toHaveAttribute(
     "data-sheet-preview",
   );
+  // A normal tap changes the snap before its CSS height transition finishes.
+  // Raw mouse coordinates do not get locator actionability/stability checks.
+  const target = await handle(page).elementHandle();
+  expect(target).not.toBeNull();
+  await target!.waitForElementState("stable");
 }
 
 async function dragSheet(page: Page, target: "expanded" | "collapsed") {
+  await settled(page);
   const box = (await handle(page).boundingBox())!;
   const x = box.x + box.width / 2;
+  const start = box.y + box.height / 2;
   const end = target === "expanded" ? 16 : page.viewportSize()!.height - 80;
   // Playwright's public touchscreen API supports taps only. Native pointer
   // dragging exercises the same sheet path in WebKit without synthetic capture.
-  await page.mouse.move(x, box.y + box.height / 2);
+  await page.mouse.move(x, start);
   await page.mouse.down();
-  await page.mouse.move(x, end, { steps: 10 });
+  await expect(page.locator("[data-mobile-sheet]")).toHaveAttribute(
+    "data-sheet-dragging",
+    "true",
+  );
+  // WebKit acknowledges batched input before compositing the moved capture
+  // target. Advance native input across real frames, as a user's drag does.
+  for (let step = 1; step <= 10; step++) {
+    await page.mouse.move(x, start + ((end - start) * step) / 10);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+  }
   await page.mouse.up();
   await expect(sheet(page)).toHaveAttribute("data-sheet-snap", target);
   await settled(page);
@@ -37,16 +56,72 @@ async function openPlanner(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    const events: object[] = [];
+    Object.assign(window, { __iosGestureEvents: events });
+    for (const type of [
+      "pointerdown",
+      "pointermove",
+      "pointerup",
+      "pointercancel",
+      "gotpointercapture",
+      "lostpointercapture",
+    ]) {
+      document.addEventListener(
+        type,
+        (entry) => {
+          const event = entry as PointerEvent;
+          const panel = document.querySelector<HTMLElement>(
+            "[data-mobile-sheet]",
+          );
+          if (events.length >= 80) events.shift();
+          events.push({
+            type,
+            pointer: event.pointerId,
+            kind: event.pointerType,
+            y: event.clientY,
+            buttons: event.buttons,
+            primary: event.isPrimary,
+            trusted: event.isTrusted,
+            preview: panel?.hasAttribute("data-sheet-preview"),
+            offset: panel?.style.getPropertyValue("--sheet-drag"),
+          });
+        },
+        { capture: true },
+      );
+    }
+  });
   await page.goto("/walk");
+});
+
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus) {
+    const events = await page.evaluate(
+      () =>
+        (window as Window & { __iosGestureEvents?: object[] })
+          .__iosGestureEvents ?? [],
+    );
+    await testInfo.attach("ios-native-pointer-events", {
+      body: JSON.stringify(events),
+      contentType: "application/json",
+    });
+  }
 });
 
 test("iPhone WebKit accepts touch controls and smooth sheet pointer gestures", async ({
   page,
 }, testInfo) => {
-  expect(await page.evaluate(() => navigator.maxTouchPoints)).toBeGreaterThan(
-    0,
-  );
   expect(await page.evaluate(() => navigator.userAgent)).toContain("iPhone");
+  await page.evaluate(() => {
+    document.addEventListener(
+      "touchstart",
+      (event) => {
+        if (event.isTrusted)
+          document.documentElement.dataset.trustedTouch = "true";
+      },
+      { once: true, capture: true },
+    );
+  });
   await expect(sheet(page)).toHaveAttribute("data-sheet-snap", "collapsed");
   await expect(page.locator(".maplibregl-canvas")).toBeVisible();
   await expect(page.getByTestId("map-panel")).toHaveAttribute(
@@ -65,6 +140,10 @@ test("iPhone WebKit accepts touch controls and smooth sheet pointer gestures", a
   );
 
   await handle(page).tap();
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-trusted-touch",
+    "true",
+  );
   await expect(sheet(page)).toHaveAttribute("data-sheet-snap", "half");
   await settled(page);
   await dragSheet(page, "expanded");
