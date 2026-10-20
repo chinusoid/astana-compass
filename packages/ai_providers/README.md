@@ -33,6 +33,13 @@ NVIDIA retains its seven-second/3072-token JSON response path and the same local
 validation. Intent review and explanation selection keep their existing Luna
 `none` reasoning setting. Construction and rules mode make no network request.
 
+Hosted journey failures emit one warning with a fixed failure category, provider,
+validated HTTP status integer and elapsed milliseconds. Categories distinguish
+timeouts, HTTP rejection, local quota, schema and grounding failures. These
+diagnostics contain no query, coordinates, model output, provider body, credential
+or exception text. Cancellation propagates without becoming a fallback warning;
+no retries or extra provider calls are added.
+
 Each independent concrete goal gets a separate ordered stage, with an exact
 `source_quote` and a normalized `search_query`. Names must be literal excerpts
 of that stage's quoted user text; cuisine identifiers describe a requested

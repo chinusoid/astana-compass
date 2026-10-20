@@ -8,11 +8,13 @@ limited fallback, not evidence that arbitrary language has been understood.
 from __future__ import annotations
 
 from copy import deepcopy
+import logging
 import re
+import time
 from typing import Any, Literal
 
 import httpx
-from astana_contracts import load_schema, validate_payload
+from astana_contracts import ContractValidationError, load_schema, validate_payload
 
 from .budgets import RequestBudget
 from .generators import HostedExplanationGenerator, ProviderError, _strict_json
@@ -20,6 +22,11 @@ from .intents import _time, json_dumps
 
 
 JourneyProvider = Literal["rules", "openai", "nvidia"]
+_LOGGER = logging.getLogger(__name__)
+_PROVIDER_FAILURES = frozenset({
+    "timeout", "transport_error", "unsupported_encoding", "response_too_large",
+    "invalid_response", "incomplete_or_failed", "unexpected_output", "refused",
+})
 _NEXT = re.compile(
     r"(?<!\w)(?:(?:а|и)\s+)?(?:потом|затем|далее|после\s+этого|в\s+конце|под\s+конец)(?!\w)|"
     r"(?<!\w)(?:and\s+)?(?:then|after\s+that|finally|lastly|"
@@ -470,6 +477,14 @@ def _safe_text(value: str) -> bool:
     return not _UNSAFE_TEXT.search(value)
 
 
+def _diagnostic_failure(provider: str, reason: str, started: float, status: int = 0) -> None:
+    """Log only caller-selected fixed labels and a bounded HTTP integer."""
+    _LOGGER.warning(
+        "Journey planner fallback provider=%s reason=%s http_status=%d elapsed_ms=%d",
+        provider, reason, status, max(0, round((time.monotonic() - started) * 1_000)),
+    )
+
+
 def _validate_coverage(query: str, result: dict[str, Any], protected: list[tuple[int, int]]) -> None:
     clauses = [] if _broad_discovery(query) else _clauses(query, protected)
     active = [(left, right, text) for left, right, text in clauses if not _negative_only(text) and not _context_only(text)]
@@ -675,12 +690,29 @@ class JourneyPlanner:
     async def plan(self, query: str, locale: str) -> dict[str, Any]:
         validate_payload("IntentRequest", {"query": query, "locale": locale})
         if self._hosted and not self._closed:
+            started = time.monotonic()
+            phase = "payload"
             try:
-                envelope = await self._hosted._request(self._payload(query, locale))
-                return _ground(_strict_json(self._hosted._output_text(envelope)), query, self._hosted.provider, locale)
-            except (ProviderError, ValueError, TypeError, UnicodeError, RecursionError):
-                result = _rules(query, locale)
-                result["warnings"].append(_text("fallback", locale))
+                payload = self._payload(query, locale)
+                phase = "request"
+                envelope = await self._hosted._request(payload)
+                phase = "json"
+                raw = _strict_json(self._hosted._output_text(envelope))
+                phase = "grounding"
+                return _ground(raw, query, self._hosted.provider, locale)
+            except ProviderError as error:
+                status = error.status_code if type(error.status_code) is int and 100 <= error.status_code <= 599 else 0
+                reason = ("http_status" if error.code in {"http_error", "authentication_failed", "rate_limited"}
+                          else "quota" if error.code == "local_budget_exhausted"
+                          else error.code if error.code in _PROVIDER_FAILURES else "provider_error")
+                _diagnostic_failure(self._hosted.provider, reason, started, status)
+            except ContractValidationError:
+                _diagnostic_failure(self._hosted.provider, "schema", started)
+            except (ValueError, TypeError, UnicodeError, RecursionError):
+                reason = "schema" if phase == "payload" else "invalid_json" if phase == "json" else "grounding"
+                _diagnostic_failure(self._hosted.provider, reason, started)
+            result = _rules(query, locale)
+            result["warnings"].append(_text("fallback", locale))
         else:
             result = _rules(query, locale)
         return validate_payload("JourneyPlan", result)

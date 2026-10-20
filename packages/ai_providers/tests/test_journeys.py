@@ -603,3 +603,82 @@ def test_first_then_conflict_cannot_be_overridden_by_a_hosted_intermediate_order
         assert result["provider"] == "rules"
         assert all(item["kind"] == "unresolved" for item in result["stages"])
         assert result["clarification_questions"]
+
+
+@pytest.mark.parametrize("status", [401, 429, 503])
+def test_hosted_http_diagnostic_logs_only_fixed_code_and_status(status, caplog):
+    query = "PRIVATE_QUERY_COORDINATES_51_71 museum"
+    result = hosted(query, None, handler=lambda _: httpx.Response(status, text=SECRET))
+    assert result["provider"] == "rules"
+    records = [record for record in caplog.records if record.name == "astana_ai_providers.journeys"]
+    assert len(records) == 1
+    assert f"reason=http_status http_status={status}" in records[0].getMessage()
+    assert "provider=openai" in records[0].getMessage() and "elapsed_ms=" in records[0].getMessage()
+    assert records[0].exc_info is None and records[0].stack_info is None
+    assert query not in caplog.text and SECRET not in caplog.text
+
+
+@pytest.mark.parametrize("kind,expected", [
+    ("quota", "quota"), ("schema", "schema"), ("grounding", "grounding"),
+    ("json", "invalid_json"), ("incomplete", "incomplete_or_failed"),
+])
+def test_hosted_failure_diagnostics_separate_private_failure_boundaries(kind, expected, caplog):
+    query = "museum"
+    answer = plan([stage(query)])
+    options = {}
+    if kind == "quota":
+        options["budget"] = RequestBudget(0, 0)
+    elif kind == "schema":
+        answer["unexpected_private_key"] = SECRET
+    elif kind == "grounding":
+        answer["stages"][0]["source_quote"] = SECRET
+    elif kind == "json":
+        answer = SECRET
+
+    def handler(_):
+        value = envelope(answer)
+        if kind == "incomplete":
+            value.update(status="incomplete", incomplete_details={"private": SECRET})
+        return httpx.Response(200, json=value)
+
+    assert hosted(query, answer, handler=handler, **options)["provider"] == "rules"
+    assert f"reason={expected} http_status=0" in caplog.text
+    assert SECRET not in caplog.text
+
+
+def test_timeout_has_fixed_diagnostic_and_cancellation_is_not_logged(caplog):
+    async def slow(_):
+        await asyncio.sleep(0.05)
+        return httpx.Response(200, json=envelope(plan([stage("museum")])))
+
+    assert hosted("museum", None, handler=slow, timeout_seconds=0.005)["provider"] == "rules"
+    assert "reason=timeout http_status=0" in caplog.text
+    caplog.clear()
+
+    async def cancelled(_):
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        hosted("museum", None, handler=cancelled)
+    assert not caplog.records
+
+
+def test_unknown_provider_error_code_cannot_inject_log_text_or_status(caplog):
+    from astana_ai_providers import ProviderError
+
+    async def check():
+        async with create_journey_planner("openai", "gpt-6-luna", SECRET) as planner:
+            async def rejected(_):
+                raise ProviderError("openai", SECRET, status_code=SECRET)
+            planner._hosted._request = rejected
+            return await planner.plan("museum", "en")
+
+    assert asyncio.run(check())["provider"] == "rules"
+    assert "reason=provider_error http_status=0" in caplog.text
+    assert SECRET not in caplog.text
+
+
+def test_success_and_deliberate_rules_do_not_emit_hosted_failure_logs(caplog):
+    assert hosted("museum", plan([stage("museum")]))["provider"] == "openai"
+    assert rules_journey_plan("museum", "en")["provider"] == "rules"
+    assert not caplog.records
