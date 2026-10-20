@@ -161,6 +161,17 @@ jobs:
         working-directory: apps/web
         run: pnpm test:live:local
 
+      - name: Preserve browser reports and screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: astana-browser-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            apps/web/test-results/
+            apps/web/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
   container:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

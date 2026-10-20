@@ -90,7 +90,9 @@ for (const locale of locales) {
     await expect(card.getByTestId("place-visit-summary")).toContainText(
       t(locale, "toilets"),
     );
-    await expect(card.getByRole("link", { name: "ODbL 1.0" })).toBeVisible();
+    await expect(
+      card.getByRole("link", { name: "ODbL 1.0", exact: true }),
+    ).toBeVisible();
     await card.getByRole("button", { name: t(locale, "details") }).click();
     const dialog = page.getByRole("dialog");
     await dialog
@@ -154,7 +156,7 @@ test("real description preserves source language, exact provenance and catalog r
   request,
 }, testInfo) => {
   const response = await request.get(
-    `/api/v1/places/${encodeURIComponent("osm:way/69232075")}`,
+    `/api/v1/places/${encodeURIComponent("osm:way/1460537088")}`,
   );
   expect(response.status()).toBe(200);
   const place = (await response.json()) as Place;
@@ -193,6 +195,64 @@ test("real description preserves source language, exact provenance and catalog r
     page.locator(".catalog-cards").getByTestId("place-card").first(),
   ).toBeVisible();
   await expect(page.locator("#catalog-query")).toHaveValue("");
+});
+
+test("official botanical visit details keep greenhouse hours separate and expose verified contacts", async ({
+  page,
+  request,
+}, testInfo) => {
+  const response = await request.get(
+    `/api/v1/places/${encodeURIComponent("osm:way/1196402246")}`,
+  );
+  expect(response.status()).toBe(200);
+  const place = (await response.json()) as Place;
+  const hours = place.facts.find(
+    (fact) => fact.key === "official:greenhouse_hours",
+  )!;
+  const phone = place.facts.find((fact) => fact.key === "official:phone")!;
+  const description = place.facts.find(
+    (fact) => fact.key === "official:description:ru",
+  )!;
+  expect([hours.status, phone.status, description.status]).toEqual([
+    "known",
+    "known",
+    "known",
+  ]);
+  await page.goto("/");
+  await searchCatalog(page, place.name);
+  const card = page.locator(`[id="place-catalog-${place.id}"]`);
+  await card.getByRole("button", { name: t("ru", "details") }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.locator(".source-description")).toContainText(
+    String(description.value),
+  );
+  const guide = dialog.getByTestId("place-visit-guide");
+  await expect(guide.getByRole("link", { name: /Позвонить/ })).toHaveAttribute(
+    "href",
+    `tel:${String(phone.value).replace(/[^+\d]/g, "")}`,
+  );
+  await expect(guide).toContainText(String(hours.value));
+  await expect(guide).toContainText("Часы оранжереи");
+  await expect(
+    guide.getByRole("link", { name: "Официальный сайт", exact: true }),
+  ).toBeVisible();
+  await expect(dialog.getByTestId("place-source-records")).not.toHaveAttribute(
+    "open",
+    "",
+  );
+  await expect(
+    guide.getByText("Идея для посещения", { exact: true }),
+  ).toBeVisible();
+  await expect(guide).toContainText(
+    "Предложение по категории места, а не подтверждённая услуга.",
+  );
+  await guide
+    .getByRole("heading", { name: "Полезно перед визитом", exact: true })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath("botanical-practical-card.png"),
+    fullPage: true,
+  });
 });
 
 test("real Wi-Fi requirement is honored and unknown outlets produce an explained no-match", async ({
@@ -236,6 +296,14 @@ test("real Wi-Fi requirement is honored and unknown outlets produce an explained
     page.locator(".result-cards").getByTestId("place-card").first(),
   ).toBeVisible();
 
+  if (
+    (await page.locator(".filter-toggle").getAttribute("aria-expanded")) !==
+    "true"
+  )
+    await page.locator(".filter-toggle").click();
+  const strict = page.locator(".strict-constraints");
+  if ((await strict.getAttribute("open")) === null)
+    await strict.locator(":scope > summary").click();
   await page
     .getByRole("combobox", { name: t("ru", "has_power_outlets"), exact: true })
     .selectOption("required");

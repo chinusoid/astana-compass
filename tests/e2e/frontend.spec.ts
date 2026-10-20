@@ -231,7 +231,7 @@ test("compound time beyond four hours is used automatically without enabling man
 
 test("the visible companion explains actual plan times and can search with less walking", async ({
   page,
-}) => {
+}, testInfo) => {
   await fill(page);
   const response = page.waitForResponse(
     (r) => r.url().endsWith("/itineraries") && r.request().method() === "POST",
@@ -253,6 +253,13 @@ test("the visible companion explains actual plan times and can search with less 
     brief.getByText("Ваш ориентир:", { exact: false }),
   ).toContainText("90 мин");
   await expect(brief.locator("ol > li")).toHaveCount(plan.stops.length);
+  await brief
+    .getByRole("heading", { name: "Разбор вашей прогулки", exact: true })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath("walk-plan-brief.png"),
+    fullPage: true,
+  });
   const original = await page.locator('textarea[name="query"]').inputValue();
   const next = page.waitForRequest(
     (request) =>
