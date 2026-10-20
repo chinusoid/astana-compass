@@ -40,9 +40,9 @@ const copy = {
     "A walk that works for everyone",
   ],
   privacy: [
-    "Гостевой профиль до 24 часов. Компания, чат и маршрут хранятся в памяти сервера и исчезнут при перезапуске. Без пароля и постоянного аккаунта.",
-    "Қонақ профилі 24 сағатқа дейін. Топ, чат және маршрут сервер жадында сақталады, қайта іске қосылғанда жойылады. Құпиясөз бен тұрақты аккаунт жоқ.",
-    "Guest profile for up to 24 hours. Groups, chat and routes live in server memory and disappear on restart. No password or permanent account.",
+    "Гостевой профиль до 7 дней, компания и чат — до 24 часов. Всё хранится в памяти сервера и исчезнет при перезапуске. Без пароля и постоянного аккаунта.",
+    "Қонақ профилі 7 күнге дейін, топ пен чат 24 сағатқа дейін сақталады. Бәрі сервер жадында, қайта іске қосылғанда жойылады. Құпиясөз бен тұрақты аккаунт жоқ.",
+    "Guest profile for up to 7 days; groups and chat for up to 24 hours. Everything lives in server memory and disappears on restart. No password or permanent account.",
   ],
   name: ["Как вас зовут?", "Атыңыз кім?", "Your name"],
   createProfile: [

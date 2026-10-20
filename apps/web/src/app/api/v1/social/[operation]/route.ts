@@ -157,7 +157,7 @@ async function proxy(
       sameSite: "strict" as const,
       secure: request.nextUrl.protocol === "https:",
       path: "/",
-      maxAge: 86400,
+      maxAge: 7 * 24 * 60 * 60,
     };
     if (upstream.ok && operation === "session") {
       if (!valid("SocialSessionResponse", payload))

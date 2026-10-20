@@ -56,6 +56,8 @@ it("sets a private cookie and never exposes the backend bearer token to JavaScri
   expect(cookie).toContain("HttpOnly");
   expect(cookie).toContain("SameSite=strict");
   expect(cookie).toContain("Secure");
+  expect(cookie).toContain("Max-Age=604800");
+  expect(cookie).toContain("Path=/");
   expect(response.headers.get("cache-control")).toBe("no-store");
 });
 
@@ -94,6 +96,8 @@ it("forwards only the guest cookie as bearer, omitting unrelated cookies and inj
   expect(fetch.mock.calls[0][1].redirect).toBe("manual");
   expect(fetch.mock.calls[0][1].headers.Authorization).toBe(`Bearer ${token}`);
   expect(fetch.mock.calls[0][1].headers).not.toHaveProperty("Cookie");
+  // Reading state must not renew the original seven-day session deadline.
+  expect(response.headers.get("set-cookie")).toBeNull();
 });
 
 it.each([301, 302, 303, 307, 308])(
