@@ -190,10 +190,13 @@ def known_cuisines(place: dict) -> frozenset[str]:
     evidence = {item["id"] for item in place["evidence"]}
     cuisines = set()
     for fact in place["facts"]:
-        if (fact["key"] != "osm:cuisine" or fact["status"] != "known" or not isinstance(fact["value"], str)
+        if (fact["key"] != "osm:cuisine" or fact["status"] != "known"
                 or not fact["evidence_ids"] or not set(fact["evidence_ids"]).issubset(evidence)):
             continue
-        values = {value.strip() for value in re.split(r"[;,]", normalize(fact["value"]))}
+        raw = fact["value"]
+        items = [raw] if isinstance(raw, str) else raw[:64] if isinstance(raw, list) else []
+        values = {value.strip() for item in items if isinstance(item, str)
+                  for value in re.split(r"[;,]", normalize(item))}
         if values.intersection({"pizza", "italian_pizza"}):
             cuisines.add("pizza")
     return frozenset(cuisines)

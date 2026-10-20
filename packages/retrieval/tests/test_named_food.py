@@ -96,7 +96,9 @@ def test_generic_green_destination_and_dish_keep_both_intents_without_arbitrary_
     }
 
 
-@pytest.mark.parametrize("cuisine", ["pizza", "italian_pizza", "pasta; pizza ;sushi", "regional,pizza,asian"])
+@pytest.mark.parametrize("cuisine", [
+    "pizza", "italian_pizza", "pasta; pizza ;sushi", "regional,pizza,asian", ["italian", "pizza"], ["italian_pizza"],
+])
 def test_only_exact_explicit_cuisine_tokens_establish_pizza(cuisine):
     target = fixture("Known", "cafe", cuisine)
     decoys = [fixture("Pizza"), fixture("Pizza Palace", description="We offer pizza."),
