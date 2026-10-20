@@ -6,7 +6,10 @@
 }
 @media (max-width: 760px) {
   .shell:global(.app-shell) {
-    position: relative;
+    position: fixed;
+    top: var(--mobile-viewport-top, 0px);
+    left: 0;
+    right: 0;
     display: block;
     height: var(--mobile-viewport, 100dvh);
     min-height: 0;
@@ -68,7 +71,7 @@
   }
   .shell :global(.rail-language) {
     position: fixed;
-    top: calc(env(safe-area-inset-top) + 8px);
+    top: calc(var(--mobile-viewport-top, 0px) + env(safe-area-inset-top) + 8px);
     right: 8px;
     z-index: 26;
     width: 60px;
@@ -310,6 +313,32 @@
   }
   .shell :global(.sidebar-content) {
     padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
+  }
+  .shell[data-keyboard-open="true"] {
+    --mobile-nav: 0px;
+  }
+  .shell[data-keyboard-open="true"] :global(.app-rail),
+  .shell[data-keyboard-open="true"] .controls {
+    display: none;
+  }
+  .shell[data-keyboard-open="true"] :global(.app-sidebar) {
+    inset: 0;
+    height: 100%;
+    max-height: 100%;
+    transition: none;
+  }
+  .shell[data-keyboard-open="true"] :global(.sidebar-content) {
+    padding-top: 10px;
+  }
+  .shell[data-keyboard-open="true"] :global(.search-actions) {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    padding-block: 8px;
+    background: var(--paper);
+  }
+  .shell[data-keyboard-open="true"] :global(.search-actions > p) {
+    display: none;
   }
   .shell :global(.fixture-banner) {
     margin: 10px 12px 0;

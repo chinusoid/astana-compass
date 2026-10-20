@@ -135,6 +135,124 @@ function scenarioResponse(
   };
 }
 
+it("mobile viewport follows keyboard resize and pan, keeps focus internally visible, and restores after dismissal", async () => {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn((query: string) => ({
+      matches: query.includes("max-width"),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  );
+  vi.stubGlobal("innerHeight", 844);
+  const viewport = Object.assign(new EventTarget(), {
+    height: 844,
+    offsetTop: 0,
+    scale: 1,
+  });
+  vi.stubGlobal("visualViewport", viewport);
+  const remove = vi.spyOn(viewport, "removeEventListener");
+  const frames = new Map<number, FrameRequestCallback>();
+  let nextFrame = 0;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    frames.set(++nextFrame, callback);
+    return nextFrame;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+  const flushFrames = () =>
+    act(() => {
+      for (const [id, callback] of [...frames]) {
+        frames.delete(id);
+        callback(0);
+      }
+    });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json({ places: [], next_cursor: null })),
+  );
+  const { container, unmount } = render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  const shell = container.querySelector<HTMLElement>(".app-shell")!;
+  await waitFor(() =>
+    expect(shell.style.getPropertyValue("--mobile-viewport")).toBe("844px"),
+  );
+  fireEvent.keyDown(container.querySelector("[data-sheet-handle]")!, {
+    key: "End",
+  });
+  const wish = screen.getByRole("textbox", { name: t("ru", "query") });
+  const content = container.querySelector<HTMLElement>(
+    "#mobile-sheet-content",
+  )!;
+  const rect = (top: number, height: number) => ({
+    top,
+    bottom: top + height,
+    height,
+    left: 0,
+    right: 390,
+    width: 390,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  });
+  vi.spyOn(content, "getBoundingClientRect").mockImplementation(() =>
+    rect(viewport.offsetTop, viewport.height),
+  );
+  const fieldRect = vi
+    .spyOn(wish, "getBoundingClientRect")
+    .mockReturnValue(rect(700, 80));
+  vi.spyOn(
+    container.querySelector(".search-actions")!,
+    "getBoundingClientRect",
+  ).mockReturnValue(rect(0, 56));
+  fireEvent.change(wish, { target: { value: "Музей и кофе" } });
+  act(() => wish.focus());
+  act(() => {
+    viewport.height = 360;
+    viewport.offsetTop = 180;
+    viewport.dispatchEvent(new Event("resize"));
+  });
+  expect(shell.style.getPropertyValue("--mobile-viewport")).toBe("360px");
+  expect(shell.style.getPropertyValue("--mobile-viewport-top")).toBe("180px");
+  expect(shell).toHaveAttribute("data-keyboard-open", "true");
+  flushFrames();
+  expect(content.scrollTop).toBe(304);
+  expect(wish).toHaveFocus();
+  fieldRect.mockReturnValue(rect(250, 80));
+  act(() => {
+    viewport.offsetTop = 240;
+    viewport.dispatchEvent(new Event("scroll"));
+  });
+  expect(shell.style.getPropertyValue("--mobile-viewport-top")).toBe("240px");
+  flushFrames();
+  expect(content.scrollTop).toBe(304);
+  act(() => {
+    viewport.height = 844;
+    viewport.offsetTop = 0;
+    viewport.dispatchEvent(new Event("resize"));
+  });
+  expect(shell).not.toHaveAttribute("data-keyboard-open");
+  expect(shell.style.getPropertyValue("--mobile-viewport-top")).toBe("0px");
+  expect(wish).toHaveValue("Музей и кофе");
+  // Pinch zoom must not trigger the compact keyboard layout.
+  act(() => {
+    viewport.height = 422;
+    viewport.scale = 2;
+    viewport.dispatchEvent(new Event("resize"));
+  });
+  expect(shell).not.toHaveAttribute("data-keyboard-open");
+  unmount();
+  expect(remove).toHaveBeenCalledWith("resize", expect.any(Function));
+  expect(remove).toHaveBeenCalledWith("scroll", expect.any(Function));
+  expect(frames.size).toBe(0);
+  viewport.dispatchEvent(new Event("scroll"));
+  expect(frames.size).toBe(0);
+});
+
 it.each([false, true])(
   "mobile planner collapses only after a successful itinerary, preserves edits (failure=%s)",
   async (failure) => {

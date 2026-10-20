@@ -154,16 +154,93 @@ export default function CompassApp({
   const isMobile = useMobileViewport();
   const [mobileSheet, setMobileSheet] = useState<SheetSnap>("collapsed");
   const [sheetHeight, setSheetHeight] = useState(132);
-  const [mobileViewportHeight, setMobileViewportHeight] = useState<
-    number | null
-  >(null);
+  const [mobileKeyboard, setMobileKeyboard] = useState(false);
   const sheetRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!isMobile) return;
+    const viewport = window.visualViewport;
+    const shell = sheetRef.current?.parentElement;
+    let maximumHeight = Math.max(window.innerHeight, viewport?.height ?? 0);
+    let keyboard = false;
+    let frame: number | null = null;
+    const keepFocusVisible = () => {
+      frame = null;
+      const panel = sheetRef.current;
+      const active = document.activeElement;
+      const content = panel?.querySelector<HTMLElement>(
+        "#mobile-sheet-content",
+      );
+      if (
+        !content ||
+        !(active instanceof HTMLElement) ||
+        !content.contains(active)
+      )
+        return;
+      if (!active.matches("input, textarea, select, [contenteditable=true]"))
+        return;
+      const bounds = content.getBoundingClientRect();
+      const field = active.getBoundingClientRect();
+      if (!bounds.height || !field.height) return;
+      const action = active
+        .closest("#planner-form")
+        ?.querySelector(".search-actions");
+      const reserved = keyboard
+        ? (action?.getBoundingClientRect().height ?? 0)
+        : 0;
+      const top = bounds.top + 8;
+      const bottom = Math.max(top + field.height, bounds.bottom - reserved - 8);
+      if (field.top < top) content.scrollTop -= top - field.top;
+      else if (field.bottom > bottom)
+        content.scrollTop += field.bottom - bottom;
+    };
+    const measure = () => {
+      const height = Math.round(viewport?.height || window.innerHeight);
+      const scale = viewport?.scale || 1;
+      maximumHeight = Math.max(
+        maximumHeight,
+        height * scale,
+        window.innerHeight,
+      );
+      const active = document.activeElement;
+      const editing =
+        active instanceof HTMLElement &&
+        sheetRef.current?.contains(active) &&
+        active.matches(
+          "textarea, input:not([type=checkbox]):not([type=radio]):not([type=button]), select, [contenteditable=true]",
+        );
+      // Multiplying by scale distinguishes pinch zoom from an on-screen keyboard.
+      keyboard =
+        maximumHeight - height * scale > 120 && (keyboard || !!editing);
+      const top = Math.round(viewport?.offsetTop || 0);
+      // Anchor immediately without re-rendering the planner on every pan frame.
+      shell?.style.setProperty("--mobile-viewport", `${height}px`);
+      shell?.style.setProperty("--mobile-viewport-top", `${top}px`);
+      setMobileKeyboard(keyboard);
+      if (frame === null)
+        frame = window.requestAnimationFrame(keepFocusVisible);
+    };
+    const initial = window.setTimeout(measure, 0);
+    viewport?.addEventListener("resize", measure);
+    viewport?.addEventListener("scroll", measure);
+    window.addEventListener("resize", measure);
+    document.addEventListener("focusin", measure);
+    document.addEventListener("focusout", measure);
+    return () => {
+      window.clearTimeout(initial);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      viewport?.removeEventListener("resize", measure);
+      viewport?.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+      document.removeEventListener("focusin", measure);
+      document.removeEventListener("focusout", measure);
+      shell?.style.removeProperty("--mobile-viewport");
+      shell?.style.removeProperty("--mobile-viewport-top");
+    };
+  }, [isMobile]);
   useEffect(() => {
     if (!isMobile) return;
     const measure = () => {
       if (sheetRef.current?.hasAttribute("data-sheet-preview")) return;
-      if (window.visualViewport?.height)
-        setMobileViewportHeight(Math.round(window.visualViewport.height));
       const height = sheetRef.current?.getBoundingClientRect().height;
       if (height) setSheetHeight(Math.ceil(height));
     };
@@ -172,13 +249,11 @@ export default function CompassApp({
       typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
     if (sheetRef.current?.parentElement)
       observer?.observe(sheetRef.current.parentElement);
-    window.visualViewport?.addEventListener("resize", measure);
     const panel = sheetRef.current;
     panel?.addEventListener(SHEET_SETTLED_EVENT, measure);
     return () => {
       window.clearTimeout(timer);
       observer?.disconnect();
-      window.visualViewport?.removeEventListener("resize", measure);
       panel?.removeEventListener(SHEET_SETTLED_EVENT, measure);
     };
   }, [isMobile, mobileSheet]);
@@ -1002,12 +1077,14 @@ export default function CompassApp({
       <div
         className={`app-shell ${mobileStyles.shell}`}
         data-sheet-snap={mobileSheet}
+        data-keyboard-open={
+          isMobile && mobileKeyboard && mobileSheet !== "collapsed"
+            ? "true"
+            : undefined
+        }
         style={
           {
             "--mobile-overlay": `${sheetHeight}px`,
-            ...(isMobile && mobileViewportHeight
-              ? { "--mobile-viewport": `${mobileViewportHeight}px` }
-              : {}),
           } as CSSProperties
         }
       >
