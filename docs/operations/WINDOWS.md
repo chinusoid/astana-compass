@@ -2,7 +2,7 @@
 
 Команды выполняются в PowerShell **7+** (`pwsh`) из корня восстановленного репозитория, рядом с `pyproject.toml`. Нужны Git, Python 3.12, uv **0.13.1**, Node.js **24.19.0** и pnpm **11.25.0** на `PATH`. `node_modules` и `.venv` с Linux не переносятся: скрипты устанавливают зависимости из `uv.lock` и `apps/web/pnpm-lock.yaml`.
 
-Если перенос ещё не завершён, сначала восстановите ZIP и проверьте manifest по [WINDOWS-HANDOFF.md](../../WINDOWS-HANDOFF.md). Один старый checkout или clone частично опубликованной ветки не заменяет полный снимок. Последующие исправления применяются поверх восстановленного кода.
+Актуальная ветка Git содержит полный исходный код и готовый каталог. Достаточно клонировать её и установить зависимости по lockfiles; отдельный архив переноса не нужен. Основной путь запуска также описан в [руководстве разработки](../DEVELOPMENT.md).
 
 ## Один запуск API и интерфейса
 
@@ -43,15 +43,15 @@ pwsh -NoProfile -File .\scripts\dev.ps1 -Mode fixture -LlmProvider none -ApiPort
 
 Автоматический сбор данных выполняется отдельной командой data-модуля, перед запуском API. Веб-запрос пользователя не должен запускать импорт. Нужен существующий валидный snapshot, созданный импортёром и содержащий source/provenance; произвольный JSON или synthetic fixtures не заменяют реальный набор.
 
-В комплект входит готовый snapshot из **300 реальных OSM POI**, импортированных 19 октября 2026 в 03:30:43 Asia/Almaty. Источник — © OpenStreetMap contributors, [ODbL 1.0](../../data/samples/README.md). Это выборка из 628 объектов ответа Overpass, не полный охват города; время загрузки не является проверкой каждого факта. [Покрытие и пробелы](../data/README.md): лишь 86 мест имеют расписание, одно — описание, indoor/тишина/розетки не подтверждены.
+В комплект входит готовый snapshot из **682 реальных OSM POI** с сохранённой атрибуцией и дополнительными сведениями из официальных источников. Источник — © OpenStreetMap contributors, [ODbL 1.0](../../data/samples/README.md). Это ограниченный каталог, а не полный охват города; время загрузки не является проверкой каждого факта. Актуальное покрытие и ограничения описаны в [отчёте данных](../data/README.md).
 
 Команда для отдельного обновления ограниченного snapshot:
 
 ```powershell
-uv run --locked --no-env-file python -m astana_city_data.importer --output data/samples/astana-osm.json --cache data/samples/astana-overpass-cache.json --manifest data/manifests/astana-osm.json --limit 300
+uv run --locked --no-env-file python -m astana_city_data.importer --output data/samples/astana-osm-updated.json --cache data/samples/astana-overpass-updated-cache.json --manifest data/manifests/astana-osm-updated.json --limit 1000
 ```
 
-Она отдельно создаёт POI snapshot, cache и manifest; повторный запуск может использовать кэш. Проверяйте отчёт импортёра и время данных, а не только наличие файла. Для уже подготовленного snapshot новый сетевой импорт перед каждым запуском не требуется.
+Она отдельно создаёт новый POI snapshot, cache и manifest, не заменяя включённый в Git обогащённый каталог; повторный запуск может использовать кэш. Перед заменой рабочего snapshot нужно отдельно воспроизвести его обогащение и проверить покрытие. Для уже подготовленного snapshot новый сетевой импорт перед каждым запуском не требуется.
 
 Укажите полученный файл через `ASTANA_POI_PATH`:
 

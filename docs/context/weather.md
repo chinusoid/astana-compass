@@ -2,8 +2,8 @@
 
 `astana_city_context.weather.OpenMeteoWeather` is an internal backend adapter.
 There is no weather DTO in the current canonical `ContextResult`, and this module
-does not serialize readings into it. The coordinated extension is proposed in
-[`team-02-weather.md`](../requests/team-02-weather.md).
+does not serialize readings into it. Public weather fields would require a
+separate canonical contract change; see the current [context documentation](../../packages/city_context/README.md).
 
 Official references checked 2026-10-19:
 

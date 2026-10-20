@@ -23,11 +23,12 @@ pnpm устанавливается через npm с точной версие�
 1. `uv sync --locked --all-packages` в корне: API и Python-зависимости replay-тестов.
 2. `pnpm install --frozen-lockfile` в `apps/web`: установка без изменения lockfile.
 3. `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` из `apps/web`.
-4. Установка Chromium и системных библиотек через
-   `pnpm exec playwright install --with-deps chromium` в CI. Версию браузера
+4. Установка Chromium, WebKit и системных библиотек через
+   `pnpm exec playwright install --with-deps chromium webkit` в CI. Версию браузера
    определяет Playwright из lockfile; системный Chrome не подставляется.
 5. Запуск fixture API на `127.0.0.1:8000`, ограниченное ожидание readiness,
-   HTTP smoke и `pnpm test:e2e`.
+   HTTP smoke, `pnpm test:ios` и `pnpm test:e2e`.
+6. Отдельные browser-сценарии локального реального каталога — `pnpm test:live:local`.
 
 Существующая конфигурация `playwright.config.ts` запускает все сценарии из
 `tests/e2e/frontend.spec.ts` без дополнительного фильтра, включая проверки
@@ -52,10 +53,12 @@ generator/recommender с синтетическими ответами и `httpx
 внешней inference. E2E выполняется из `apps/web`, поэтому его относительные пути
 до Python helper и shared contracts разрешаются корректно.
 
-Проверка использует три synthetic fixture-места. Она не подтверждает доступность
+Основная fixture-проверка использует три synthetic-места. Отдельный local-live
+набор читает реальный snapshot без обращения к живым inference/routing API. Эти
+проверки не подтверждают доступность
 поставщиков live-данных, актуальность реальных мест, корректность платной модели
 или live weather/routing. `pnpm test:live` в этот job не входит. Установка
-зависимостей и Chromium требует сети, но тестовым сценариям не нужны внешние
+зависимостей и браузеров требует сети, но тестовым сценариям не нужны внешние
 карты, inference, ключи или публичное размещение приложения.
 
 ## Проверка и диагностика
@@ -71,8 +74,9 @@ generator/recommender с синтетическими ответами и `httpx
 HTTP smoke проверяются до её запуска. При ошибке API выводятся последние
 100 строк его журнала, access log отключён. Playwright выводит list reporter
 и создаёт локальные `apps/web/playwright-report` и `apps/web/test-results`.
-Загрузка этих каталогов как GitHub artifacts пока не подключена.
+Workflow сохраняет browser reports и screenshots как GitHub artifacts; результат конкретного прогона проверяется по его commit SHA.
 
-Сведения о прежних проверках Team 03 находятся в
-[TEAM-03-VERIFICATION.md](../ux/TEAM-03-VERIFICATION.md). Это исторический отчёт
-на указанном там commit; текущее состояние CI проверяется по последнему SHA PR.
+Текущее состояние CI проверяется по последнему SHA PR; сам документ описывает
+конфигурацию, а не подтверждает успех ещё не завершившегося прогона.
+Сводный путь запуска и проверок — в [DEVELOPMENT.md](../DEVELOPMENT.md),
+пользовательская демонстрация — в [DEMO.md](../DEMO.md).

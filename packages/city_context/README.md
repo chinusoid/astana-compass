@@ -42,7 +42,7 @@ reset to unknown so an earlier request cannot supply current evidence.
 ## Reproducible isolated install and checks
 
 Run from the repository root with Python 3.12 and uv. This does not change the
-coordinator's root workspace or lockfile:
+root workspace or lockfile:
 
 ```sh
 uv venv --python 3.12 /tmp/astana-context-venv
@@ -65,8 +65,8 @@ uv pip install --python /tmp/astana-context-venv/bin/python \
 No unit test calls a hosted provider. Explicit synthetic fixtures and injected
 ports verify integration behavior; they do not demonstrate real POI ingestion,
 external route availability or weather accuracy. See [verification](../../docs/context/verification.md)
-for actual check results and live limitations. Coordinator workspace wiring is
-requested in [team-02-integration](../../docs/requests/team-02-integration.md).
+for historical check results and live limitations. The current integration is
+described in [ARCHITECTURE.md](../../ARCHITECTURE.md).
 
 ## Backend environment
 
@@ -89,8 +89,8 @@ failure and normal shutdown. Provider error text, raw requests, credentials and
 precise coordinates are not logged by the module.
 
 `CityContext` permits dependency injection of routers and weather adapters for
-offline tests and alternative implementations. It does not import another team's
-private modules. HTTP retries are limited to safe weather GET and idempotent
+offline tests and alternative implementations. It uses explicit package interfaces
+instead of importing private modules. HTTP retries are limited to safe weather GET and idempotent
 route-calculation POST; response bodies are size-bounded, redirects disabled.
 Caches are memory-only, bounded and expire explicitly; their source timestamps
 are preserved. Provider quotas apply across processes/accounts: deployment must
@@ -154,16 +154,15 @@ metrics, vertex count and timestamps. It never prints the key, exact locations
 or raw response. Missing key exits explicitly; no approximation counts as a
 successful live smoke. `ASTANA_WEATHER_ENABLED` stays false for this command.
 
-## Detailed policies and pending coordination
+## Detailed policies and limitations
 
 - [Supported schedules and uncertainty](../../docs/context/schedules.md)
 - [Routing validation, provenance, cache and provider terms](../../docs/context/routing.md)
 - [Internal weather, units, provenance and terms](../../docs/context/weather.md)
-- [Weather wire contract proposal](../../docs/requests/team-02-weather.md)
-- [Arrival-time orchestration and route-leg proposal](../../docs/requests/team-02-arrivals.md)
+- [Implemented application architecture and contract boundaries](../../ARCHITECTURE.md)
 
 The current API enriches at the trip's `start_at`, not each stop's arrival. A
 successful start-time schedule check cannot establish that the venue stays open
-until arrival or through a visit. Root owns that orchestration and final budget /
+until arrival or through a visit. The recommender owns final budget and
 required-constraint checks. This package adds no hidden arrival fields and does
-not claim that pending integration has been completed.
+not claim an arrival-time schedule check has been completed.

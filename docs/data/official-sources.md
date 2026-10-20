@@ -107,4 +107,4 @@ OSM/Wikidata timestamps сохранены. Manifest хранит checksum за�
 
 Проверки: 87 city_data tests, Ruff, побайтное offline-воспроизведение snapshot
 и manifest, загрузка repository в ready с 628 местами. Внешняя сеть в тестах
-не вызывается. Новый checksum приложения интегрирует координатор.
+не вызывается. Новый checksum нужно согласовать с конфигурацией сборки приложения.

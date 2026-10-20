@@ -1,6 +1,6 @@
 # Local development and checks
 
-The API defaults to `fixture`: synthetic places and approximate synthetic routes, clearly marked in responses. Explicit live mode uses the bundled 300-place OSM snapshot and local multilingual lexical retrieval. Neither mode requires PostgreSQL; the optional database profile prepares a future PostgreSQL/pgvector backend. For PowerShell launch/check commands, see [Windows instructions](WINDOWS.md).
+The API defaults to `fixture`: synthetic places and approximate synthetic routes, clearly marked in responses. Explicit live mode uses the bundled 682-place OSM snapshot and local multilingual lexical retrieval. Neither mode requires PostgreSQL; the optional database profile prepares a future PostgreSQL/pgvector backend. For PowerShell launch/check commands, see [Windows instructions](WINDOWS.md); the consolidated current guide is [DEVELOPMENT.md](../DEVELOPMENT.md).
 
 ## Start the API
 
@@ -10,7 +10,7 @@ Use Python 3.12–3.14 and [uv](https://docs.astral.sh/uv/getting-started/instal
 bash scripts/dev.sh
 ```
 
-The helper runs `uv sync --locked --all-packages` and then the factory `astana_api.app:create_app`. It listens on `127.0.0.1:8000`, disables HTTP access logs, and defaults to `ASTANA_MODE=fixture` and `LLM_PROVIDER=none`. It uses the committed lockfile; an absent or stale lock is an error for the coordinator to resolve, not an instruction to silently regenerate it.
+The helper runs `uv sync --locked --all-packages` and then the factory `astana_api.app:create_app`. It listens on `127.0.0.1:8000`, disables HTTP access logs, and defaults to `ASTANA_MODE=fixture` and `LLM_PROVIDER=none`. It uses the committed lockfile; an absent or stale lock requires resolving the dependency mismatch rather than silently regenerating it.
 
 Additional uvicorn arguments are forwarded explicitly, for example:
 
@@ -74,7 +74,7 @@ The image supplies pgvector. Application schema migrations and PostgreSQL reposi
 
 ## Configure real adapters and optional LLMs
 
-Data, retrieval and context modules are installed and locked. The repository needs an explicit snapshot path; the committed OSM sample contains 300 real records with source attribution and a reproducible import manifest. From the repository root:
+Data, retrieval and context modules are installed and locked. The repository needs an explicit snapshot path; the committed OSM sample contains 682 real records with source attribution and reproducible import manifests. From the repository root:
 
 ```sh
 export ASTANA_MODE=live
@@ -87,7 +87,7 @@ bash scripts/dev.sh
 
 Live factories must match these `module:function` boundaries or be explicitly configured. Missing live adapters fail startup; the API must not silently substitute synthetic data. Each provider adapter documents its required server-side environment separately. The helper reads the process environment and does not automatically load `.env`.
 
-The sample was downloaded on 2026-10-18 at 22:30:43 UTC. It is a bounded named-category selection, not complete city coverage. Only one place has a source description and 86 have opening hours; unknown amenities remain unknown. [Import/provenance and coverage](../data/README.md), [OSM data license](../../data/samples/README.md), [update command](../../packages/city_data/README.md). Import runs separately from API requests; restart the API to load a replaced snapshot. The freshness warning is based on import/OSM replica time and does not certify facts on the ground.
+The sample is a bounded named-category selection, not complete city coverage. Its successive imports and official-source enrichment have separate provenance; unknown amenities remain unknown. See [import dates and coverage](../data/README.md), [OSM data license](../../data/samples/README.md) and [update commands](../../packages/city_data/README.md). Import runs separately from API requests; restart the API to load a replaced snapshot. The freshness warning is based on import/OSM replica time and does not certify facts on the ground.
 
 Live retrieval is local BM25 with a small RU/KK/EN lexicon and a bounded nearest-place pool. No semantic embeddings or paid inference are used by that retriever. [Synthetic evaluation and real snapshot smoke](../retrieval/QUALITY.md) are distinct; neither establishes complete coverage or independent end-to-end recommendation quality.
 

@@ -42,7 +42,7 @@ await retriever.aclose()
 
 ## Проверки
 
-До регистрации workspace координатором можно запускать из корня PowerShell:
+Для изолированной установки пакета можно запускать из корня PowerShell:
 
 ```powershell
 $env:PYTHONPATH = (Join-Path (Get-Location) 'packages/retrieval/src')
