@@ -231,7 +231,42 @@ export function fitJourney(
     ...(geometry?.coordinates ?? []),
     ...stops.map(({ lon, lat }) => [lon, lat]),
   ];
-  if (!points.length) return;
+  if (
+    !points.length ||
+    points.some(
+      ([lon, lat]) =>
+        !Number.isFinite(lon) ||
+        !Number.isFinite(lat) ||
+        Math.abs(lon) > 180 ||
+        Math.abs(lat) >= 90,
+    )
+  )
+    return false;
+  const host = map.getContainer();
+  const width = host.clientWidth;
+  const height = host.clientHeight;
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width < 2 ||
+    height < 2
+  )
+    return false;
+  // Layout changes can precede ResizeObserver. Fit using the current CSS size,
+  // and leave positive room after both retained and requested camera padding.
+  map.resize();
+  const retained = map.getPadding();
+  const availableWidth = width - (retained.left ?? 0) - (retained.right ?? 0);
+  const availableHeight = height - (retained.top ?? 0) - (retained.bottom ?? 0);
+  if (
+    !Number.isFinite(availableWidth) ||
+    !Number.isFinite(availableHeight) ||
+    availableWidth < 2 ||
+    availableHeight < 2
+  )
+    return false;
+  const horizontalScale = Math.min(1, availableWidth / 260);
+  const verticalScale = Math.min(1, availableHeight / 340);
   const longitude = points.map((point) => point[0]);
   const latitude = points.map((point) => point[1]);
   map.fitBounds(
@@ -240,11 +275,17 @@ export function fitJourney(
       [Math.max(...longitude), Math.max(...latitude)],
     ],
     {
-      padding: { top: 100, right: 65, bottom: 70, left: 65 },
+      padding: {
+        top: 100 * verticalScale,
+        right: 65 * horizontalScale,
+        bottom: 70 * verticalScale,
+        left: 65 * horizontalScale,
+      },
       maxZoom: 16,
       duration: animate && !reducedMapMotion() ? 750 : 0,
     },
   );
+  return true;
 }
 
 export function categorySymbol(categories: string[]) {

@@ -102,6 +102,7 @@ export default function CityMap(props: Props) {
   const mode = useRef(true);
   const stopMotion = useRef<(() => void) | null>(null);
   const stopJourney = useRef<(() => void) | null>(null);
+  const retryJourneyFit = useRef<(() => void) | null>(null);
   const stopTraffic = useRef<(() => void) | null>(null);
   const trafficRequest = useRef<AbortController | null>(null);
   const lastTrafficRequest = useRef(0);
@@ -357,7 +358,10 @@ export default function CityMap(props: Props) {
               void inspectPoint(lookupPoint);
             }
           });
-          observer = new ResizeObserver(() => map.resize());
+          observer = new ResizeObserver(() => {
+            if (retryJourneyFit.current) retryJourneyFit.current();
+            else map.resize();
+          });
           observer.observe(host);
         } catch {
           clearLoadingTimer();
@@ -371,6 +375,7 @@ export default function CityMap(props: Props) {
       disposed = true;
       clearLoadingTimer();
       observer?.disconnect();
+      retryJourneyFit.current = null;
       stopMotion.current?.();
       stopMotion.current = null;
       stopJourney.current?.();
@@ -672,8 +677,18 @@ export default function CityMap(props: Props) {
   }, [ready, props.activeId, props.origin, props.places, props.route]);
 
   useEffect(() => {
-    if (!ready || !mapRef.current || !hasJourney) return;
-    fitJourney(mapRef.current, geometry, journeyPoints, true);
+    retryJourneyFit.current = null;
+    const map = mapRef.current;
+    if (!ready || !map || !hasJourney) return;
+    const fit = () => {
+      retryJourneyFit.current = fitJourney(map, geometry, journeyPoints, true)
+        ? null
+        : fit;
+    };
+    fit();
+    return () => {
+      retryJourneyFit.current = null;
+    };
   }, [ready, geometry, hasJourney, journeyPoints, props.overviewRequest]);
 
   useEffect(() => {
@@ -913,8 +928,18 @@ export default function CityMap(props: Props) {
                 data-testid="map-route-overview"
                 disabled={!ready}
                 onClick={() => {
-                  if (mapRef.current)
-                    fitJourney(mapRef.current, geometry, journeyPoints);
+                  const map = mapRef.current;
+                  if (!map) return;
+                  const fit = () => {
+                    retryJourneyFit.current = fitJourney(
+                      map,
+                      geometry,
+                      journeyPoints,
+                    )
+                      ? null
+                      : fit;
+                  };
+                  fit();
                 }}
               >
                 <Route size={18} aria-hidden="true" />

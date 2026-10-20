@@ -18,6 +18,7 @@ const fake = vi.hoisted(() => ({
   maps: [] as MockMap[],
   markers: [] as MockMarker[],
   geolocates: [] as MockGeolocate[],
+  resizeObservers: [] as (() => void)[],
 }));
 type Listener = (event?: unknown) => void;
 class MockMap {
@@ -80,6 +81,12 @@ class MockMap {
   }
   getBearing() {
     return this.bearing;
+  }
+  getContainer() {
+    return this.options.container as HTMLElement;
+  }
+  getPadding() {
+    return { top: 0, right: 0, bottom: 0, left: 0 };
   }
   isStyleLoaded() {
     return true;
@@ -193,6 +200,9 @@ beforeEach(() => {
   fake.maps.length = 0;
   fake.markers.length = 0;
   fake.geolocates.length = 0;
+  fake.resizeObservers.length = 0;
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(900);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(650);
   vi.stubGlobal(
     "matchMedia",
     vi.fn(() => ({ matches: true })),
@@ -200,12 +210,18 @@ beforeEach(() => {
   vi.stubGlobal(
     "ResizeObserver",
     class {
+      constructor(callback: () => void) {
+        fake.resizeObservers.push(callback);
+      }
       observe() {}
       disconnect() {}
     },
   );
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 const props = (): ComponentProps<typeof CityMap> => ({
   places: [],
   origin: null,
@@ -320,6 +336,49 @@ it("fits all three stops and origin without inventing a line for approximate rou
   expect(map.fitBounds).toHaveBeenCalledTimes(count + 1);
   fireEvent.click(screen.getByTestId("map-route-overview"));
   expect(map.fitBounds).toHaveBeenCalledTimes(count + 2);
+});
+
+it("fits the latest journey once a hidden mobile map becomes visible without recentering later resizes", async () => {
+  const width = vi
+    .spyOn(HTMLElement.prototype, "clientWidth", "get")
+    .mockReturnValue(0);
+  const height = vi
+    .spyOn(HTMLElement.prototype, "clientHeight", "get")
+    .mockReturnValue(0);
+  const seed = structuredClone(
+    examples.cases.find((entry) => entry.name === "place_valid")!.instance,
+  ) as Place;
+  const route = (
+    examples.cases.find((entry) => entry.name === "recommendations_valid")!
+      .instance as { recommendations: { route: RouteEstimate }[] }
+  ).recommendations[0].route;
+  const config = {
+    ...props(),
+    places: [seed],
+    route,
+    origin: { lon: 71.42, lat: 51.12 },
+    routeStopIds: [seed.id],
+  };
+  const view = render(<CityMap {...config} />);
+  const map = await loadMap();
+  expect(map.fitBounds).not.toHaveBeenCalled();
+  const latest = { ...seed, location: { lon: 71.45, lat: 51.15 } };
+  view.rerender(<CityMap {...config} places={[latest]} />);
+  expect(map.fitBounds).not.toHaveBeenCalled();
+  width.mockReturnValue(390);
+  height.mockReturnValue(170);
+  act(() => fake.resizeObservers.forEach((notify) => notify()));
+  expect(map.fitBounds).toHaveBeenCalledExactlyOnceWith(
+    [
+      [71.42, 51.12],
+      [71.45, 51.15],
+    ],
+    expect.objectContaining({
+      padding: { top: 50, right: 65, bottom: 35, left: 65 },
+    }),
+  );
+  act(() => fake.resizeObservers.forEach((notify) => notify()));
+  expect(map.fitBounds).toHaveBeenCalledOnce();
 });
 
 it("starts with real vector 3D and switches to genuinely flat footprints", async () => {
