@@ -4,6 +4,7 @@ import {
   AxeBuilder,
   type Page,
   type RecommendationResponse,
+  type ItineraryResponse,
 } from "../../apps/web/e2e-support";
 import type { Place } from "../../packages/api_client/src/generated";
 import { locales, t } from "../../apps/web/src/lib/i18n";
@@ -342,5 +343,58 @@ test("real Wi-Fi requirement is honored and unknown outlets produce an explained
   await page.screenshot({
     path: testInfo.outputPath("real-no-match-mobile.png"),
     fullPage: true,
+  });
+});
+
+test("pizza and the named Botanical Garden automatically form one two-stop walk", async ({
+  page,
+  request,
+}, testInfo) => {
+  const botanicalId = "osm:way/1196402246";
+  const response = await request.get(
+    `/api/v1/places/${encodeURIComponent(botanicalId)}`,
+  );
+  const botanical = (await response.json()) as Place;
+  await page.goto("/");
+  await fillWalk(
+    page,
+    botanical,
+    "хочу в ботанический сад сходить и пицу покушать",
+  );
+  await page.locator('input[name="minutes"]').fill("");
+  const recommendations = page.waitForResponse(
+    (res) =>
+      res.url().endsWith("/recommendations") &&
+      res.request().method() === "POST",
+  );
+  const built = page.waitForResponse(
+    (res) =>
+      res.url().endsWith("/itineraries") && res.request().method() === "POST",
+  );
+  await page.locator('textarea[name="query"]').press("Enter");
+  const result = (await (
+    await recommendations
+  ).json()) as RecommendationResponse;
+  const ids = result.recommendations.map((item) => item.place_id);
+  expect(ids).toHaveLength(2);
+  expect(ids[1]).toBe(botanicalId);
+  const pizza = result.places.find((place) => place.id === ids[0])!;
+  const cuisine = pizza.facts.find((fact) => fact.key === "osm:cuisine")!;
+  expect(cuisine.status).toBe("known");
+  expect(String(cuisine.value).split(";")).toEqual(
+    expect.arrayContaining([expect.stringMatching(/^(pizza|italian_pizza)$/i)]),
+  );
+  expect(cuisine.evidence_ids.length).toBeGreaterThan(0);
+  const itinerary = (await (await built).json()) as ItineraryResponse;
+  expect(itinerary.stops.map((stop) => stop.place_id)).toEqual(ids);
+  await expect(
+    page.locator(".journey-preview .journey-stop strong"),
+  ).toHaveText([pizza.name, botanical.name]);
+  await expect(page.getByTestId("map-journey-summary")).toBeVisible();
+  await expect(page.locator(".journey-preview .journey-stop")).toHaveCount(2);
+  await page.screenshot({
+    path: testInfo.outputPath("pizza-then-botanical-walk.png"),
+    fullPage: true,
+    animations: "disabled",
   });
 });

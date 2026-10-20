@@ -231,6 +231,46 @@ def test_named_stages_keep_the_requested_real_venues(offline_live):
     ]
 
 
+@pytest.mark.parametrize("query,botanical_first", [
+    ("хочу в ботанический сад сходить и пицу покушать", False),
+    ("Сначала пицца, потом Ботанический сад", False),
+    ("Сначала Ботанический сад, потом поесть пиццу", True),
+])
+def test_real_pizza_and_named_botanical_request_become_one_complete_outing(
+    offline_live, query, botanical_first,
+):
+    payload = request(query)
+    payload.update(available_seconds=60, return_to_origin=False)
+    response = offline_live.post("/v1/recommendations", json=payload)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    validate_payload("RecommendationResponse", result)
+    ids = [item["place_id"] for item in result["recommendations"]]
+    assert len(ids) == 2
+    assert ids[0 if botanical_first else 1] == "osm:way/1196402246"
+    pizza_id = ids[1 if botanical_first else 0]
+    pizza = next(place for place in result["places"] if place["id"] == pizza_id)
+    cuisine = next(fact for fact in pizza["facts"] if fact["key"] == "osm:cuisine")
+    assert cuisine["status"] == "known" and cuisine["evidence_ids"]
+    assert set(str(cuisine["value"]).lower().split(";")) & {"pizza", "italian_pizza"}
+    assert set(cuisine["evidence_ids"]) <= {item["id"] for item in pizza["evidence"]}
+    assert not pizza["is_synthetic"]
+    built = offline_live.post("/v1/itineraries", json={**payload, "place_ids": ids})
+    assert built.status_code == 200, built.text
+    itinerary = built.json()
+    validate_payload("ItineraryResponse", itinerary)
+    assert [stop["place_id"] for stop in itinerary["stops"]] == ids
+    assert itinerary["total_duration_seconds"] > payload["available_seconds"]
+
+
+def test_single_named_botanical_request_is_not_padded_with_other_gardens(offline_live):
+    response = offline_live.post("/v1/recommendations", json=request("Хочу в Ботанический сад"))
+    assert response.status_code == 200, response.text
+    assert [item["place_id"] for item in response.json()["recommendations"]] == [
+        "osm:way/1196402246",
+    ]
+
+
 @pytest.mark.parametrize("path", [None, "missing-snapshot.json"])
 def test_real_factory_does_not_fall_back_when_snapshot_is_unconfigured(monkeypatch, path):
     if path is None:
