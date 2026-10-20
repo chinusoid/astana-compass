@@ -13,11 +13,13 @@ NAME_KEYS = frozenset({
       for suffix in ("", ":ru", ":kk", ":en")),
     "osm:int_name",
     *(f"wikidata:{kind}:{lang}" for kind in ("label", "aliases") for lang in ("ru", "kk", "en")),
+    *(f"official:aliases:{lang}" for lang in ("ru", "kk", "en")),
 })
 TEXT_KEYS = frozenset({
     "osm:cuisine", "osm:addr:street", "osm:addr:place",
     "osm:description", *(f"osm:description:{lang}" for lang in ("ru", "kk", "en")),
     *(f"wikidata:description:{lang}" for lang in ("ru", "kk", "en")),
+    *(f"official:description:{lang}" for lang in ("ru", "kk", "en")),
 })
 ANCHOR_START = re.compile(
     r"(?<!\w)(?:near|by|beside|around|next\s+to|close\s+to|у|возле|около|рядом\s+с|недалеко\s+от)\s+", re.I,
@@ -67,6 +69,12 @@ def _phrase_pattern(name: str) -> re.Pattern[str] | None:
         {term for term in understand(name).terms if ":" in term}
     )):
         return None
+    # Inflect only these complete, source-backed names. This does not translate
+    # a generic garden or turn a botanical description into a named destination.
+    if tokens == ("ботанический", "сад"):
+        return re.compile(r"(?<!\w)ботаническ(?:ий|ого|ому|им|ом)[\W_]+сад(?:а|у|ом|е)?(?!\w)")
+    if tokens == ("ботаникалық", "бақ"):
+        return re.compile(r"(?<!\w)ботаникалық[\W_]+бақ(?:қа|та|тан|тың|ты)?(?!\w)")
     suffix = r"(?:ға|ге|қа|ке|да|де|та|те|дан|ден|тан|тен|ның|нің)?" if (
         len(tokens[-1]) >= 5 and all("\u0400" <= char <= "\u052f" for char in tokens[-1])
     ) else ""
@@ -108,7 +116,57 @@ class NameMention:
     key: str | None
 
 
-def mentions(text: str, aliases: list[tuple[str, str | None]]) -> list[NameMention]:
+def maximal_source_mentions(found: dict[str, list[NameMention]]) -> dict[str, list[NameMention]]:
+    """Keep complete source names over contained aliases, per query occurrence.
+
+    An independent shorter mention still identifies its own destination. Equal
+    spans retain all source identities/alias evidence. Apply this separately to
+    positive and negative mentions, so a longer excluded name cannot exclude an
+    independently requested shorter one. The interval sweep is O(M log M).
+    """
+    spans = sorted({(mention.start, mention.end) for values in found.values() for mention in values},
+                   key=lambda span: (span[0], -span[1]))
+    maximal = set()
+    furthest = -1
+    for start, end in spans:
+        if end > furthest:
+            maximal.add((start, end))
+            furthest = end
+    return {place_id: [mention for mention in values if (mention.start, mention.end) in maximal]
+            for place_id, values in found.items()}
+
+
+def exact_source_mentions(text: str, aliases: list[tuple[str, str | None]]) -> list[NameMention]:
+    """A structured destination must match an entire source alias, not its suffix."""
+    value = normalize(text).strip(" \t\r\n\"'«»“”‘’")
+    result = []
+    for name, key in aliases:
+        pattern = _phrase_pattern(name)
+        if pattern is not None and (pattern.fullmatch(value) or _inflected_name(value, name)):
+            result.append(NameMention(0, len(value), key))
+    return result
+
+
+def _inflected_name(requested: str, source: str) -> bool:
+    """Bounded Cyrillic case endings; every full-name token must still agree."""
+    left, right = words(requested), words(source)
+    if not left or len(left) != len(right):
+        return False
+
+    def variants(word: str) -> set[str]:
+        result = {word}
+        if re.fullmatch(r"[а-яё]+", word):
+            for ending in ("ами", "ями", "ого", "ему", "ому", "ыми", "ими", "ый", "ий", "ой",
+                           "ое", "ая", "яя", "ую", "юю", "ые", "ие", "ых", "их", "ом", "ем",
+                           "ам", "ям", "ах", "ях", "а", "я", "у", "ю", "е", "ы", "и"):
+                if word.endswith(ending) and len(word) - len(ending) >= 4:
+                    result.add(word[:-len(ending)])
+        return result
+
+    return all(variants(a).intersection(variants(b)) for a, b in zip(left, right, strict=True))
+
+
+def mentions(text: str, aliases: list[tuple[str, str | None]], *, excluded: bool = False) -> list[NameMention]:
     result = []
     activities = [match.span() for pattern in ACTIVITIES.values() for match in pattern.finditer(text)]
     for name, key in aliases:
@@ -120,7 +178,7 @@ def mentions(text: str, aliases: list[tuple[str, str | None]]) -> list[NameMenti
                 if any(start <= match.start() and match.end() <= end and match.span() != (start, end)
                        for start, end in activities):
                     continue
-                if not negated(text, match.start(), match.end()):
+                if negated(text, match.start(), match.end()) == excluded:
                     result.append(NameMention(match.start(), match.end(), key))
     return result
 

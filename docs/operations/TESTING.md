@@ -48,11 +48,11 @@ ASTANA_MODE=fixture LLM_PROVIDER=none bash scripts/dev.sh --port 18080
 | Что проверить | Действие | Ожидаемое поведение |
 |---|---|---|
 | Каталог | Загрузить места | Три места с `is_synthetic=true` и ID с префиксом `synthetic:` |
-| Помещение | `POST /v1/recommendations`: `indoor=true`, `strength="required"`, пешком, достаточно времени | Есть подходящие варианты; каждый подтверждён известным indoor-фактом и помещается в бюджет |
+| Помещение | `POST /v1/recommendations`: `indoor=true`, `strength="required"`, пешком, достаточно времени | Есть подходящие варианты; каждый подтверждён известным indoor-фактом с полным временем; превышение ориентира помечено |
 | Неизвестный обязательный факт | Заменить ограничение на `wheelchair_accessible=true`, `strength="required"` | `status="no_match"`, пустые `places` и `recommendations`, объяснение ограничения |
 | Неподдерживаемый транспорт | Установить `transport="cycling"` | HTTP 422, `error.code="unsupported_transport"`; скрытой замены на walking нет |
 | Неверные координаты | Установить `origin.lat=91` | HTTP 422, `error.code="invalid_request"` |
-| Выбранный маршрут | `POST /v1/itineraries`: выбрать два indoor-места в явном порядке, передать их в `place_ids`, включить `return_to_origin=true` | Порядок и выбранные ID сохранены; возврат учтён; дорога плюс оба посещения укладываются в `available_seconds` |
+| Выбранный маршрут | `POST /v1/itineraries`: выбрать два indoor-места в явном порядке, передать их в `place_ids`, включить `return_to_origin=true` | Порядок и выбранные ID сохранены; возврат учтён; дорога плюс оба посещения включены в итог; `available_seconds` — ориентир, превышение допустимо и отмечено |
 
 Для ручной проверки через Swagger можно получить готовый synthetic-запрос с текущим временем UTC+05:
 

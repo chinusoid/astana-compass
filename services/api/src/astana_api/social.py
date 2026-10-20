@@ -11,6 +11,9 @@ from fastapi import APIRouter, Request
 from starlette.responses import JSONResponse
 
 
+GUEST_SESSION_SECONDS = 7 * 24 * 60 * 60
+
+
 class SocialError(Exception):
     def __init__(self, code, status=422):
         self.code, self.status = code, status
@@ -66,8 +69,8 @@ class SocialStore:
         self.profiles[profile_id] = {
             "profile": {"id": profile_id, "name": name.strip()},
             "code": secrets.token_urlsafe(16), "friends": set(), "requests": set(),
-            "deadline": self.clock() + 86400,
-            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+            "deadline": self.clock() + GUEST_SESSION_SECONDS,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=GUEST_SESSION_SECONDS)).isoformat(),
             "actions": [],
         }
         self.tokens[hashlib.sha256(token.encode()).hexdigest()] = profile_id

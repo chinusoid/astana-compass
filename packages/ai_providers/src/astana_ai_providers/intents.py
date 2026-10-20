@@ -8,12 +8,14 @@ All extracted constraints are proposals (preferred) until the user confirms.
 from __future__ import annotations
 
 import re
+from fractions import Fraction
 from typing import Any, Literal
 
 import httpx
 from astana_contracts import validate_payload
 
 from .generators import HostedExplanationGenerator, ProviderError, _strict_json
+from .budgets import RequestBudget
 
 IntentProvider = Literal["rules", "openai", "nvidia"]
 
@@ -44,12 +46,12 @@ _PATTERNS = {
     key: re.compile(r"(?<!\w)(?:" + value + r")(?!\w)", re.I) for key, value in {**_FEATURES, **_CATEGORIES}.items()
 }
 _CLAUSE = re.compile(r"[^,;.!?\n]+")
-_SPLIT_CONTRAST = re.compile(r"\b(?:но|but|однако|бірақ)\b", re.I)
+_SPLIT_CONTRAST = re.compile(r"\b(?:но|а|but|instead|однако|бірақ|алайда)\b", re.I)
 _NEG_BEFORE = re.compile(
     r"(?<!\w)(?:не|без|not|no|without|don't|dont|doesn't|doesnt|avoid|не\s+нуж\w{0,20})(?!\w)", re.I
 )
 _NEG_AFTER = re.compile(
-    r"^\s*(?:(?:мне|нам|is|are)\s+)?(?:не\s+(?:нуж\w{0,20}|важ\w{0,20}|обязател\w{0,20}|хочу)|(?:is\s+)?(?:not\s+(?:needed|required|important)|optional)|(?:isn|aren)['’]t\s+(?:needed|required|important)|doesn.t\s+matter|керек\s+емес|маңызды\s+емес)",
+    r"^\s*(?:(?:мне|нам|is|are)\s+)?(?:не\s+(?:нуж\w{0,20}|важ\w{0,20}|обязател\w{0,20}|хочу)|(?:is\s+)?(?:not\s+(?:needed|required|important)|optional)|(?:isn|aren)['’]t\s+(?:needed|required|important)|doesn.t\s+matter|(?:керек|қажет|маңызды)\s+емес|емес)",
     re.I,
 )
 _FLIGHT = re.compile(
@@ -60,11 +62,23 @@ _FLIGHT = re.compile(
 )
 _NIGHT = re.compile(r"ноч\w{0,20}|вечер\w{0,20}|tonight|at\s+night|nightlife|түн\w{0,20}|кешке", re.I)
 _TOURIST = re.compile(r"турист\w{0,20}|tourist\w{0,20}|visiting\s+Astana|Астан.*алғаш", re.I)
-_NUMBER = r"(?:\d{1,4}(?:[.,]\d{1,2})?|one|two|three|four|half|один|одна|одну|два|две|три|четыре|бір|екі|үш|төрт)"
-_UNIT = r"(?:минут\w{0,20}|мин\.?|minutes?|mins?|сағат\w{0,20}|час\w{0,20}|hours?|hrs?|hr|h|мину[тт]\w{0,20})"
+_NUMBER = (
+    r"(?:\d+(?:\s+and\s+a\s+half|[.,]\d+|/\d+)?|one\s+and\s+(?:a\s+)?half|two\s+and\s+(?:a\s+)?half|"
+    r"бір\s+жарым|екі\s+жарым|полтора|полторы|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"half(?:\s+an?)?|один|одна|одну|два|две|три|четыре|пять|шесть|семь|восемь|девять|десять|"
+    r"бір|екі|үш|төрт|бес|алты|жеті|сегіз|тоғыз|он|an?)"
+)
+_HOUR = r"(?:сағат(?:қа|тан|тай|ым|ымыз)?|час(?:а|ов)?|hours?|hrs?|h)"
+_MINUTE = r"(?:минут(?:а|ы|у|ой)?|мин\.?|minutes?|mins?|мину[тт](?:қа|тай)?)"
+_UNIT = rf"(?:{_HOUR}|{_MINUTE})"
 _TIME = re.compile(
-    # Do not reinterpret the tail of an unsupported decimal as a whole number.
-    rf"(?<![\w.,])(?P<first>{_NUMBER})(?:\s*(?:[-–—]|до|to)\s*(?P<last>{_NUMBER}))?\s*(?P<unit>{_UNIT})(?!\w)", re.I
+    rf"(?<![\w.,])(?:"
+    rf"(?P<standalone>полчаса|час\s+с\s+половиной|час(?=\s*(?:(?:и|and|және)\s+)?{_NUMBER}\s*{_MINUTE}))|"
+    rf"(?P<first>{_NUMBER})(?:\s*(?:[-–—]|до|to)\s*(?P<last>{_NUMBER}))?\s*"
+    rf"(?P<unit>{_UNIT})(?![^\W\d_]))"
+    rf"(?:(?P<half>\s+(?:с\s+половиной|and\s+a\s+half))|"
+    rf"(?:\s*(?:(?:и|and|және)\s+)?)(?P<minutes>{_NUMBER})\s*(?P<minute_unit>{_MINUTE}))?"
+    rf"(?!\w)", re.I,
 )
 _NUM_WORDS = {
     "one": 1,
@@ -83,6 +97,12 @@ _NUM_WORDS = {
     "екі": 2,
     "үш": 3,
     "төрт": 4,
+    "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "пять": 5, "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10,
+    "бес": 5, "алты": 6, "жеті": 7, "сегіз": 8, "тоғыз": 9, "он": 10,
+    "полтора": 1.5, "полторы": 1.5, "бір жарым": 1.5, "екі жарым": 2.5,
+    "one and a half": 1.5, "two and a half": 2.5, "a": 1, "an": 1,
+    "one and half": 1.5, "two and half": 2.5, "half a": 0.5, "half an": 0.5,
 }
 _ANCHOR = re.compile(
     r"(?<!\w)(?:MEGA(?:\s+Silk\s+Way)?|МЕГА(?:\s+Силк\s+В[еэ]й)?|Байтерек\w{0,20}|Бәйтерек\w{0,20}|Baiterek|Bayterek|Хан\s+Шатыр\w{0,20}|Khan\s+Shatyr)(?!\w)",
@@ -213,29 +233,53 @@ def _mentions(query: str, key: str) -> tuple[list[str], bool]:
     return positive, negative
 
 
-def _number(value: str) -> float:
-    return _NUM_WORDS[value.lower()] if value.lower() in _NUM_WORDS else float(value.replace(",", "."))
+def _number(value: str) -> Fraction:
+    value = " ".join(value.lower().split())
+    if value.endswith(" and a half") and value not in _NUM_WORDS:
+        return Fraction(value.removesuffix(" and a half")) + Fraction(1, 2)
+    return Fraction(str(_NUM_WORDS[value])) if value in _NUM_WORDS else Fraction(value.replace(",", "."))
 
 
 def _time(query: str) -> tuple[int | None, str | None, bool, bool]:
     """Return seconds, exact excerpt, range flag, ambiguity flag; no clamping."""
     candidates: list[tuple[int, str, bool]] = []
     for match in _TIME.finditer(query):
-        first = _number(match["first"])
-        last = _number(match["last"]) if match["last"] else first
-        unit = match["unit"].lower()
-        multiplier = 3600 if unit.startswith(("час", "hour", "hr", "сағат")) or unit == "h" else 60
-        seconds = int(min(first, last) * multiplier)
+        try:
+            standalone = match["standalone"]
+            if standalone:
+                first = {"полчаса": Fraction(1, 2), "час": Fraction(1)}.get(standalone.lower(), Fraction(3, 2))
+            else:
+                first = _number(match["first"])
+            last = _number(match["last"]) if match["last"] else first
+            unit = (match["unit"] or "час").lower()
+            hour = bool(re.fullmatch(_HOUR, unit, re.I))
+            seconds = first * (3600 if hour else 60)
+            if match["half"]:
+                if not hour or first.denominator != 1 or match["last"]:
+                    return None, None, False, True
+                seconds += 1800
+            if match["minutes"]:
+                minutes = _number(match["minutes"])
+                if not hour or match["last"] or not 0 <= minutes < 60:
+                    return None, None, False, True
+                seconds += minutes * 60
+        except (ValueError, ZeroDivisionError):
+            return None, None, False, True
         # A negated duration or an upper/lower bound alone is not an available
-        # budget. Compound times (1 h 30 min) are handled conservatively below.
+        # budget. Only adjacent hour/minute components form one duration.
         prefix = query[max(0, match.start() - 30) : match.start()]
         if re.search(
-            r"(?:(?<!\w)(?:не|not|less\s+than|more\s+than|меньше|больше|кем|артық)|[-−–—])\s*$", prefix, re.I
+            r"(?:(?<!\w)(?:не(?:\s+(?:на|хочу|нужно|надо))?|нет(?:\s+даже)?|"
+            r"not(?:\s+for)?|don['’]?t\s+have|under|over|less\s+than|more\s+than|"
+            r"меньше|больше|кем|артық|до)|[-−–—])\s*$", prefix, re.I
         ):
             return None, None, False, True
-        if not 60 <= seconds <= 14400 or first > last:
+        suffix = query[match.end():match.end() + 40]
+        if re.match(r"\s*(?:емес|жоқ|кем|артық|астам|дейін|не\s+подходит|is\s+not|(?:или|or|немесе)\s+\d)", suffix, re.I):
             return None, None, False, True
-        candidates.append((seconds, match.group(), bool(match["last"])))
+        if not 60 <= seconds <= 86400 or seconds.denominator != 1 or first > last:
+            return None, None, False, True
+        candidates.append((int(seconds), match.group(), bool(match["last"])))
     if len(candidates) != 1:
         return None, None, False, len(candidates) > 1
     seconds, quote, is_range = candidates[0]
@@ -340,7 +384,7 @@ def _schema() -> dict[str, Any]:
     properties = {
         "categories": quotes("category", list(_CATEGORIES)),
         "constraints": quotes("key", list(_FEATURES)),
-        "available_seconds": {"anyOf": [{"type": "integer", "minimum": 60, "maximum": 14400}, {"type": "null"}]},
+        "available_seconds": {"anyOf": [{"type": "integer", "minimum": 60, "maximum": 86400}, {"type": "null"}]},
         "time_evidence": nullable_text,
         "anchor_text": nullable_text,
         "clarifications": {"type": "array", "maxItems": 5, "items": {"type": "string", "enum": _QUESTION_CODES}},
@@ -377,6 +421,7 @@ class IntentAnalyzer:
                 "input": [{"role": "user", "content": data}],
                 "max_output_tokens": 1536,
                 "text": {"format": {"type": "json_schema", "name": "city_intent", "strict": True, "schema": _schema()}},
+                **self._hosted._openai_model_options(),
             }
         # Hosted NVIDIA model support for constrained decoding varies. Do not
         # send self-hosted NIM guided_json or assume universal response_format.
@@ -485,6 +530,7 @@ def create_intent_analyzer(
     *,
     timeout_seconds: float = 6.0,
     transport: httpx.AsyncBaseTransport | None = None,
+    budget: RequestBudget | None = None,
 ) -> IntentAnalyzer:
     """No network until analyze; absent credentials explicitly select rules mode."""
     if provider not in {"rules", "openai", "nvidia"}:
@@ -500,5 +546,6 @@ def create_intent_analyzer(
             max_response_bytes=65_536,
             max_output_tokens=1536,
             transport=transport,
+            budget=budget,
         )
     )

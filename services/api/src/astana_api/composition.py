@@ -1,10 +1,12 @@
 """Only this module loads team implementations; missing live adapters fail closed."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import logging
+import time
 from importlib import import_module
 from inspect import Parameter, isasyncgenfunction, isawaitable, iscoroutinefunction, signature
 from contextlib import AsyncExitStack
 
-from astana_contracts import ContextProvider, PlaceRepository, RecommendationService, Retriever
+from astana_contracts import ContextProvider, JourneyPlanner, PlaceRepository, RecommendationService, Retriever
 from astana_recommender import DefaultRecommendationService, ExplanationGenerator
 from .fixtures import FixtureRepository, FixtureRetriever, FixtureContext
 
@@ -14,6 +16,21 @@ class Services:
     repository: object
     recommender: object
     intent: object | None = None
+
+
+@dataclass
+class StartupProgress:
+    # Only fixed labels are assigned below; never include factory paths or env.
+    stage: str = "services"
+    started: float = field(default_factory=time.monotonic)
+    cpu_started: float = field(default_factory=time.process_time)
+
+    def enter(self, stage):
+        self.stage = stage
+        logging.getLogger("uvicorn.error").info(
+            "Service startup: stage=%s elapsed=%.2fs cpu=%.2fs",
+            stage, time.monotonic() - self.started, time.process_time() - self.cpu_started,
+        )
 
 
 def resolve(path):
@@ -79,17 +96,20 @@ def validate_port(resource, protocol):
                 raise ValueError(message) from None
 
 
-async def build_services(settings, stack):
+async def build_services(settings, stack, *, progress=None):
+    progress = progress or StartupProgress()
     # Failed startup must close partially-created clients immediately, rather than
     # leave them owned by the still-running liveness-only application.
     async with AsyncExitStack() as owned:
         # Config contains no secrets; each server-side adapter reads its documented env.
         config = {"timezone": "Asia/Almaty", "mode": settings.mode}
+        progress.enter("repository")
         if settings.mode == "fixture":
             repository = FixtureRepository()
         else:
             repository = await own(owned, resolve(settings.repository_factory)(config=config))
         validate_port(repository, PlaceRepository)
+        progress.enter("retriever")
         if settings.mode == "fixture":
             retriever = FixtureRetriever(repository)
         else:
@@ -97,26 +117,55 @@ async def build_services(settings, stack):
                 owned, resolve(settings.retriever_factory)(repository=repository, config=config)
             )
         validate_port(retriever, Retriever)
+        progress.enter("context")
         if settings.mode == "fixture":
             context = FixtureContext()
         else:
             context = await own(owned, resolve(settings.context_factory)(config=config))
         validate_port(context, ContextProvider)
         generator = None
+        llm_budget = None
         if settings.llm_provider != "none":
+            progress.enter("generator")
             from astana_ai_providers import create_generator
+            from astana_ai_providers.budgets import RequestBudget
+            # One allowance covers all intent and explanation calls in this API
+            # process. Multi-worker deployments also need a shared edge quota.
+            llm_budget = RequestBudget.from_env()
             generator = await own(
                 owned, create_generator(
-                    provider=settings.llm_provider, model=settings.llm_model, api_key=settings.llm_api_key
+                    provider=settings.llm_provider, model=settings.llm_model, api_key=settings.llm_api_key,
+                    budget=llm_budget,
                 )
             )
             validate_port(generator, ExplanationGenerator)
-        recommender = DefaultRecommendationService(repository, retriever, context, generator=generator)
+        planner = None
+        if settings.mode == "live":
+            progress.enter("journey_planner")
+            from astana_ai_providers import create_journey_planner
+            planner = await own(owned, create_journey_planner(
+                provider=settings.llm_provider if settings.llm_provider != "none" else "rules",
+                model=settings.llm_model or None, api_key=settings.llm_api_key or None,
+                budget=llm_budget,
+            ))
+            validate_port(planner, JourneyPlanner)
+        progress.enter("recommender")
+        recommender = DefaultRecommendationService(
+            repository, retriever, context, generator=generator, planner=planner,
+            # The hosted planner has a 10s deadline; allow its local fallback
+            # to finish before the port deadline cancels the whole plan.
+            planner_timeout_seconds=11,
+            # Leave time for final contract checks/serialization before the
+            # outer HTTP deadline; a longer model plan shares this same budget.
+            request_budget_seconds=min(26, max(0.1, settings.request_timeout_seconds - 2)),
+        )
         validate_port(recommender, RecommendationService)
+        progress.enter("intent")
         from astana_ai_providers.intents import create_intent_analyzer
         intent = await own(owned, create_intent_analyzer(
             provider=settings.llm_provider if settings.llm_provider != "none" else "rules",
             model=settings.llm_model or None, api_key=settings.llm_api_key or None,
+            budget=llm_budget,
         ))
         services = Services(repository=repository, recommender=recommender, intent=intent)
         stack.push_async_callback(owned.pop_all().aclose)

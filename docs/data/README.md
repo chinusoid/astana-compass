@@ -1,11 +1,19 @@
 # Реальный снимок Астаны: происхождение и качество
 
-OSM получен одним ограниченным запросом Overpass **19 октября 2026,
-03:30:43 Asia/Almaty (18 октября 22:30:43 UTC)**. OSM replica timestamp:
-18 октября 22:29:47 UTC. Расширение 300 → 628 и новая нормализация использовали
-этот же raw-кэш, без повторного запроса Overpass. Семь точных OSM Wikidata QID
-получены одним GET 19 октября 2026, 07:45:49 UTC. Это времена загрузки источников,
+OSM обновлён одним ограниченным запросом Overpass **20 октября 2026,
+14:46:57 UTC**. OSM replica timestamp: 20 октября 14:44:50 UTC.
+В запрос добавлен `shop=mall`: сохранены все прежние 628 OSM ID и добавлены
+54 записи торговых центров, итого 682. Девять точных OSM Wikidata QID
+получены одним GET 20 октября 2026, 14:48:09 UTC. Это времена загрузки источников,
 а не дата посещения или независимой проверки каждого места.
+
+19 октября добавлено [официальное редакционное дополнение](official-sources.md):
+девять страниц пяти организаций, 37 утверждений и шесть развёрнутых RU-описаний.
+20 октября расширено до 16 страниц семи организаций, 80 утверждений и 11
+развёрнутых описаний, добавлены проверенные контакты и отдельно часы касс.
+При этом редакционном расширении OSM/Wikidata кэши и их даты не менялись;
+последующий импорт торговых центров обновил оба кэша 20 октября. У каждой заметки своя ссылка и время чтения;
+это сведения источников, а не полевая проверка удобств.
 
 OSM: © OpenStreetMap contributors,
 [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/),
@@ -22,12 +30,15 @@ Wikidata text: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 
 | Этап | Число |
 | --- | ---: |
-| Получено / прошло нормализацию | 628 / 628 |
-| Включено в snapshot при default limit 1000 | 628 |
+| Получено / прошло нормализацию | 682 / 682 |
+| Включено в snapshot при default limit 1000 | 682 |
 | Исключено из-за лимита / невалидности | 0 / 0 |
-| Категорий | 13 |
-| Точных Wikidata QID / связанных мест | 7 / 7 |
-| Мест с кратким Wikidata description | 6 |
+| Категорий | 14 |
+| Точных Wikidata QID / связанных мест | 9 / 9 |
+| Мест с кратким Wikidata description | 8 |
+| Мест с официальным редакционным дополнением | 11 |
+| Официальных страниц / утверждений | 16 / 80 |
+| Непустых итоговых Place.description | 15 |
 
 Выбор ограничен именованными категориями и bbox, не всей Астаной. Если в будущем
 результат превысит 1000, применяется category × grid round-robin; число исключённых
@@ -38,6 +49,7 @@ Wikidata text: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 | --- | ---: |
 | cafe | 346 |
 | restaurant | 172 |
+| mall | 54 |
 | park | 35 |
 | attraction | 16 |
 | artwork | 13 |
@@ -52,10 +64,11 @@ Way/relation coordinates — bounding-box centers, не проверенные �
 
 ## Аудит тегов и результат
 
-`raw_tag_counts` manifest содержит полный аудит 628 исходных объектов.
-Таблица сравнивает наличие исходного тега и результат консервативной нормализации.
+`raw_tag_counts` текущего manifest содержит полный аудит 682 исходных объектов.
+Следующая историческая таблица относится к прежнему снимку из 628 объектов
+и сравнению с первоначальной выборкой 300. Текущие точные счётчики находятся в manifest.
 
-| Поле OSM | Raw / прежний snapshot 300 | Новый snapshot 628 |
+| Поле OSM | Raw / первоначальный snapshot 300 | Исторический snapshot 628 |
 | --- | ---: | --- |
 | internet_access | 37 / 13 | has_wifi: 29 true, 2 false, остальные unknown |
 | internet_access:fee | 12 / 6 | raw строки, не обещание бесплатного Wi-Fi |
@@ -87,13 +100,15 @@ true. [OSM internet_access](https://wiki.openstreetmap.org/wiki/Key:internet_acc
 Отсутствие и неоднозначные значения не превращаются в false или более широкие
 подтверждения. Категория park/playground не доказывает пригодность для детей.
 
-Wikidata: 7 EN labels, 6 RU и 6 KK labels; aliases у 3 мест на RU, 1 на KK и 1 на EN.
-Descriptions после фильтра: 3 RU, 6 EN, **0 KK**. Всего в Place.description 7 текстов:
-1 OSM и 6 Wikidata. Это короткие исходные строки, не полные редакторские описания.
+Wikidata: 9 EN labels, 8 RU и 8 KK labels; aliases у 3 мест на RU, 1 на KK и 1 на EN.
+Descriptions Wikidata после фильтра: 5 RU, 8 EN, **0 KK**. Теперь 11 карточек имеют
+развёрнутый официальный RU-пересказ, а всего непустых описаний 15. Короткие
+исходные тексты сохранены отдельными фактами.
 Одна субъективная RU-строка о Ботаническом саде исключена из нормализованных
 данных и поиска; выбран нейтральный EN-текст. Исходный кэш сохранён без изменений.
 Ограниченный словарный фильтр не является независимой проверкой фактов.
-Выбор: OSM description → OSM description:ru/kk/en → Wikidata description:ru/kk/en.
+Без редакционного дополнения выбор: OSM description → OSM description:ru/kk/en → Wikidata description:ru/kk/en.
+У обогащённых карточек приоритет имеет проверенный `official:description:ru`.
 Поддержанные языки остаются в facts; переводов, дополнительных
 amenities и заполнения одной категорией нет. `description:source` и, когда язык
 известен, `description:language` отмечают выбор.
@@ -111,25 +126,35 @@ opening_hours; неподдержанные расписания остаютс�
 - `osm:node/11783576043` Drinkit: toilets=yes, internet_access=yes; Wi-Fi unknown.
 - `osm:node/4894937300` Национальный музей: Q18405670, description RU/EN.
 - `osm:way/917478479` Астана Опера: Q21371563, description RU/EN.
-- `osm:way/69232075` Жетысу: Q104866925, description только EN.
-- `osm:way/1460700597` Атамекен: Q1454511, source labels; description отсутствует.
+- `osm:way/69232075` Жетысу: Q104866925, развёрнутое официальное RU-описание; прежний EN source сохранён.
+- `osm:way/1460700597` Атамекен: Q1454511, source labels и официальное RU-описание формата экспозиции по статье 2023 года.
+
+Торговые центры подтверждены явным [OSM `shop=mall`](https://wiki.openstreetmap.org/wiki/Tag:shop%3Dmall).
+[MEGA Silk Way](https://www.openstreetmap.org/way/499328514) и
+[Abu Dhabi Plaza](https://www.openstreetmap.org/way/762780007) включены по исходным OSM ID и координатам.
+`building=retail` без `shop=mall`, похожее название кафе и близость к нему
+не создают категорию торгового центра. Результаты не подтверждают красоту,
+наличие конкретного магазина или актуальную доступность входа.
 
 ## Воспроизведение и границы доверия
 
 - `data/samples/astana-overpass-cache.json`: неизменённый исходный OSM response;
 - `data/samples/astana-wikidata-cache.json`: один Wikidata response, request/raw
   hashes, точные QID, время загрузки, revisions и modified_at;
+- `data/samples/astana-official-supplement.json`: редакционные заметки, ссылки,
+  области фактов и точные привязки к 11 OSM ID;
 - `data/samples/astana-osm.json`: canonical Places и встроенный manifest;
 - `data/manifests/astana-osm.json`: тот же manifest, bbox/query/hashes,
-  normalization `osm-tags-v2`, coverage и отдельная Wikidata provenance;
+  normalization `osm-tags-v3`, coverage и отдельная Wikidata provenance;
 - `packages/city_data`: bounded CLI, repository и offline tests.
 
-OSM raw SHA-256: `7e10e38b97d8e5cb546905f51a46d881aa35f1f4ccb26d2083c23a738746151c`.
-Wikidata raw SHA-256: `770b57e20dcb680e2dec1e4f431575b4bef651fc6d48f3bd16f39957b1134985`.
-Places SHA-256: `c8aa21649a1549a020c8102e18bc03ed47c1e19b76c6dd552a55c35c6ae1f0dc`.
+OSM raw SHA-256: `d09f80c4e6bf71158a38b5e6f78056f53a88d6a7716bd3ca12f49fde1170fdda`.
+Wikidata raw SHA-256: `46b9848feaabab6056771abe36beee6cf5c294fb6122895973b76c6cac0cf40f`.
+Places SHA-256: `16028ec831398055df990f05e8d9268e7947dad23d21d75645148e45028f0d78`.
+Official supplement SHA-256: `5dc8445df95879a7a3811079f654e3d7d96684cbfd1b1b1d178d3f92cc8824d4`.
 Canonical hashing описан в `data/samples/README.md`. Это контроль повреждения и
 воспроизводимости, не подпись доверенного издателя. Places воспроизводятся из
-двух кэшей без сети, включая descriptions и per-source evidence.
+двух кэшей и официального дополнения без сети, включая descriptions и per-source evidence.
 
 Wikidata evidence имеет type `provider`, CC0 source name, точный QID и URL revision.
 Repository проверяет allowlist, match с OSM QID, source times и manifest counts;

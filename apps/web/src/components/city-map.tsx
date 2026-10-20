@@ -8,6 +8,9 @@ import {
   RotateCcw,
   Crosshair,
   CarFront,
+  Route,
+  Search,
+  X,
 } from "lucide-react";
 import type {
   CommunityEvent,
@@ -17,9 +20,12 @@ import type {
   SharedLocation,
   TrafficResponse,
 } from "@astana/api-client";
-import type { Map as LibreMap, Marker, GeoJSONSource } from "maplibre-gl";
+import type { Map as LibreMap, Marker } from "maplibre-gl";
 import { t, type Locale } from "@/lib/i18n";
 import { mapText } from "@/lib/map-copy";
+import { buildingLookupPoint } from "@/lib/map-building";
+import { LOCATION_TIMEOUT_MS } from "@/lib/geolocation";
+import { keepPopupInMap } from "@/lib/map-popup-bounds";
 import {
   ASTANA_VIEW,
   BUILDING_LAYER,
@@ -31,6 +37,23 @@ import {
 } from "@/lib/map-style";
 import { startMapMotion, type MotionStatus } from "@/lib/map-motion";
 import { valid } from "@/lib/contracts";
+import {
+  bindMarkerPopup,
+  animateJourney,
+  categorySymbol,
+  fitJourney,
+  installJourney,
+  placePopup,
+  stopTitle,
+} from "@/lib/map-route";
+import { journeyColor } from "@/lib/map-route-segments";
+import RasterMapFallback from "./raster-map-fallback";
+import {
+  fetchMapFeatures,
+  MapFeatureError,
+  safeSourceUrl,
+  type MapFeaturesResult,
+} from "@/lib/map-feature";
 import {
   fetchTraffic,
   sampleVisibleRoads,
@@ -46,6 +69,10 @@ type Props = {
   origin: Location | null;
   activeId: string | null;
   selectedIds: string[];
+  routeStopIds?: string[];
+  overviewRequest?: number;
+  bottomInset?: number;
+  locationFoundRequest?: number;
   route: RouteEstimate | null;
   locale: Locale;
   picking: boolean;
@@ -56,6 +83,8 @@ type Props = {
   onEnable: () => void;
   onPick: (point: Location) => void;
   onSelect: (id: string) => void;
+  onDetails?: (id: string) => void;
+  onLocationFound?: () => void;
 };
 
 type Camera = { center: [number, number]; zoom: number; bearing: number };
@@ -63,11 +92,28 @@ type Camera = { center: [number, number]; zoom: number; bearing: number };
 export default function CityMap(props: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LibreMap | null>(null);
+  const mapLibrary = useRef<typeof import("maplibre-gl") | null>(null);
   const current = useRef(props);
   const markers = useRef<Marker[]>([]);
+  const inspectionMarker = useRef<Marker | null>(null);
   const camera = useRef<Camera | null>(null);
+  const featureRequest = useRef<AbortController | null>(null);
+  const [inspection, setInspection] = useState<{
+    point: Location;
+    state: "loading" | "ready" | "error" | "busy";
+    result?: MapFeaturesResult;
+  } | null>(null);
+  const inspectionPoint = inspection?.point;
   const mode = useRef(true);
   const stopMotion = useRef<(() => void) | null>(null);
+  const stopJourney = useRef<(() => void) | null>(null);
+  const retryJourneyFit = useRef<(() => void) | null>(null);
+  const lastJourneyFit = useRef<{
+    map: LibreMap;
+    geometry: typeof geometry;
+    points: Location[];
+    overview: number | undefined;
+  } | null>(null);
   const stopTraffic = useRef<(() => void) | null>(null);
   const trafficRequest = useRef<AbortController | null>(null);
   const lastTrafficRequest = useRef(0);
@@ -87,46 +133,166 @@ export default function CityMap(props: Props) {
   const [buildings, setBuildings] = useState(false);
   const [threeD, setThreeD] = useState(true);
   const [attempt, setAttempt] = useState(0);
-  const [picked, setPicked] = useState(false);
-  const [motionEnabled, setMotionEnabled] = useState(false);
-  const [motionStatus, setMotionStatus] = useState<MotionStatus>("empty");
-  const geometry = useMemo(
-    () => validatedRouteGeometry(props.route),
-    [props.route],
+  const [recovery, setRecovery] = useState<"original" | "osm" | "raster">(
+    "original",
   );
+  const effectiveProvider =
+    recovery !== "original" && props.provider !== "none"
+      ? "osm"
+      : props.provider;
+  const [picked, setPicked] = useState(false);
+  const [followState, setFollowState] = useState<
+    "idle" | "loading" | "following" | "paused" | "denied" | "unavailable"
+  >("idle");
+  const followMode = useRef<"idle" | "following" | "paused">("idle");
+  const clearFollowError = useRef<(() => void) | null>(null);
+  const [motionEnabled, setMotionEnabled] = useState(true);
+  const [motionStatus, setMotionStatus] = useState<MotionStatus>("empty");
+  const [revealingRoute, setRevealingRoute] = useState(false);
+  // An inspection can recreate its parent's route object. Compare coordinates
+  // so it never restarts the reveal or recentres a route the user is browsing.
+  const geometryKey = JSON.stringify(validatedRouteGeometry(props.route));
+  const geometry = useMemo(
+    () => JSON.parse(geometryKey) as ReturnType<typeof validatedRouteGeometry>,
+    [geometryKey],
+  );
+  const stopIdKey = JSON.stringify(props.routeStopIds ?? props.selectedIds);
+  const stopIds: string[] = useMemo(() => JSON.parse(stopIdKey), [stopIdKey]);
+  const journeyPointKey = JSON.stringify([
+    ...(props.origin ? [props.origin] : []),
+    ...stopIds.flatMap((id) => {
+      const place = props.places.find((item) => item.id === id);
+      return place ? [place.location] : [];
+    }),
+  ]);
+  const journeyPoints: Location[] = useMemo(
+    () => JSON.parse(journeyPointKey),
+    [journeyPointKey],
+  );
+  const destinationKey = JSON.stringify(
+    stopIds.flatMap((id) => {
+      const place = props.places.find((item) => item.id === id);
+      return place ? [place.location] : [];
+    }),
+  );
+  const destinations: Location[] = useMemo(
+    () => JSON.parse(destinationKey),
+    [destinationKey],
+  );
+  const hasJourney =
+    props.route !== null && (geometry !== null || stopIds.length > 0);
   const ready = status === "ready";
-  const has3D = props.provider === "openfreemap" && buildings;
+  const has3D = effectiveProvider === "openfreemap" && buildings;
   const is3D = has3D && threeD;
   const text = (key: Parameters<typeof mapText>[1]) =>
     mapText(props.locale, key);
+  const simpleMapLabel =
+    props.locale === "kk"
+      ? "Қарапайым карта"
+      : props.locale === "en"
+        ? "Simple map"
+        : "Простая карта";
+  const openRasterMap = () => {
+    setBuildings(false);
+    setStatus("failed");
+    setRecovery("raster");
+  };
+  const retryMap = () => {
+    setStatus("loading");
+    setRecovery("original");
+    setAttempt((value) => value + 1);
+  };
 
   useEffect(() => {
     current.current = props;
   });
 
   useEffect(() => {
-    if (!props.enabled || !container.current) return;
+    if (props.locationFoundRequest) clearFollowError.current?.();
+  }, [props.locationFoundRequest]);
+
+  useEffect(() => {
+    if (!props.enabled || !container.current || recovery === "raster") return;
     let disposed = false;
+    let recovering = false;
     let localMap: LibreMap | null = null;
     let loadingTimer: ReturnType<typeof setTimeout> | undefined;
     let observer: ResizeObserver | undefined;
+    let followTimer: ReturnType<typeof setTimeout> | undefined;
+    let hasFollowFix = false;
+    let followFailed = false;
+    let followDenied = false;
+    let replaceGeolocate: (() => void) | undefined;
+    const clearFollowTimer = () => {
+      clearTimeout(followTimer);
+      followTimer = undefined;
+    };
+    const waitForFollowFix = () => {
+      if (followFailed) return;
+      setFollowState("loading");
+      // A native watch continues after temporary errors. Give it the same
+      // bounded recovery window as the planner rather than announcing failure.
+      if (followTimer === undefined)
+        followTimer = setTimeout(() => {
+          followTimer = undefined;
+          followFailed = true;
+          if (!disposed) setFollowState("unavailable");
+        }, LOCATION_TIMEOUT_MS);
+    };
+    clearFollowError.current = () => {
+      // A browser-confirmed planner fix proves that location access recovered.
+      // MapLibre disables a denied control's native button, so replace it via
+      // its public lifecycle rather than only clearing our feedback text.
+      if (followDenied) replaceGeolocate?.();
+      followDenied = false;
+      followFailed = false;
+      clearFollowTimer();
+      setFollowState((state) =>
+        state === "denied" || state === "unavailable" || state === "loading"
+          ? "idle"
+          : state,
+      );
+    };
     const host = container.current;
     const clearLoadingTimer = () => {
       if (loadingTimer) clearTimeout(loadingTimer);
     };
+    const recover = (webglFailure = false) => {
+      if (disposed || recovering) return;
+      recovering = true;
+      clearLoadingTimer();
+      setBuildings(false);
+      if (props.provider === "none") {
+        setStatus("failed");
+        setRecovery("raster");
+        return;
+      }
+      if (!webglFailure && effectiveProvider === "openfreemap") {
+        setStatus("loading");
+        setRecovery("osm");
+      } else {
+        setStatus("failed");
+        setRecovery("raster");
+      }
+    };
+    loadingTimer = setTimeout(() => recover(true), 8_000);
     import("maplibre-gl")
       .then((lib) => {
-        if (disposed) return;
+        if (disposed || recovering) return;
+        clearLoadingTimer();
+        mapLibrary.current = lib;
         try {
           setStatus("loading");
           setTransient(false);
           setBuildings(false);
+          setFollowState("idle");
+          followMode.current = "idle";
           lib.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
           const map = new lib.Map({
             container: host,
             ...(camera.current ?? ASTANA_VIEW),
             pitch:
-              props.provider === "openfreemap" && mode.current
+              effectiveProvider === "openfreemap" && mode.current
                 ? ASTANA_VIEW.pitch
                 : 0,
             minZoom: 3,
@@ -135,7 +301,7 @@ export default function CityMap(props: Props) {
             renderWorldCopies: false,
             canvasContextAttributes: { antialias: true },
             attributionControl: false,
-            style: basemapStyle(props.provider),
+            style: basemapStyle(effectiveProvider),
             locale: {
               "NavigationControl.ZoomIn": mapText(props.locale, "zoomIn"),
               "NavigationControl.ZoomOut": mapText(props.locale, "zoomOut"),
@@ -145,6 +311,14 @@ export default function CityMap(props: Props) {
                 "attribution",
               ),
               "Popup.Close": mapText(props.locale, "closePopup"),
+              "GeolocateControl.FindMyLocation": mapText(
+                props.locale,
+                "followLocation",
+              ),
+              "GeolocateControl.LocationNotAvailable": mapText(
+                props.locale,
+                "followUnavailable",
+              ),
             },
           });
           localMap = map;
@@ -162,6 +336,69 @@ export default function CityMap(props: Props) {
             }),
             "top-right",
           );
+          // Native control requests location only on its own button press. It
+          // follows the camera without touching the planner's origin/route,
+          // pauses following on pan, and clears its watch when map.remove runs.
+          let geolocate: import("maplibre-gl").GeolocateControl;
+          const createGeolocate = () => {
+            const control = new lib.GeolocateControl({
+              positionOptions: {
+                enableHighAccuracy: false,
+                timeout: 10000,
+                maximumAge: 30000,
+              },
+              trackUserLocation: true,
+              showUserLocation: true,
+              showAccuracyCircle: true,
+              fitBoundsOptions: { maxZoom: 16 },
+            });
+            const stale = () => disposed || control !== geolocate;
+            control.on("trackuserlocationstart", () => {
+              if (stale()) return;
+              followMode.current = "following";
+              followDenied = false;
+              followFailed = false;
+              clearFollowTimer();
+              if (hasFollowFix) {
+                setFollowState("following");
+              } else waitForFollowFix();
+            });
+            control.on("trackuserlocationend", () => {
+              if (stale()) return;
+              followMode.current = "paused";
+              clearFollowTimer();
+              setFollowState("paused");
+            });
+            control.on("geolocate", () => {
+              if (stale()) return;
+              hasFollowFix = true;
+              followDenied = false;
+              followFailed = false;
+              clearFollowTimer();
+              setFollowState(followMode.current);
+              current.current.onLocationFound?.();
+            });
+            control.on("error", (event) => {
+              if (stale()) return;
+              hasFollowFix = false;
+              if (event.code === 1) {
+                followDenied = true;
+                followFailed = true;
+                clearFollowTimer();
+                setFollowState("denied");
+              } else waitForFollowFix();
+            });
+            return control;
+          };
+          geolocate = createGeolocate();
+          map.addControl(geolocate, "top-right");
+          replaceGeolocate = () => {
+            map.removeControl(geolocate);
+            geolocate = createGeolocate();
+            hasFollowFix = false;
+            followMode.current = "idle";
+            map.addControl(geolocate, "top-right");
+          };
           map.addControl(
             new lib.ScaleControl({ maxWidth: 100, unit: "metric" }),
             "bottom-left",
@@ -171,49 +408,41 @@ export default function CityMap(props: Props) {
             "bottom-right",
           );
           loadingTimer = setTimeout(() => {
-            if (!disposed) setStatus("failed");
-          }, 18_000);
+            recover();
+          }, 8_000);
           map.on("load", () => {
-            if (disposed) return;
+            if (disposed || recovering) return;
             clearLoadingTimer();
             try {
               setBuildings(
-                props.provider === "openfreemap" && installBuildings(map),
+                effectiveProvider === "openfreemap" && installBuildings(map),
               );
-              map.addSource("journey", {
-                type: "geojson",
-                data: { type: "FeatureCollection", features: [] },
-              });
-              map.addLayer({
-                id: "journey-line",
-                type: "line",
-                source: "journey",
-                paint: {
-                  "line-color": "#167a63",
-                  "line-width": 5,
-                  "line-opacity": 0.95,
-                },
-                layout: { "line-cap": "round", "line-join": "round" },
-              });
-              setStatus("ready");
             } catch {
-              setStatus("failed");
+              // Optional 3D layers must never hide a working basemap.
+              setBuildings(false);
+              setTransient(true);
             }
+            try {
+              installJourney(map);
+            } catch {
+              setTransient(true);
+            }
+            setStatus("ready");
           });
           map.on("error", () => {
-            if (disposed) return;
+            if (disposed || recovering) return;
             // A missing tile/glyph must not replace an otherwise usable map with
             // a full-screen failure. A missing root style cannot be rendered.
             if (!map.getStyle()) {
-              clearLoadingTimer();
-              setStatus("failed");
+              recover();
             } else setTransient(true);
           });
           map.on("webglcontextlost", () => {
-            if (!disposed) setStatus("failed");
+            recover(true);
           });
           map.on("webglcontextrestored", () => {
-            if (!disposed && map.isStyleLoaded()) setStatus("ready");
+            if (!disposed && !recovering && map.isStyleLoaded())
+              setStatus("ready");
           });
           map.on("moveend", () => {
             const center = map.getCenter();
@@ -224,39 +453,81 @@ export default function CityMap(props: Props) {
             };
           });
           map.on("click", (event) => {
-            if (!current.current.picking) return;
+            if (
+              (event.originalEvent?.target as Element | null)?.closest?.(
+                ".map-marker, .origin-marker, .maplibregl-popup",
+              )
+            )
+              return;
             const point = pickedLocation(event.lngLat.lng, event.lngLat.lat);
-            if (point) {
+            if (!point) return;
+            if (current.current.picking) {
+              closeInspection();
               setPicked(true);
               current.current.onPick(point);
+            } else {
+              let lookupPoint = point;
+              if (mode.current && event.point && map.getLayer(BUILDING_LAYER)) {
+                try {
+                  // The rendered extrusion hit-test includes its roof/walls;
+                  // event.lngLat alone projects onto the ground behind it.
+                  const building = map.queryRenderedFeatures(event.point, {
+                    layers: [BUILDING_LAYER],
+                  })[0];
+                  lookupPoint =
+                    buildingLookupPoint(building?.geometry) ?? point;
+                } catch {
+                  // A tile/style changing during the click keeps ground lookup.
+                }
+              }
+              void inspectPoint(lookupPoint);
             }
           });
-          observer = new ResizeObserver(() => map.resize());
+          observer = new ResizeObserver(() => {
+            if (retryJourneyFit.current) retryJourneyFit.current();
+            else map.resize();
+          });
           observer.observe(host);
         } catch {
-          clearLoadingTimer();
-          if (!disposed) setStatus("failed");
+          recover(true);
         }
       })
       .catch(() => {
-        if (!disposed) setStatus("failed");
+        recover(true);
       });
     return () => {
       disposed = true;
       clearLoadingTimer();
+      clearFollowTimer();
+      clearFollowError.current = null;
       observer?.disconnect();
+      retryJourneyFit.current = null;
       stopMotion.current?.();
       stopMotion.current = null;
+      stopJourney.current?.();
+      stopJourney.current = null;
       trafficRequest.current?.abort();
+      featureRequest.current?.abort();
       stopTraffic.current?.();
       stopTraffic.current = null;
+      setTraffic(null);
+      setTrafficBusy(false);
       markers.current.forEach((marker) => marker.remove());
       markers.current = [];
+      inspectionMarker.current?.remove();
+      inspectionMarker.current = null;
       localMap?.remove();
       if (mapRef.current === localMap) mapRef.current = null;
     };
     // Rebuilding translated native controls retains the user's camera.
-  }, [props.enabled, props.provider, props.locale, attempt]);
+  }, [
+    props.enabled,
+    props.provider,
+    effectiveProvider,
+    props.locale,
+    attempt,
+    recovery,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -266,42 +537,92 @@ export default function CityMap(props: Props) {
     import("maplibre-gl")
       .then((lib) => {
         if (disposed) return;
+        // Selection can refresh parent arrays or route geometry. Preserve an
+        // actually open place popup when replacing markers with updated data.
+        const openPlaceId = markers.current
+          .find(
+            (marker) =>
+              marker.getElement().dataset.placeId &&
+              marker.getPopup()?.isOpen(),
+          )
+          ?.getElement().dataset.placeId;
         markers.current.forEach((marker) => marker.remove());
         const next: Marker[] = [];
         props.places.forEach((place) => {
           const button = document.createElement("button");
-          const index = props.selectedIds.indexOf(place.id);
-          button.className = `map-marker ${place.id === props.activeId ? "active" : ""} ${index >= 0 ? "selected" : ""}`;
+          const index = stopIds.indexOf(place.id);
+          button.className = `map-marker ${place.id === current.current.activeId ? "active" : ""} ${index >= 0 ? "selected" : ""}`;
           button.type = "button";
-          button.textContent = index >= 0 ? String(index + 1) : "•";
+          button.dataset.placeId = place.id;
+          const symbol = document.createElement("span");
+          symbol.className = "map-marker-symbol";
+          symbol.setAttribute("aria-hidden", "true");
+          symbol.textContent =
+            index >= 0 ? String(index + 1) : categorySymbol(place.categories);
+          button.append(symbol);
+          button.title = `${index >= 0 ? `${stopTitle(props.locale, index)} · ` : ""}${place.name}`;
+          if (index >= 0) {
+            button.style.backgroundColor = journeyColor(index);
+            button.style.outlineColor = journeyColor(index);
+            const caption = document.createElement("span");
+            caption.className = "map-marker-caption";
+            caption.textContent = `${place.name}${geometry && !props.route?.includes_return && index === stopIds.length - 1 ? ` · ${mapText(props.locale, "endRoute")}` : ""}`;
+            button.append(caption);
+          }
           button.setAttribute(
             "aria-label",
-            `${mapText(props.locale, "place")}: ${place.name}`,
+            `${index >= 0 ? stopTitle(props.locale, index) : mapText(props.locale, "place")}: ${place.name}`,
           );
           button.setAttribute(
             "aria-pressed",
-            String(place.id === props.activeId),
+            String(place.id === current.current.activeId),
           );
-          button.onclick = (event) => {
-            event.stopPropagation();
+          const marker = new lib.Marker({ element: button })
+            .setLngLat([place.location.lon, place.location.lat])
+            .setPopup(
+              new lib.Popup({
+                offset: 26,
+                maxWidth: "min(330px, calc(100% - 24px))",
+                focusAfterOpen: false,
+              }).setDOMContent(
+                placePopup(place, props.locale, index, () =>
+                  (current.current.onDetails ?? current.current.onSelect)(
+                    place.id,
+                  ),
+                ),
+              ),
+            )
+            .addTo(map);
+          keepPopupInMap(map, marker.getPopup()!);
+          bindMarkerPopup(button, marker, () => {
+            closeInspection();
+            for (const other of markers.current)
+              if (other !== marker) other.getPopup()?.remove();
             current.current.onSelect(place.id);
-          };
-          next.push(
-            new lib.Marker({ element: button })
-              .setLngLat([place.location.lon, place.location.lat])
-              .addTo(map),
-          );
+            current.current.onDetails?.(place.id);
+          });
+          if (place.id === openPlaceId) marker.togglePopup();
+          next.push(marker);
         });
         if (props.origin) {
-          const element = document.createElement("div");
+          const element = document.createElement("button");
+          element.type = "button";
           element.className = "origin-marker";
-          element.setAttribute("role", "img");
-          element.setAttribute("aria-label", mapText(props.locale, "start"));
-          next.push(
-            new lib.Marker({ element })
-              .setLngLat([props.origin.lon, props.origin.lat])
-              .addTo(map),
+          element.textContent = "S";
+          const title = mapText(
+            props.locale,
+            props.route?.includes_return ? "returnStart" : "start",
           );
+          element.setAttribute("aria-label", title);
+          element.title = title;
+          const content = document.createElement("p");
+          content.textContent = title;
+          const marker = new lib.Marker({ element })
+            .setLngLat([props.origin.lon, props.origin.lat])
+            .setPopup(new lib.Popup({ offset: 24 }).setDOMContent(content))
+            .addTo(map);
+          bindMarkerPopup(element, marker);
+          next.push(marker);
         }
         for (const event of props.communityEvents ?? []) {
           const remaining = Date.parse(event.ends_at) - Date.now();
@@ -314,7 +635,6 @@ export default function CityMap(props: Props) {
             "aria-label",
             `${mapText(props.locale, "community")}: ${event.title}`,
           );
-          button.onclick = (click) => click.stopPropagation();
           const content = document.createElement("div");
           content.className = "map-community-popup";
           for (const [tag, value] of [
@@ -330,6 +650,7 @@ export default function CityMap(props: Props) {
             .setLngLat([event.location.lon, event.location.lat])
             .setPopup(new lib.Popup({ offset: 24 }).setDOMContent(content))
             .addTo(map);
+          bindMarkerPopup(button, marker);
           next.push(marker);
           if (remaining < 2_147_483_647)
             expiryTimers.push(setTimeout(() => marker.remove(), remaining));
@@ -361,12 +682,6 @@ export default function CityMap(props: Props) {
           );
         }
         markers.current = next;
-        (map.getSource("journey") as GeoJSONSource | undefined)?.setData({
-          type: "FeatureCollection",
-          features: geometry
-            ? [{ type: "Feature", properties: {}, geometry }]
-            : [],
-        });
       })
       .catch(() => {
         if (!disposed) setTransient(true);
@@ -380,14 +695,43 @@ export default function CityMap(props: Props) {
     ready,
     props.places,
     props.origin,
-    props.activeId,
-    props.selectedIds,
+    stopIds,
+    props.route?.includes_return,
     geometry,
     props.locale,
     props.picking,
     props.communityEvents,
     props.sharedLocations,
   ]);
+
+  useEffect(() => {
+    const buttons = container.current?.querySelectorAll<HTMLButtonElement>(
+      "button.map-marker[aria-pressed]",
+    );
+    for (const button of buttons ?? []) {
+      const active = button.dataset.placeId === props.activeId;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
+  }, [ready, props.activeId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const lib = mapLibrary.current;
+    if (!ready || !map || !lib || !inspectionPoint || props.picking) return;
+    inspectionMarker.current?.remove();
+    const element = document.createElement("div");
+    element.className = "map-inspection-pin";
+    element.setAttribute("role", "img");
+    element.setAttribute("aria-label", mapText(props.locale, "inspect"));
+    inspectionMarker.current = new lib.Marker({ element })
+      .setLngLat([inspectionPoint.lon, inspectionPoint.lat])
+      .addTo(map);
+    return () => {
+      inspectionMarker.current?.remove();
+      inspectionMarker.current = null;
+    };
+  }, [ready, inspectionPoint, props.picking, props.locale]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -403,7 +747,7 @@ export default function CityMap(props: Props) {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!ready || !map || !motionEnabled || props.provider !== "openfreemap")
+    if (!ready || !map || !motionEnabled || effectiveProvider !== "openfreemap")
       return;
     const stop = startMapMotion(map, setMotionStatus);
     stopMotion.current = stop;
@@ -411,7 +755,7 @@ export default function CityMap(props: Props) {
       stop();
       if (stopMotion.current === stop) stopMotion.current = null;
     };
-  }, [ready, motionEnabled, props.provider]);
+  }, [ready, motionEnabled, effectiveProvider]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -455,7 +799,7 @@ export default function CityMap(props: Props) {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!ready || !map) return;
+    if (!ready || !map || props.route) return;
     const point =
       props.places.find((place) => place.id === props.activeId)?.location ??
       props.origin;
@@ -465,28 +809,102 @@ export default function CityMap(props: Props) {
         zoom: Math.max(map.getZoom(), ASTANA_VIEW.zoom),
         duration: 0,
       });
-  }, [ready, props.activeId, props.origin, props.places]);
+  }, [ready, props.activeId, props.origin, props.places, props.route]);
 
   useEffect(() => {
-    if (!ready || !mapRef.current || !geometry) return;
-    let west = Infinity,
-      south = Infinity,
-      east = -Infinity,
-      north = -Infinity;
-    for (const [lon, lat] of geometry.coordinates) {
-      west = Math.min(west, lon);
-      east = Math.max(east, lon);
-      south = Math.min(south, lat);
-      north = Math.max(north, lat);
+    retryJourneyFit.current = null;
+    const map = mapRef.current;
+    if (!ready || !map || !hasJourney) {
+      lastJourneyFit.current = null;
+      return;
     }
-    mapRef.current.fitBounds(
-      [
-        [west, south],
-        [east, north],
-      ],
-      { padding: 65, maxZoom: 16, duration: 0 },
+    const previous = lastJourneyFit.current;
+    // A sheet resize updates framing once without a second camera animation.
+    const animate =
+      !previous ||
+      previous.map !== map ||
+      previous.geometry !== geometry ||
+      previous.points !== journeyPoints ||
+      previous.overview !== props.overviewRequest;
+    lastJourneyFit.current = {
+      map,
+      geometry,
+      points: journeyPoints,
+      overview: props.overviewRequest,
+    };
+    const fit = () => {
+      retryJourneyFit.current = fitJourney(
+        map,
+        geometry,
+        journeyPoints,
+        animate,
+        props.bottomInset,
+      )
+        ? null
+        : fit;
+    };
+    fit();
+    return () => {
+      retryJourneyFit.current = null;
+    };
+  }, [
+    ready,
+    geometry,
+    hasJourney,
+    journeyPoints,
+    props.overviewRequest,
+    props.bottomInset,
+  ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    setRevealingRoute(geometry !== null);
+    const stop = animateJourney(
+      map,
+      geometry,
+      destinations,
+      props.route?.includes_return,
+      () => setRevealingRoute(false),
     );
-  }, [ready, geometry]);
+    stopJourney.current = stop;
+    return () => {
+      stop();
+      if (stopJourney.current === stop) stopJourney.current = null;
+    };
+  }, [ready, geometry, destinations, props.route?.includes_return]);
+
+  function closeInspection() {
+    featureRequest.current?.abort();
+    featureRequest.current = null;
+    setInspection(null);
+  }
+  async function inspectPoint(point: Location) {
+    featureRequest.current?.abort();
+    const controller = new AbortController();
+    featureRequest.current = controller;
+    setInspection({ point, state: "loading" });
+    try {
+      const result = await fetchMapFeatures(
+        point,
+        current.current.locale,
+        controller.signal,
+      );
+      if (!controller.signal.aborted && featureRequest.current === controller)
+        setInspection({ point, state: "ready", result });
+    } catch (error) {
+      if (!controller.signal.aborted && featureRequest.current === controller)
+        setInspection({
+          point,
+          state:
+            error instanceof MapFeatureError && error.code === "busy"
+              ? "busy"
+              : "error",
+        });
+    } finally {
+      if (featureRequest.current === controller) featureRequest.current = null;
+    }
+  }
 
   function setDimension(value: boolean) {
     mode.current = value;
@@ -563,8 +981,10 @@ export default function CityMap(props: Props) {
       aria-labelledby="map-heading"
       data-testid="map-panel"
       data-route-geometry={geometry ? "routed" : "none"}
+      data-route-revealing={revealingRoute}
       data-map-mode={is3D ? "3d" : "2d"}
       data-map-status={status}
+      data-map-renderer={recovery === "raster" ? "raster" : "webgl"}
     >
       <div className="map-heading">
         <div>
@@ -580,7 +1000,48 @@ export default function CityMap(props: Props) {
           role="region"
           aria-label={text("title")}
         />
-        {props.enabled && (
+        {props.enabled && ready && hasJourney && !props.picking && (
+          <div
+            className="map-journey-summary"
+            data-testid="map-journey-summary"
+          >
+            <p role="status" aria-live="polite">
+              <Route size={17} aria-hidden="true" />
+              {text(
+                revealingRoute
+                  ? "routeAppearing"
+                  : geometry
+                    ? "routeReady"
+                    : "routePointsReady",
+              )}
+            </p>
+            {geometry && (
+              <ol className="map-journey-legs" aria-label={text("routeLegs")}>
+                {stopIds.map((id, index) => {
+                  const name = props.places.find(
+                    (place) => place.id === id,
+                  )?.name;
+                  return (
+                    <li
+                      key={id}
+                      style={{ color: journeyColor(index) }}
+                      title={name}
+                    >
+                      <span aria-hidden="true">●</span> {index ? index : "S"} →{" "}
+                      {index + 1}
+                    </li>
+                  );
+                })}
+                {props.route?.includes_return && (
+                  <li style={{ color: journeyColor(stopIds.length, true) }}>
+                    <span aria-hidden="true">●</span> {stopIds.length} → S
+                  </li>
+                )}
+              </ol>
+            )}
+          </div>
+        )}
+        {props.enabled && status !== "failed" && (
           <div
             className="map-toolbar"
             role="group"
@@ -597,6 +1058,15 @@ export default function CityMap(props: Props) {
             >
               2D
             </button>
+            {props.provider !== "none" && (
+              <button
+                type="button"
+                className="map-tool"
+                onClick={openRasterMap}
+              >
+                {simpleMapLabel}
+              </button>
+            )}
             <button
               type="button"
               className="map-tool"
@@ -626,7 +1096,50 @@ export default function CityMap(props: Props) {
             >
               <LocateFixed size={20} aria-hidden="true" />
             </button>
-            {props.provider === "openfreemap" && (
+            {hasJourney && (
+              <button
+                type="button"
+                className="map-tool"
+                data-testid="map-route-overview"
+                disabled={!ready}
+                onClick={() => {
+                  const map = mapRef.current;
+                  if (!map) return;
+                  const fit = () => {
+                    retryJourneyFit.current = fitJourney(
+                      map,
+                      geometry,
+                      journeyPoints,
+                      false,
+                      props.bottomInset,
+                    )
+                      ? null
+                      : fit;
+                  };
+                  fit();
+                }}
+              >
+                <Route size={18} aria-hidden="true" />
+                {text("overview")}
+              </button>
+            )}
+            {!props.picking && (
+              <button
+                type="button"
+                className="map-tool"
+                disabled={!ready}
+                onClick={() => {
+                  const center = mapRef.current?.getCenter();
+                  const point =
+                    center && pickedLocation(center.lng, center.lat);
+                  if (point) void inspectPoint(point);
+                }}
+              >
+                <Search size={18} aria-hidden="true" />
+                {text("inspectCentre")}
+              </button>
+            )}
+            {effectiveProvider === "openfreemap" && (
               <button
                 type="button"
                 className="map-tool map-motion-toggle"
@@ -638,7 +1151,7 @@ export default function CityMap(props: Props) {
                 {text("motion")}
               </button>
             )}
-            {props.provider === "openfreemap" && (
+            {effectiveProvider === "openfreemap" && (
               <>
                 <button
                   type="button"
@@ -703,17 +1216,41 @@ export default function CityMap(props: Props) {
           <div className="map-cover map-loading" role="status">
             <MapIcon size={28} aria-hidden="true" />
             <p>{text("loading")}</p>
+            {props.provider !== "none" && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={openRasterMap}
+              >
+                {simpleMapLabel}
+              </button>
+            )}
           </div>
         )}
-        {props.enabled && status === "failed" && (
+        {props.enabled && status === "failed" && props.provider !== "none" && (
+          <RasterMapFallback
+            places={props.places}
+            origin={props.origin}
+            activeId={props.activeId}
+            stopIds={stopIds}
+            geometry={geometry}
+            locale={props.locale}
+            picking={props.picking}
+            bottomInset={props.bottomInset}
+            overviewRequest={props.overviewRequest}
+            includesReturn={props.route?.includes_return}
+            onPick={props.onPick}
+            onSelect={props.onSelect}
+            onDetails={props.onDetails}
+            onInspect={(point) => void inspectPoint(point)}
+            onRetry3D={retryMap}
+          />
+        )}
+        {props.enabled && status === "failed" && props.provider === "none" && (
           <div className="map-cover map-failure" role="status">
             <MapIcon size={28} aria-hidden="true" />
             <p>{text("failed")}</p>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setAttempt((value) => value + 1)}
-            >
+            <button type="button" className="secondary" onClick={retryMap}>
               <RotateCcw size={18} aria-hidden="true" />
               {text("retry")}
             </button>
@@ -722,11 +1259,7 @@ export default function CityMap(props: Props) {
         {props.enabled && ready && transient && (
           <div className="map-status" role="status">
             <p>{text("transient")}</p>
-            <button
-              type="button"
-              className="text-button"
-              onClick={() => setAttempt((value) => value + 1)}
-            >
+            <button type="button" className="text-button" onClick={retryMap}>
               {text("retry")}
             </button>
           </div>
@@ -750,66 +1283,280 @@ export default function CityMap(props: Props) {
             </div>
           </>
         )}
+        {props.enabled &&
+          (ready || (recovery === "raster" && props.provider !== "none")) &&
+          !props.picking &&
+          inspection && (
+            <aside
+              className="map-inspection"
+              aria-labelledby="map-inspection-heading"
+              data-testid="map-inspection"
+              onKeyDown={(event) => {
+                if (event.key === "Escape") closeInspection();
+              }}
+            >
+              <div className="map-inspection-heading">
+                <h3 id="map-inspection-heading">{text("inspect")}</h3>
+                <button
+                  type="button"
+                  className="map-tool"
+                  aria-label={text("closePopup")}
+                  onClick={closeInspection}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <p className="map-inspection-coordinate">
+                {inspection.point.lat.toFixed(5)},{" "}
+                {inspection.point.lon.toFixed(5)}
+              </p>
+              {inspection.state === "loading" && (
+                <p role="status">{text("inspectLoading")}</p>
+              )}
+              {(inspection.state === "error" ||
+                inspection.state === "busy") && (
+                <div role="status">
+                  <p>
+                    {text(
+                      inspection.state === "busy"
+                        ? "inspectSlow"
+                        : "inspectError",
+                    )}
+                  </p>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void inspectPoint(inspection.point)}
+                  >
+                    {text("retry")}
+                  </button>
+                </div>
+              )}
+              {inspection.result?.status === "empty" && (
+                <p role="status">{text("inspectEmpty")}</p>
+              )}
+              {!!inspection.result?.features.length && (
+                <>
+                  {inspection.result.features.map((feature) => (
+                    <article key={feature.id}>
+                      <p className="map-feature-match">
+                        {text(
+                          feature.match === "contains"
+                            ? "contains"
+                            : "nearbyMatch",
+                        )}
+                        {feature.match === "nearby"
+                          ? ` · ${Math.round(feature.distance_meters)} ${text("meters")}`
+                          : ""}
+                      </p>
+                      <h4>{feature.name}</h4>
+                      <p>{feature.kind}</p>
+                      <p>{feature.address ?? text("addressUnknown")}</p>
+                      <p>
+                        {feature.description ??
+                          text("inspectDescriptionUnknown")}
+                      </p>
+                      <dl>
+                        {feature.attributes.map((attribute, index) => (
+                          <div key={`${attribute.label}-${index}`}>
+                            <dt>{attribute.label}</dt>
+                            <dd>{attribute.value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                      {safeSourceUrl(feature.source_url) && (
+                        <a
+                          href={safeSourceUrl(feature.source_url)!}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {feature.source_label || text("inspectSource")}
+                        </a>
+                      )}
+                    </article>
+                  ))}
+                  <small>{text("sourceClaim")}</small>
+                </>
+              )}
+              {inspection.result && (
+                <footer>
+                  <p>{inspection.result.attribution}</p>
+                  <p>
+                    {text("retrieved")}:{" "}
+                    <time dateTime={inspection.result.retrieved_at}>
+                      {new Intl.DateTimeFormat(props.locale, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      }).format(new Date(inspection.result.retrieved_at))}
+                    </time>
+                  </p>
+                </footer>
+              )}
+            </aside>
+          )}
         {(!props.enabled || !ready || !props.picking) && (
           <span id="map-keyboard-instructions" className="sr-only">
             {text("keyboard")}
           </span>
         )}
       </div>
-      <div className="map-footer">
-        {trafficNotice && (
-          <span
-            className="map-traffic-notice"
-            role="status"
-            data-testid="map-traffic-notice"
-          >
-            {trafficText(props.locale, trafficNotice)}
-            {traffic && (
-              <>
+      <div className="map-footer map-footer-compact">
+        <div className="map-footer-bar">
+          {props.provider !== "none" && (
+            <span className="map-attribution" data-testid="map-attribution">
+              <a
+                href="https://www.openstreetmap.org/copyright"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                © OpenStreetMap
+              </a>
+              {effectiveProvider === "openfreemap" && (
+                <>
+                  {" "}
+                  ·{" "}
+                  <a
+                    href="https://openfreemap.org/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    OpenFreeMap
+                  </a>
+                </>
+              )}
+              {traffic && (
                 <span className="traffic-attribution">
                   {" "}
                   · {traffic.attribution}
                 </span>
-                <small>{trafficText(props.locale, "illustration")}</small>
-                <small>{trafficText(props.locale, "colors")}</small>
-              </>
+              )}
+            </span>
+          )}
+          {ready && motionEnabled && effectiveProvider === "openfreemap" && (
+            <span
+              className="map-simulation-badge"
+              data-testid="map-motion-summary"
+              title={text("simulation")}
+            >
+              {text("motion")}
+            </span>
+          )}
+          <details className="map-about" data-testid="map-about">
+            <summary>{text("privacyLabel")}</summary>
+            <div className="map-about-content">
+              <span>
+                <b className="map-legend-origin" aria-hidden="true">
+                  S
+                </b>{" "}
+                {props.route?.includes_return
+                  ? text("returnStart")
+                  : picked && !props.picking
+                    ? text("selected")
+                    : text("start")}
+              </span>
+              <span>
+                <b aria-hidden="true">☕ ♧ ▥</b> {text("placesLegend")}
+              </span>
+              {!!stopIds.length && (
+                <span>
+                  <b className="map-legend-stop" aria-hidden="true">
+                    1
+                  </b>{" "}
+                  {text("stopsLegend")}
+                </span>
+              )}
+              {geometry && (
+                <span>
+                  <b
+                    className="map-legend-route"
+                    aria-hidden="true"
+                    style={{ color: journeyColor(0) }}
+                  >
+                    ➜
+                  </b>{" "}
+                  {text("routeLegend")}
+                </span>
+              )}
+              {!props.picking && (
+                <span className="map-inspect-hint">{text("inspectHint")}</span>
+              )}
+              {!props.picking && props.enabled && (
+                <span className="map-inspect-privacy">
+                  {text("inspectPrivacy")}
+                </span>
+              )}
+              {props.route && (
+                <span>
+                  {t(props.locale, geometry ? "routed" : "approximate")}
+                </span>
+              )}
+              {effectiveProvider === "openfreemap" && (
+                <span className="map-height-note">{text("heights")}</span>
+              )}
+              {ready &&
+                motionEnabled &&
+                effectiveProvider === "openfreemap" && (
+                  <span className="map-motion-status" role="status">
+                    <span className="motion-car">{text("cars")}</span> ·{" "}
+                    <span className="motion-walker">{text("walkers")}</span> ·{" "}
+                    {text("simulation")}{" "}
+                    {motionStatus !== "running" &&
+                      text(
+                        motionStatus === "paused"
+                          ? "motionPaused"
+                          : "motionEmpty",
+                      )}
+                  </span>
+                )}
+              {traffic && (
+                <div className="map-traffic-details">
+                  <p>{traffic.attribution}</p>
+                  <p>{trafficText(props.locale, "illustration")}</p>
+                  <p>{trafficText(props.locale, "colors")}</p>
+                </div>
+              )}
+              {props.provider !== "none" && (
+                <>
+                  <p>{text("privacy")}</p>
+                  <p>{text("followHint")}</p>
+                  <a
+                    href="https://www.openstreetmap.org/fixthemap"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {text("issue")}
+                  </a>
+                </>
+              )}
+            </div>
+          </details>
+        </div>
+        {followState !== "idle" && (
+          <span className="map-footer-notice" role="status" aria-live="polite">
+            {text(
+              followState === "loading"
+                ? "followLoading"
+                : followState === "following"
+                  ? "following"
+                  : followState === "paused"
+                    ? "followPaused"
+                    : followState === "denied"
+                      ? "followDenied"
+                      : "followUnavailable",
             )}
           </span>
         )}
-        <span>
-          <i className="legend-dot" />
-          {picked && !props.picking ? text("selected") : text("start")}
-        </span>
-        {props.route && (
-          <span>{t(props.locale, geometry ? "routed" : "approximate")}</span>
-        )}
-        {props.provider === "openfreemap" && (
-          <span className="map-height-note">{text("heights")}</span>
-        )}
-        {motionEnabled && props.provider === "openfreemap" && (
-          <span className="map-motion-status" role="status">
-            <span className="motion-car">{text("cars")}</span> ·{" "}
-            <span className="motion-walker">{text("walkers")}</span> ·{" "}
-            {text("simulation")}{" "}
-            {motionStatus !== "running" &&
-              text(motionStatus === "paused" ? "motionPaused" : "motionEmpty")}
+        {trafficNotice && (
+          <span
+            className="map-footer-notice map-traffic-notice"
+            role="status"
+            data-testid="map-traffic-notice"
+          >
+            {trafficText(props.locale, trafficNotice)}
           </span>
         )}
         {props.enabled && props.provider === "none" && (
-          <span>{text("offline")}</span>
-        )}
-        {props.provider !== "none" && (
-          <details className="map-privacy">
-            <summary>{text("privacyLabel")}</summary>
-            <p>{text("privacy")}</p>
-            <a
-              href="https://www.openstreetmap.org/fixthemap"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {text("issue")}
-            </a>
-          </details>
+          <span className="map-footer-notice">{text("offline")}</span>
         )}
       </div>
     </section>

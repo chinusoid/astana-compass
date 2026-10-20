@@ -4,11 +4,15 @@ import {
   AxeBuilder,
   type Page,
   type RecommendationResponse,
+  type ItineraryResponse,
 } from "../../apps/web/e2e-support";
 import type { Place } from "../../packages/api_client/src/generated";
 import { locales, t } from "../../apps/web/src/lib/i18n";
 
 async function searchCatalog(page: Page, name: string) {
+  // On phones the first view is the map; open the discover sheet as a user would.
+  if (!(await page.locator("#catalog-query").isVisible()))
+    await page.getByRole("navigation").locator('a.rail-link[href="/"]').click();
   await page.locator("#catalog-query").fill(name);
   await page.locator(".catalog-search button[type=submit]").click();
 }
@@ -23,6 +27,10 @@ async function fillWalk(page: Page, place: Place, query: string) {
     .locator('input[name="longitude"]')
     .fill(String(place.location.lon));
   await advanced.getByRole("button").click();
+  const filters = page.locator(".filter-toggle");
+  if ((await filters.getAttribute("aria-expanded")) !== "true")
+    await filters.click();
+  await expect(page.locator("#walk-filters")).toBeVisible();
   await page.locator('input[name="minutes"]').fill("120");
 }
 
@@ -79,14 +87,22 @@ for (const locale of locales) {
     await searchCatalog(page, place.name);
     const card = page.locator(`[id="place-catalog-${place.id}"]`);
     await expect(card).toBeVisible();
-    await expect(card.locator(".source-summary")).toContainText("Wi-Fi");
-    await expect(card.locator(".source-summary")).toContainText("24/7");
-    await expect(card.locator(".source-summary")).toContainText(
+    await expect(card.getByTestId("place-visit-summary")).toContainText(
+      "Wi-Fi",
+    );
+    await expect(card.getByTestId("place-visit-summary")).toContainText("24/7");
+    await expect(card.getByTestId("place-visit-summary")).toContainText(
       t(locale, "toilets"),
     );
-    await expect(card.getByRole("link", { name: "ODbL 1.0" })).toBeVisible();
+    await expect(
+      card.getByRole("link", { name: "ODbL 1.0", exact: true }),
+    ).toBeVisible();
     await card.getByRole("button", { name: t(locale, "details") }).click();
     const dialog = page.getByRole("dialog");
+    await dialog
+      .getByTestId("place-source-records")
+      .locator(":scope > summary")
+      .click();
     const wifi = dialog
       .locator(".fact")
       .filter({ has: page.locator("strong", { hasText: /^Wi-Fi$/ }) });
@@ -111,10 +127,18 @@ for (const locale of locales) {
     );
     await expect(unknownCard).toBeVisible();
     await expect(
-      unknownCard.locator(".source-summary dt").filter({ hasText: /^Wi-Fi$/ }),
+      unknownCard
+        .getByTestId("place-visit-summary")
+        .locator("dt")
+        .filter({ hasText: /^Wi-Fi$/ }),
     ).toHaveCount(0);
     await unknownCard
       .getByRole("button", { name: t(locale, "details") })
+      .click();
+    await page
+      .getByRole("dialog")
+      .getByTestId("unknown-place-facts")
+      .locator(":scope > summary")
       .click();
     const unknownWifi = page
       .getByRole("dialog")
@@ -136,7 +160,7 @@ test("real description preserves source language, exact provenance and catalog r
   request,
 }, testInfo) => {
   const response = await request.get(
-    `/api/v1/places/${encodeURIComponent("osm:way/69232075")}`,
+    `/api/v1/places/${encodeURIComponent("osm:way/1460537088")}`,
   );
   expect(response.status()).toBe(200);
   const place = (await response.json()) as Place;
@@ -177,6 +201,65 @@ test("real description preserves source language, exact provenance and catalog r
   await expect(page.locator("#catalog-query")).toHaveValue("");
 });
 
+test("official botanical visit details keep greenhouse hours separate and expose verified contacts", async ({
+  page,
+  request,
+}, testInfo) => {
+  const response = await request.get(
+    `/api/v1/places/${encodeURIComponent("osm:way/1196402246")}`,
+  );
+  expect(response.status()).toBe(200);
+  const place = (await response.json()) as Place;
+  const hours = place.facts.find(
+    (fact) => fact.key === "official:greenhouse_hours",
+  )!;
+  const phone = place.facts.find((fact) => fact.key === "official:phone")!;
+  const description = place.facts.find(
+    (fact) => fact.key === "official:description:ru",
+  )!;
+  expect([hours.status, phone.status, description.status]).toEqual([
+    "known",
+    "known",
+    "known",
+  ]);
+  await page.goto("/");
+  await searchCatalog(page, place.name);
+  const card = page.locator(`[id="place-catalog-${place.id}"]`);
+  await card.getByRole("button", { name: t("ru", "details") }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.locator(".source-description")).toContainText(
+    String(description.value),
+  );
+  const guide = dialog.getByTestId("place-visit-guide");
+  await expect(guide.getByRole("link", { name: /Позвонить/ })).toHaveAttribute(
+    "href",
+    `tel:${String(phone.value).replace(/[^+\d]/g, "")}`,
+  );
+  await expect(guide).toContainText(String(hours.value));
+  await expect(guide).toContainText("Часы оранжереи");
+  await expect(
+    guide.getByRole("link", { name: "Официальный сайт", exact: true }),
+  ).toBeVisible();
+  await expect(dialog.getByTestId("place-source-records")).not.toHaveAttribute(
+    "open",
+    "",
+  );
+  await expect(
+    guide.getByText("Идея для посещения", { exact: true }),
+  ).toBeVisible();
+  await expect(guide).toContainText(
+    "Предложение по категории места, а не подтверждённая услуга.",
+  );
+  await guide
+    .getByRole("heading", { name: "Полезно перед визитом", exact: true })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath("botanical-practical-card.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
 test("real Wi-Fi requirement is honored and unknown outlets produce an explained no-match", async ({
   page,
   request,
@@ -189,6 +272,7 @@ test("real Wi-Fi requirement is honored and unknown outlets produce an explained
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await fillWalk(page, place, "Estet Coffee");
+  await page.locator(".strict-constraints > summary").click();
   await page
     .getByRole("combobox", { name: "Wi-Fi", exact: true })
     .selectOption("required");
@@ -196,6 +280,9 @@ test("real Wi-Fi requirement is honored and unknown outlets produce an explained
     (res) =>
       res.url().endsWith("/recommendations") &&
       res.request().method() === "POST",
+  );
+  const firstItinerary = page.waitForResponse(
+    (res) => res.url().endsWith("/itineraries") && res.request().method() === "POST",
   );
   await page.locator(".find-button").click();
   const result = (await (await firstResponse).json()) as RecommendationResponse;
@@ -213,10 +300,22 @@ test("real Wi-Fi requirement is honored and unknown outlets produce an explained
         }),
       ]),
     );
+  await firstItinerary;
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-sheet-snap", "collapsed");
+  await page.getByTestId("mobile-sheet-controls").getByRole("link").click();
+  await expect(page.locator('textarea[name="query"]')).toBeVisible();
   await expect(
     page.locator(".result-cards").getByTestId("place-card").first(),
   ).toBeVisible();
 
+  if (
+    (await page.locator(".filter-toggle").getAttribute("aria-expanded")) !==
+    "true"
+  )
+    await page.locator(".filter-toggle").click();
+  const strict = page.locator(".strict-constraints");
+  if ((await strict.getAttribute("open")) === null)
+    await strict.locator(":scope > summary").click();
   await page
     .getByRole("combobox", { name: t("ru", "has_power_outlets"), exact: true })
     .selectOption("required");
@@ -254,5 +353,151 @@ test("real Wi-Fi requirement is honored and unknown outlets produce an explained
   await page.screenshot({
     path: testInfo.outputPath("real-no-match-mobile.png"),
     fullPage: true,
+  });
+});
+
+test("pizza and the named Botanical Garden automatically form one two-stop walk", async ({
+  page,
+  request,
+}, testInfo) => {
+  const botanicalId = "osm:way/1196402246";
+  const response = await request.get(
+    `/api/v1/places/${encodeURIComponent(botanicalId)}`,
+  );
+  const botanical = (await response.json()) as Place;
+  await page.goto("/");
+  await fillWalk(
+    page,
+    botanical,
+    "хочу в ботанический сад сходить и пицу покушать",
+  );
+  await page.locator('input[name="minutes"]').fill("");
+  const recommendations = page.waitForResponse(
+    (res) =>
+      res.url().endsWith("/recommendations") &&
+      res.request().method() === "POST",
+  );
+  const built = page.waitForResponse(
+    (res) =>
+      res.url().endsWith("/itineraries") && res.request().method() === "POST",
+  );
+  await page.locator('textarea[name="query"]').press("Enter");
+  const result = (await (
+    await recommendations
+  ).json()) as RecommendationResponse;
+  const ids = result.recommendations.map((item) => item.place_id);
+  expect(ids).toHaveLength(2);
+  expect(ids[1]).toBe(botanicalId);
+  const pizza = result.places.find((place) => place.id === ids[0])!;
+  const cuisine = pizza.facts.find((fact) => fact.key === "osm:cuisine")!;
+  expect(cuisine.status).toBe("known");
+  expect(String(cuisine.value).split(";")).toEqual(
+    expect.arrayContaining([expect.stringMatching(/^(pizza|italian_pizza)$/i)]),
+  );
+  expect(cuisine.evidence_ids.length).toBeGreaterThan(0);
+  const itinerary = (await (await built).json()) as ItineraryResponse;
+  expect(itinerary.stops.map((stop) => stop.place_id)).toEqual(ids);
+  await expect(
+    page.locator(".journey-preview .journey-stop strong"),
+  ).toHaveText([pizza.name, botanical.name]);
+  await expect(page.getByTestId("map-journey-summary")).toBeVisible();
+  await expect(page.locator(".journey-preview .journey-stop")).toHaveCount(2);
+  await page.screenshot({
+    path: testInfo.outputPath("pizza-then-botanical-walk.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
+test("a general four-activity scenario reaches every requested stop automatically", async ({
+  page,
+  request,
+}, testInfo) => {
+  const origin = await request.get(
+    `/api/v1/places/${encodeURIComponent("osm:way/1196402246")}`,
+  );
+  await page.goto("/");
+  await fillWalk(
+    page,
+    (await origin.json()) as Place,
+    "Сначала библиотека, затем суши, потом кино, потом Астана Опера",
+  );
+  await page.locator('input[name="minutes"]').fill("");
+  const response = page.waitForResponse(
+    (res) =>
+      res.url().endsWith("/recommendations") &&
+      res.request().method() === "POST",
+  );
+  const built = page.waitForResponse(
+    (res) =>
+      res.url().endsWith("/itineraries") && res.request().method() === "POST",
+  );
+  await page.locator('textarea[name="query"]').press("Enter");
+  const result = (await (await response).json()) as RecommendationResponse;
+  const ids = result.recommendations.map((item) => item.place_id);
+  expect(ids).toHaveLength(4);
+  const places = new Map(result.places.map((place) => [place.id, place]));
+  expect(places.get(ids[0])!.categories).toContain("library");
+  const cuisine = places
+    .get(ids[1])!
+    .facts.find((fact) => fact.key === "osm:cuisine")!;
+  expect(cuisine.status).toBe("known");
+  expect(String(cuisine.value).split(";")).toContain("sushi");
+  expect(places.get(ids[2])!.categories).toContain("cinema");
+  expect(places.get(ids[3])!.name).toBe("Астана Опера");
+  const itinerary = (await (await built).json()) as ItineraryResponse;
+  expect(itinerary.stops.map((stop) => stop.place_id)).toEqual(ids);
+  await expect(page.getByTestId("scenario-plan").locator("li")).toHaveCount(4);
+  await expect(
+    page.locator(".journey-preview .journey-stop strong"),
+  ).toHaveText(ids.map((id) => places.get(id)!.name));
+  await expect(page.locator(".journey-preview .journey-stop")).toHaveCount(4);
+  await expect(page.getByTestId("map-journey-summary")).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("general-four-stop-walk.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
+test("a shopping centre on the way comes before the named final garden", async ({
+  page,
+  request,
+}, testInfo) => {
+  const botanicalId = "osm:way/1196402246";
+  const botanical = (await (
+    await request.get(`/api/v1/places/${encodeURIComponent(botanicalId)}`)
+  ).json()) as Place;
+  await page.goto("/");
+  await fillWalk(
+    page,
+    botanical,
+    "Хочу в ботанический сад а по пути зайти в торговый центр красивый",
+  );
+  await page.locator('input[name="minutes"]').fill("");
+  const recommendation = page.waitForResponse(
+    (res) => res.url().endsWith("/recommendations") && res.request().method() === "POST",
+  );
+  const built = page.waitForResponse(
+    (res) => res.url().endsWith("/itineraries") && res.request().method() === "POST",
+  );
+  await page.locator('textarea[name="query"]').press("Enter");
+  const result = (await (await recommendation).json()) as RecommendationResponse;
+  const ids = result.recommendations.map((item) => item.place_id);
+  expect(ids).toHaveLength(2);
+  const mall = result.places.find((place) => place.id === ids[0])!;
+  expect(mall.categories).toContain("mall");
+  expect(mall.is_synthetic).toBe(false);
+  expect(ids[1]).toBe(botanicalId);
+  const itinerary = (await (await built).json()) as ItineraryResponse;
+  expect(itinerary.stops.map((stop) => stop.place_id)).toEqual(ids);
+  await expect(page.locator(".journey-preview .journey-stop strong")).toHaveText([
+    mall.name, botanical.name,
+  ]);
+  await expect(page.getByTestId("map-journey-summary")).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("mall-on-the-way-to-botanical-garden.png"),
+    fullPage: true,
+    animations: "disabled",
   });
 });

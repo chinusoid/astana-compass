@@ -1,5 +1,4 @@
-import Ajv2020 from "ajv/dist/2020";
-import addFormats from "ajv-formats";
+import validators from "./generated/validators.cjs";
 import type {
   ConstraintEvaluation,
   ItineraryRequest,
@@ -9,18 +8,11 @@ import type {
   RecommendationResponse,
   RouteEstimate,
 } from "@astana/api-client";
-import schema from "../../../../contracts.schema.json";
-
-const ajv = new Ajv2020({
-  strict: false,
-  allErrors: false,
-  validateFormats: true,
-});
-addFormats(ajv);
-ajv.addSchema(schema, "canonical");
-export type Definition = keyof typeof schema.$defs;
+export type Definition = keyof typeof validators;
 export function valid(name: Definition, data: unknown): boolean {
-  const validate = ajv.getSchema(`canonical#/$defs/${name}`);
+  const validate = Object.hasOwn(validators, name)
+    ? validators[name]
+    : undefined;
   return Boolean(validate?.(data));
 }
 export function routeGeometry(route: RouteEstimate | null | undefined) {
@@ -117,14 +109,35 @@ export function recommendationIntegrity(
     return false;
   const places = new Map(response.places.map((p) => [p.id, p]));
   const ids = response.recommendations.map((r) => r.place_id);
+  const suggestions = response.suggestions ?? [];
+  const allIds = [...ids, ...suggestions.map((suggestion) => suggestion.place_id)];
+  const stages = response.journey_plan?.stages;
   if (
-    places.size !== response.places.length ||
-    new Set(ids).size !== ids.length ||
-    ids.length !== places.size ||
-    ids.length > request.limit
+    stages?.some(
+      (stage) =>
+        !request.query.includes(stage.source_quote) ||
+        (stage.named_place !== null &&
+          !stage.source_quote.includes(stage.named_place)),
+    )
   )
     return false;
-  return response.recommendations.every((r, index) => {
+  const concreteGoals =
+    stages?.filter((stage) => stage.kind !== "unresolved").length ?? 0;
+  const resultLimit = concreteGoals
+    ? Math.min(6, concreteGoals)
+    : request.limit;
+  if (
+    places.size !== response.places.length ||
+    new Set(allIds).size !== allIds.length ||
+    allIds.length !== places.size ||
+    ids.length > resultLimit ||
+    (suggestions.length > 0 && (ids.length === 0 || allIds.length > 6))
+  )
+    return false;
+  return suggestions.every((suggestion) => {
+    const place = places.get(suggestion.place_id);
+    return place && evaluationsSafe(place, suggestion.constraint_evaluations, request);
+  }) && response.recommendations.every((r, index) => {
     const place = places.get(r.place_id);
     return (
       place &&
@@ -132,8 +145,7 @@ export function recommendationIntegrity(
       routeSafe(r.route, request) &&
       evaluationsSafe(place, r.constraint_evaluations, request) &&
       r.total_duration_seconds ===
-        r.visit_duration_seconds + r.route.duration_seconds &&
-      r.total_duration_seconds <= request.available_seconds
+        r.visit_duration_seconds + r.route.duration_seconds
     );
   });
 }
@@ -179,10 +191,7 @@ export function itineraryIntegrity(
     return false;
   return (
     response.total_duration_seconds ===
-      response.route.duration_seconds +
-        response.stops.reduce(
-          (sum, stop) => sum + stop.visit_duration_seconds,
-          0,
-        ) && response.total_duration_seconds <= request.available_seconds
+    response.route.duration_seconds +
+      response.stops.reduce((sum, stop) => sum + stop.visit_duration_seconds, 0)
   );
 }

@@ -617,6 +617,31 @@ details[open] > summary {
   font-size: 11px;
   border-radius: 9px;
 }
+.preference-list {
+  gap: 0;
+}
+.preference-list label {
+  min-height: 44px;
+  cursor: pointer;
+}
+.preference-list input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--green);
+}
+.required-badge,
+.required-count {
+  color: var(--green-dark);
+  font-size: 11px;
+  font-weight: 600;
+}
+.strict-constraints {
+  border-top: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+.strict-constraints > summary {
+  font-size: 12px;
+}
 .primary,
 .secondary {
   display: inline-flex;
@@ -947,15 +972,16 @@ details[open] > summary {
   height: 44px;
   padding: 0;
   border: 3px solid white;
-  border-radius: 50%;
-  background: var(--green);
-  color: white;
+  border-radius: 14px;
+  background: #fff;
+  color: #155744;
   box-shadow: 0 2px 8px #173d2240;
   font-weight: 700;
   font-size: 23px;
 }
 .map-marker.selected {
   background: #2457b8;
+  color: white;
   font-size: 15px;
 }
 .map-marker.active {
@@ -963,12 +989,175 @@ details[open] > summary {
   outline-offset: 3px;
 }
 .origin-marker {
-  width: 19px;
-  height: 19px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: white;
+  font-weight: 800;
   border: 3px solid white;
   border-radius: 50%;
   background: #2563d9;
   box-shadow: 0 0 0 6px #2563d926;
+}
+.map-marker-caption {
+  position: absolute;
+  top: 45px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 180px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: #fff;
+  color: #173d32;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 2px 8px #173d2226;
+  pointer-events: none;
+}
+.map-legend-origin,
+.map-legend-stop {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: #fff;
+  background: #2457b8;
+  border-radius: 6px;
+}
+.map-legend-origin {
+  border-radius: 50%;
+}
+.map-legend-route {
+  color: #156d60;
+  font-size: 20px;
+}
+.map-inspect-privacy {
+  flex-basis: 100%;
+  color: #627169;
+}
+.maplibregl-popup {
+  z-index: 5;
+}
+.maplibregl-popup[data-horizontal-clamp] .maplibregl-popup-tip {
+  visibility: hidden;
+}
+.maplibregl-popup-content {
+  border-radius: 14px;
+  padding: 18px;
+}
+.maplibregl-popup-close-button {
+  min-width: 32px;
+  min-height: 32px;
+  font-size: 20px;
+}
+.map-place-popup {
+  max-height: min(400px, 55dvh);
+  overflow-y: auto;
+  color: #223b31;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.map-place-popup h3 {
+  padding-right: 15px;
+  font-size: 18px;
+  line-height: 1.3;
+}
+.map-place-popup p,
+.map-place-popup dl {
+  margin: 8px 0;
+}
+.map-place-popup .map-stop-ordinal {
+  font-weight: 700;
+  color: #2457b8;
+}
+.map-place-popup dt,
+.map-inspection dt {
+  margin-top: 7px;
+  font-weight: 600;
+}
+.map-place-popup dd,
+.map-inspection dd {
+  margin: 2px 0;
+  color: #53685c;
+}
+.map-place-popup a,
+.map-inspection a {
+  display: block;
+  color: #145f52;
+  text-decoration: underline;
+  margin: 8px 0;
+}
+.map-place-popup small {
+  display: block;
+  margin-bottom: 12px;
+}
+.map-place-popup button {
+  width: 100%;
+}
+.map-inspection {
+  position: absolute;
+  z-index: 6;
+  right: 12px;
+  bottom: 36px;
+  width: min(360px, calc(100% - 24px));
+  max-height: 65%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  border: 1px solid #cbd8cd;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 32px #173d2230;
+  color: #223b31;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.map-inspection-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.map-inspection-heading h3 {
+  font-size: 17px;
+}
+.map-inspection-coordinate,
+.map-inspection footer {
+  color: #627169;
+  font-size: 11px;
+}
+.map-inspection article {
+  margin: 12px 0;
+  padding-top: 12px;
+  border-top: 1px solid #dce5de;
+}
+.map-inspection article h4 {
+  font-size: 17px;
+  margin: 5px 0;
+}
+.map-inspection article p {
+  margin: 6px 0;
+}
+.map-feature-match {
+  color: #2457b8;
+  font-weight: 600;
+  font-size: 11px;
+}
+.map-inspection-pin {
+  width: 18px;
+  height: 18px;
+  border: 3px solid white;
+  border-radius: 50%;
+  background: #c06b18;
+  box-shadow: 0 0 0 6px #c06b1833;
+  pointer-events: none;
 }
 .maplibregl-ctrl-group {
   border-radius: 11px !important;

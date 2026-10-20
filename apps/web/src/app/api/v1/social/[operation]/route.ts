@@ -138,8 +138,14 @@ async function proxy(
       body: body as BodyInit | undefined,
       cache: "no-store",
       signal,
-      redirect: "error",
+      // Workers does not implement redirect:error. Never follow a redirect
+      // carrying the guest bearer token or a private request body.
+      redirect: "manual",
     });
+    if (upstream.status >= 300 && upstream.status < 400) {
+      await upstream.body?.cancel();
+      return fail(503, "provider_unavailable");
+    }
     const payload = await readPayload(upstream, signal);
     const responseHeaders = new Headers({ "Cache-Control": "no-store" });
     for (const key of ["X-Astana-Data-Mode", "X-Request-ID", "Retry-After"]) {
@@ -151,7 +157,7 @@ async function proxy(
       sameSite: "strict" as const,
       secure: request.nextUrl.protocol === "https:",
       path: "/",
-      maxAge: 86400,
+      maxAge: 7 * 24 * 60 * 60,
     };
     if (upstream.ok && operation === "session") {
       if (!valid("SocialSessionResponse", payload))

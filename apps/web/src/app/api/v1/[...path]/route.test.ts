@@ -35,12 +35,66 @@ it("forwards supported query fields and data-mode without browser credentials", 
     ),
     { params: Promise.resolve({ path: ["places"] }) },
   );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ places: [], next_cursor: null });
   expect(response.headers.get("X-Astana-Data-Mode")).toBe("live");
   const [url, options] = fetch.mock.calls[0];
+  expect(options.redirect).toBe("manual");
   expect(url.searchParams.has("key")).toBe(false);
   expect(options.headers).not.toHaveProperty("Cookie");
   expect(options.headers).not.toHaveProperty("Authorization");
 });
+it("proxies a directory lookup without forwarding browser credentials or caching", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValue(Response.json({ status: "empty", features: [] }));
+  vi.stubGlobal("fetch", fetch);
+  const body = JSON.stringify({ place_id: "osm:node/1", locale: "ru" });
+  const response = await POST(
+    new NextRequest("http://localhost/api/v1/place-directory", {
+      method: "POST",
+      body,
+      headers: { Cookie: "private", Authorization: "Bearer private" },
+    }),
+    { params: Promise.resolve({ path: ["place-directory"] }) },
+  );
+  expect(response.status).toBe(200);
+  expect(response.headers.get("Cache-Control")).toBe("no-store");
+  expect(fetch).toHaveBeenCalledOnce();
+  const [url, options] = fetch.mock.calls[0];
+  expect(url.pathname).toBe("/v1/place-directory");
+  expect(new TextDecoder().decode(options.body)).toBe(body);
+  expect(options.cache).toBe("no-store");
+  expect(options.headers).not.toHaveProperty("Cookie");
+  expect(options.headers).not.toHaveProperty("Authorization");
+});
+it.each([301, 302, 303, 307, 308])(
+  "rejects upstream %s redirects and cancels the body without following",
+  async (status) => {
+    const cancel = vi.fn();
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(new ReadableStream({ cancel }), {
+        status,
+        headers: { Location: "https://other.example/private" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const response = await POST(
+      new NextRequest("http://localhost/api/v1/intent", {
+        method: "POST",
+        body: '{"query":"private request"}',
+      }),
+      { params: Promise.resolve({ path: ["intent"] }) },
+    );
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe("provider_unavailable");
+    expect(response.headers.get("Location")).toBeNull();
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0][1].redirect).toBe("manual");
+    expect(cancel).toHaveBeenCalledOnce();
+  },
+);
 it("rejects an oversized request before forwarding", async () => {
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);

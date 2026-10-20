@@ -117,9 +117,9 @@ jobs:
       - name: Production frontend build
         working-directory: apps/web
         run: pnpm build
-      - name: Install Chromium matching the locked Playwright version
+      - name: Install Chromium and WebKit matching the locked Playwright version
         working-directory: apps/web
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium webkit
       - name: Browser E2E against the fixture API
         shell: bash
         run: |
@@ -155,11 +155,23 @@ jobs:
           fi
           .venv/bin/python scripts/smoke.py --base-url http://127.0.0.1:8000
           cd apps/web
+          pnpm test:ios
           pnpm test:e2e
 
       - name: Browser E2E against the real, locally loaded catalog
         working-directory: apps/web
         run: pnpm test:live:local
+
+      - name: Preserve browser reports and screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: astana-browser-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            apps/web/test-results/
+            apps/web/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
 
   container:
     runs-on: ubuntu-24.04
@@ -209,3 +221,347 @@ jobs:
       - name: Stop test containers
         if: always()
         run: docker compose -f infra/compose.yaml down
+
+  cloudflare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      WRANGLER_SEND_METRICS: "false"
+      ASTANA_ALLOW_FIXTURES: "false"
+      ASTANA_MAP_PROVIDER: none
+      # Build a deployable worker without depending on a running backend.
+      ASTANA_API_URL: https://backend.example.invalid
+      SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.19.0"
+          package-manager-cache: false
+      - name: Install pinned pnpm from the official registry
+        run: |
+          npm install --global pnpm@11.25.0 --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org
+          test "$(pnpm --version)" = "11.25.0"
+      - name: Install the independent frontend lockfile
+        working-directory: apps/web
+        run: pnpm install --frozen-lockfile
+      - name: Build the Cloudflare Worker and static assets
+        working-directory: apps/web
+        run: pnpm build:cloudflare
+      - name: Verify map assets and prepare a portable Worker without publishing
+        working-directory: apps/web
+        run: |
+          test -s .open-next/worker.js
+          test -s .open-next/assets/maplibre/maplibre-gl-worker.mjs
+          # MapLibre 6.15.0 ships an empty shared module. Compare exact copies
+          # with the locked package rather than requiring that file to be nonempty.
+          for asset in maplibre-gl-worker.mjs maplibre-gl-shared.mjs; do
+            cmp "node_modules/maplibre-gl/dist/$asset" ".open-next/assets/maplibre/$asset"
+          done
+          release_dir="$RUNNER_TEMP/cloudflare-release"
+          mkdir -p "$release_dir"
+          # Dereference pnpm links so the download needs no Linux checkout.
+          cp --recursive --dereference .open-next "$release_dir/.open-next"
+          cp wrangler.jsonc "$release_dir/wrangler.jsonc"
+          node - "$release_dir" <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const destination = process.argv[2];
+          const metadata = {
+            source_revision: process.env.SOURCE_REVISION,
+            checkout_revision: process.env.GITHUB_SHA,
+            run_url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            wrangler_version: "4.151.1",
+          };
+          fs.writeFileSync(path.join(destination, "build-info.json"), JSON.stringify(metadata, null, 2) + "\n");
+          fs.writeFileSync(path.join(destination, "DEPLOY.txt"), [
+            "Prebuilt Astana Compass Cloudflare Worker. No API keys or account credentials are included.",
+            "Extract the entire artifact, including .open-next, into a short local path.",
+            "From this directory, with an authorized Cloudflare account:",
+            "npx --yes wrangler@4.151.1 deploy --config wrangler.jsonc --keep-vars",
+            "Use --config explicitly to deploy this bundle without rebuilding Next.js/OpenNext.",
+            "Configure ASTANA_API_URL and other runtime settings in Cloudflare. OpenAI keys belong only on the Python backend.",
+            "build-info.json identifies the reviewed source revision and the CI checkout that produced this bundle.",
+            "",
+          ].join("\n"));
+          NODE
+          # Resolve every import outside the source checkout, before uploading.
+          pnpm exec wrangler deploy --config "$release_dir/wrangler.jsonc" \
+            --dry-run --outdir "$RUNNER_TEMP/cloudflare-dry-run"
+      - name: Serve the built Worker in workerd and check HTTP behavior
+        working-directory: apps/web
+        timeout-minutes: 4
+        shell: bash
+        run: |
+          worker_log="$RUNNER_TEMP/cloudflare-worker.log"
+          # Only the GitHub runner starts this local runtime; no Cloudflare login.
+          # The upstream points at a closed local port, never a real API/provider.
+          setsid node node_modules/wrangler/bin/wrangler.js dev --local \
+            --config "$RUNNER_TEMP/cloudflare-release/wrangler.jsonc" \
+            --ip 127.0.0.1 --port 8787 --inspector-port 9231 \
+            --var ASTANA_API_URL:http://127.0.0.1:9 \
+            --var ASTANA_ALLOW_FIXTURES:false --var ASTANA_MAP_PROVIDER:none \
+            >"$worker_log" 2>&1 &
+          worker_pid=$!
+          cleanup() {
+            result=$?
+            trap - EXIT
+            # Terminate Wrangler and its workerd children as one process group.
+            kill -- "-$worker_pid" 2>/dev/null || true
+            sleep 1
+            kill -KILL -- "-$worker_pid" 2>/dev/null || true
+            wait "$worker_pid" 2>/dev/null || true
+            if [ "$result" -ne 0 ]; then
+              tail -n 100 "$worker_log"
+            fi
+            exit "$result"
+          }
+          trap cleanup EXIT
+          ready=false
+          for ((attempt = 0; attempt < 60; attempt++)); do
+            if ! kill -0 "$worker_pid" 2>/dev/null; then
+              echo "Cloudflare Worker exited before serving the page."
+              exit 1
+            fi
+            if status=$(curl --silent --max-time 2 --output "$RUNNER_TEMP/cloudflare-home.html" \
+              --write-out '%{http_code}' http://127.0.0.1:8787/) && [ "$status" = 200 ]; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            echo "Cloudflare Worker did not serve the page within the readiness window."
+            exit 1
+          fi
+          grep -q 'Astana Compass' "$RUNNER_TEMP/cloudflare-home.html"
+          curl --fail --silent --show-error --max-time 10 \
+            --output "$RUNNER_TEMP/cloudflare-icon.svg" http://127.0.0.1:8787/icon.svg
+          grep -q '<svg' "$RUNNER_TEMP/cloudflare-icon.svg"
+          status=$(curl --silent --show-error --max-time 15 \
+            --dump-header "$RUNNER_TEMP/cloudflare-api.headers" \
+            --output "$RUNNER_TEMP/cloudflare-api.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api/v1/data-status)
+          test "$status" = 503
+          grep -qi '^cache-control: no-store' "$RUNNER_TEMP/cloudflare-api.headers"
+          node - "$RUNNER_TEMP/cloudflare-api.json" <<'NODE'
+          const assert = require("node:assert/strict");
+          const fs = require("node:fs");
+          const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          assert.equal(payload.error.code, "provider_unavailable");
+          assert.equal(payload.error.retryable, true);
+          assert.equal(typeof payload.request_id, "string");
+          console.log("Cloudflare workerd passed: SSR page, public icon and safe 503 without a backend.");
+          NODE
+      - name: Verify successful upstream proxying and redirect rejection in workerd
+        working-directory: apps/web
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          # Wrangler's local outbound-service mock receives every fetch from
+          # workerd. No real API, provider, credentials or external network.
+          timeout --signal=TERM --kill-after=5s 120s node - <<'NODE'
+          const assert = require("node:assert/strict");
+          const path = require("node:path");
+          const { unstable_startWorker } = require("wrangler");
+          const origin = "https://backend.test";
+          const token = "a".repeat(43);
+          const state = {
+            profile: { id: "guest", name: "Guest" }, friend_code: "invite",
+            friends: [], friend_requests: [], party_invites: [], parties: [],
+            expires_at: "2026-10-20T00:00:00Z",
+          };
+          const calls = [];
+          let worker;
+          (async () => {
+            try {
+              worker = await unstable_startWorker({
+                config: path.join(process.env.RUNNER_TEMP, "cloudflare-release/wrangler.jsonc"),
+                bindings: {
+                  ASTANA_API_URL: { type: "plain_text", value: origin },
+                  ASTANA_MAP_PROVIDER: { type: "plain_text", value: "none" },
+                  ASTANA_ALLOW_FIXTURES: { type: "plain_text", value: "false" },
+                },
+                dev: {
+                  remote: false, watch: false, persist: false, inspector: false,
+                  server: { hostname: "127.0.0.1", port: 0 },
+                  outboundService: async (request) => {
+                    const url = new URL(request.url);
+                    assert.equal(url.origin, origin, "Unexpected outbound host or followed redirect");
+                    calls.push(url.pathname);
+                    if (url.pathname === "/v1/places" || url.pathname === "/v1/social/events") {
+                      return new Response("Do not expose this redirect body", {
+                        status: url.pathname === "/v1/places" ? 302 : 307,
+                        headers: { Location: "https://redirect.invalid/private" },
+                      });
+                    }
+                    if (url.pathname === "/v1/social/state") {
+                      assert.equal(request.headers.get("Authorization"), `Bearer ${token}`);
+                      return Response.json(state);
+                    }
+                    assert.ok(["/v1/data-status", "/v1/intent"].includes(url.pathname));
+                    if (url.pathname === "/v1/intent") {
+                      assert.equal(request.method, "POST");
+                      assert.deepEqual(await request.json(), { query: "CI example", locale: "en" });
+                    }
+                    return Response.json({ ci: "upstream-ok" }, {
+                      headers: { "X-Astana-Data-Mode": "live", "Set-Cookie": "not-for-the-browser=1" },
+                    });
+                  },
+                },
+              });
+              const catalog = await worker.fetch("http://localhost/api/v1/data-status");
+              assert.equal(catalog.status, 200);
+              assert.deepEqual(await catalog.json(), { ci: "upstream-ok" });
+              assert.equal(catalog.headers.get("X-Astana-Data-Mode"), "live");
+              assert.equal(catalog.headers.get("Set-Cookie"), null);
+              const intent = await worker.fetch("http://localhost/api/v1/intent", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query: "CI example", locale: "en" }),
+              });
+              assert.equal(intent.status, 200);
+              assert.deepEqual(await intent.json(), { ci: "upstream-ok" });
+              const guest = await worker.fetch("http://localhost/api/v1/social/state", {
+                headers: { Cookie: `astana_guest=${token}` },
+              });
+              assert.equal(guest.status, 200);
+              assert.deepEqual(await guest.json(), state);
+              for (const resource of ["places", "social/events"]) {
+                const response = await worker.fetch(`http://localhost/api/v1/${resource}`);
+                assert.equal(response.status, 503);
+                assert.equal((await response.json()).error.code, "provider_unavailable");
+                assert.equal(response.headers.get("Location"), null);
+              }
+              assert.deepEqual(calls, [
+                "/v1/data-status", "/v1/intent", "/v1/social/state", "/v1/places", "/v1/social/events",
+              ]);
+              console.log("Cloudflare upstream smoke passed: GET/POST/social 200, redirect rejection, no external requests.");
+            } finally {
+              await worker?.dispose();
+            }
+          })().catch((error) => { console.error(error); process.exitCode = 1; });
+          NODE
+      - name: Upload the verified portable Cloudflare Worker
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: astana-cloudflare-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/cloudflare-release/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  render-container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the separate live Render image
+        run: docker build --file infra/render/Dockerfile --tag astana-render:ci .
+      - name: Start the live image without network or credentials
+        # Mirror every literal env value in render.yaml, except hosted LLM calls.
+        # Account-supplied sync:false values and provider keys are not used in CI.
+        env:
+          ASTANA_MODE: live
+          ASTANA_POI_PATH: /app/data/astana-osm.json
+          ASTANA_POI_STALE_SECONDS: "604800"
+          ASTANA_REPOSITORY_FACTORY: astana_city_data:create_repository
+          ASTANA_RETRIEVER_FACTORY: astana_retrieval:create_retriever
+          ASTANA_CONTEXT_FACTORY: astana_city_context:create_context
+          ASTANA_RETRIEVAL_POOL_LIMIT: "1000"
+          LLM_PROVIDER: none
+          ASTANA_LLM_REQUESTS_PER_MINUTE: "10"
+          ASTANA_LLM_REQUESTS_PER_DAY: "100"
+          ROUTING_PROVIDER: osrm_public
+          ASTANA_ROUTE_ALLOW_APPROXIMATE: "true"
+          ASTANA_CONTEXT_TIMEOUT_SECONDS: "10"
+          ASTANA_CONTEXT_RETRIES: "0"
+          ASTANA_MAP_LOOKUP_ENABLED: "true"
+          ASTANA_MAP_LOOKUP_PROVIDER: nominatim
+          ASTANA_WEATHER_ENABLED: "false"
+          REQUEST_TIMEOUT_SECONDS: "30"
+        run: |
+          docker run --detach --name astana-render-ci \
+            --network none --read-only --memory 512m --memory-swap 512m \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --env PORT=11000 --env ASTANA_MODE --env ASTANA_POI_PATH \
+            --env ASTANA_POI_STALE_SECONDS --env ASTANA_REPOSITORY_FACTORY \
+            --env ASTANA_RETRIEVER_FACTORY --env ASTANA_CONTEXT_FACTORY \
+            --env ASTANA_RETRIEVAL_POOL_LIMIT --env LLM_PROVIDER \
+            --env ASTANA_LLM_REQUESTS_PER_MINUTE --env ASTANA_LLM_REQUESTS_PER_DAY \
+            --env ROUTING_PROVIDER --env ASTANA_ROUTE_ALLOW_APPROXIMATE \
+            --env ASTANA_CONTEXT_TIMEOUT_SECONDS --env ASTANA_CONTEXT_RETRIES \
+            --env ASTANA_MAP_LOOKUP_ENABLED --env ASTANA_MAP_LOOKUP_PROVIDER \
+            --env ASTANA_WEATHER_ENABLED --env REQUEST_TIMEOUT_SECONDS \
+            astana-render:ci
+      - name: Verify installed runtime and live catalog over container HTTP
+        shell: bash
+        run: |
+          docker exec -i astana-render-ci python - <<'PY'
+          import importlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          import time
+          from urllib.error import URLError
+          from urllib.request import urlopen
+
+          from astana_contracts import validate_payload
+
+          assert os.getuid() != 0, "The API must run as a non-root user"
+          assert os.environ["ASTANA_MODE"] == "live"
+          assert os.environ["LLM_PROVIDER"] == "none"
+          for key in ("OPENAI_API_KEY", "NVIDIA_API_KEY", "LLM_API_KEY", "TOMTOM_API_KEY", "ORS_API_KEY", "ROUTING_API_KEY"):
+              assert not os.environ.get(key), "CI must not use provider credentials"
+          for name in ("astana_api", "astana_city_data", "astana_retrieval", "astana_city_context", "astana_contracts"):
+              module = importlib.import_module(name)
+              assert Path(module.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()), name
+          assert not Path("/app/packages").exists(), "Runtime must use installed wheels"
+          assert Path(os.environ["ASTANA_POI_PATH"]).is_file(), "Public snapshot must be baked into the live image"
+
+          # A non-default PORT proves that the Render entrypoint uses its runtime env.
+          base = "http://127.0.0.1:11000"
+
+          def get(path, schema):
+              with urlopen(base + path, timeout=5) as response:
+                  assert response.status == 200
+                  assert response.headers["X-Astana-Data-Mode"] == "live"
+                  payload = json.load(response)
+              validate_payload(schema, payload)
+              return payload
+
+          deadline = time.monotonic() + 90
+          while True:
+              try:
+                  health = get("/v1/health/ready", "HealthResponse")
+                  assert health["status"] == "ok"
+                  break
+              except URLError:
+                  if time.monotonic() >= deadline:
+                      raise AssertionError("Live image did not become ready within 90 seconds") from None
+                  time.sleep(1)
+
+          status = get("/v1/data-status", "DataStatusResponse")
+          assert status["total_places"] == 682, status["total_places"]
+          assert status["sources"]
+          assert all(source["status"] in {"ready", "stale"} for source in status["sources"])
+          catalog = get("/v1/places?categories=museum&limit=3", "PlaceListResponse")
+          assert catalog["places"], "The real catalog must expose museum candidates"
+          assert all(not place["is_synthetic"] and place["id"].startswith("osm:") for place in catalog["places"])
+          detail = get("/v1/places/osm:way/1395465867", "Place")
+          facts = {fact["key"]: fact for fact in detail["facts"]}
+          assert facts["has_wifi"]["status"] == "known" and facts["has_wifi"]["value"] is True
+          assert facts["toilets"]["status"] == "known" and facts["toilets"]["value"] is True
+          print("Render live image passed: non-root installed runtime, dynamic PORT, 682 real POIs and verified details, no provider network or keys.")
+          PY
+      - name: Logs on failure
+        if: failure()
+        run: docker logs --tail=100 astana-render-ci || true
+      - name: Stop the live test container
+        if: always()
+        run: docker rm --force astana-render-ci 2>/dev/null || true

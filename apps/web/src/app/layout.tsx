@@ -3,11 +3,14 @@ import CompassApp from "@/components/compass-app";
 import { astanaInputDate } from "@/lib/format";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
+import "./planner.css";
 
 export const viewport: Viewport = {
   themeColor: "#087f5b",
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
 };
 
 export const metadata: Metadata = {

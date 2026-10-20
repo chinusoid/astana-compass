@@ -3,7 +3,10 @@ import path from "node:path";
 
 const config: NextConfig = {
   poweredByHeader: false,
-  turbopack: { root: path.resolve(import.meta.dirname, "../..") },
+  // OpenNext resolves this independent pnpm project as its package root.
+  // Shared contracts are compiled into the app; no runtime files live outside it.
+  outputFileTracingRoot: path.resolve(import.meta.dirname),
+  turbopack: { root: path.resolve(import.meta.dirname) },
   async headers() {
     return [
       {
@@ -11,7 +14,7 @@ const config: NextConfig = {
         headers: [
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "X-Content-Type-Options", value: "nosniff" },
-          { key: "Permissions-Policy", value: "camera=(), microphone=()" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(self)" },
         ],
       },
     ];

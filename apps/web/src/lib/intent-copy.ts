@@ -1,5 +1,68 @@
 import { locales, type Locale } from "./i18n";
 const copy = {
+  scenarioFind: ["Найти места", "Орындарды табу", "Find places"],
+  scenarioFinding: ["Ищем места…", "Орындар ізделуде…", "Finding places…"],
+  scenarioKeyboard: [
+    "Enter — найти места · Shift + Enter — новая строка",
+    "Enter — орындарды табу · Shift + Enter — жаңа жол",
+    "Enter to find places · Shift + Enter for a new line",
+  ],
+  scenarioDraft: [
+    "Нажмите «Найти места»: учтём описание и покажем прогулку на карте. Фильтры — по желанию.",
+    "Қалау әлі қолданылған жоқ. «Орындарды табу» түймесін басыңыз: іздеуде мәтін, таңдалған шарттар, бастау нүктесі мен уақыт ескеріледі.",
+    "Your request has not been applied yet. Choose Find places to search with your text, selected settings, start and time budget.",
+  ],
+  scenarioPending: [
+    "Учитываем описание и подбираем остановки. Затем соединим их маршрутом на карте…",
+    "Қалау жіберілді. Таңдалған шарттар, бастау нүктесі мен уақыт бойынша орындар ізделуде…",
+    "Request submitted. Finding places with your selected settings, start and time budget…",
+  ],
+  scenarioApplied: [
+    "Пожелание учтено. План и все остановки показаны рядом с картой.",
+    "Қалау ескерілді. Жоспар мен барлық аялдамалар картаның жанында көрсетілген.",
+    "Request applied. Your plan and all stops are shown beside the map.",
+  ],
+  scenarioCount: ["Вариантов", "Нұсқалар саны", "Options"],
+  scenarioDirty: [
+    "Изменения ещё не применены. Нажмите «Найти места», чтобы обновить варианты.",
+    "Өзгерістер әлі қолданылған жоқ. Нұсқаларды жаңарту үшін «Орындарды табу» түймесін басыңыз.",
+    "Your changes have not been applied. Choose Find places to update the options.",
+  ],
+  scenarioNoMatch: [
+    "Пожелание обработано. Подходящих мест не найдено; обязательные условия сохранены. Уточните текст, старт или настройки и повторите поиск.",
+    "Қалау өңделді. Сәйкес орындар табылмады; міндетті шарттар сақталды. Мәтінді, бастау нүктесін немесе баптауларды нақтылап, қайта іздеңіз.",
+    "Request processed. No suitable places found; must-haves were preserved. Adjust your text, start or settings and search again.",
+  ],
+  scenarioClarify: [
+    "Пожелание получено. Ответьте на уточняющий вопрос ниже, чтобы продолжить подбор.",
+    "Қалау алынды. Іздеуді жалғастыру үшін төмендегі нақтылау сұрағына жауап беріңіз.",
+    "Request received. Answer the clarification question below to continue.",
+  ],
+  scenarioNeedsQuery: [
+    "Напишите, куда хотите сходить, и нажмите «Найти места».",
+    "Қайда барғыңыз келетінін жазып, «Орындарды табу» түймесін басыңыз.",
+    "Describe where you would like to go, then choose Find places.",
+  ],
+  scenarioNeedsOrigin: [
+    "Сначала выберите точку старта на карте или укажите своё местоположение. Затем нажмите «Найти места».",
+    "Алдымен картадан бастау нүктесін таңдаңыз немесе орналасқан жеріңізді көрсетіңіз. Содан кейін «Орындарды табу» түймесін басыңыз.",
+    "Choose a start on the map or use your location first, then choose Find places.",
+  ],
+  scenarioInvalid: [
+    "Поиск не запущен. Проверьте координаты, время начала и длительность от 1 до 1440 минут.",
+    "Іздеу басталмады. Координаттарды, басталу уақытын және 1–1440 минут аралығындағы ұзақтығын тексеріңіз.",
+    "Search has not started. Check your coordinates, start time and a time budget from 1 to 1440 minutes.",
+  ],
+  scenarioError: [
+    "Не удалось выполнить поиск. Проверьте сообщение об ошибке ниже и повторите поиск.",
+    "Іздеу орындалмады. Төмендегі қате хабарламасын тексеріп, қайта іздеңіз.",
+    "Search could not finish. Check the error below and try again.",
+  ],
+  analysisOnly: [
+    "Необязательно: разберите текст, если хотите перенести из него время и условия в форму. Эта кнопка не запускает поиск мест.",
+    "Қосымша: мәтіндегі уақыт пен шарттарды пішінге көшіру үшін талдаңыз. Бұл түйме орындарды іздеуді бастамайды.",
+    "Optional: interpret the text to add time and constraints to the form. This button does not search for places.",
+  ],
   analyze: [
     "Разобрать запрос с ИИ",
     "Сұрауды ЖИ арқылы талдау",
@@ -50,9 +113,9 @@ const copy = {
     "Apply selected settings",
   ],
   applied: [
-    "Настройки обновлены. Проверьте их ниже и запустите подбор.",
-    "Баптаулар жаңартылды. Төменде тексеріп, іздеуді бастаңыз.",
-    "Settings updated. Review them below and start your search.",
+    "Настройки добавлены в форму. Для поиска используйте кнопку «Найти места».",
+    "Баптаулар пішінге қосылды. Іздеу үшін «Орындарды табу» түймесін пайдаланыңыз.",
+    "Settings added to the form. Use Find places to search.",
   ],
   preserved: [
     "Уже обязательные условия останутся обязательными. Неподтверждённое свойство места не считается выполненным.",
@@ -60,9 +123,9 @@ const copy = {
     "Existing must-haves stay required. An unknown place property does not satisfy a must-have.",
   ],
   noSettings: [
-    "Новых условий или времени не найдено. Уточните пожелание или заполните форму вручную.",
-    "Жаңа шарттар немесе уақыт табылмады. Қалауыңызды нақтылаңыз немесе пішінді қолмен толтырыңыз.",
-    "No new constraints or time budget found. Clarify your request or use the form.",
+    "Новых условий или времени не найдено. Само пожелание можно использовать: нажмите «Найти места». Условия и время задайте в форме.",
+    "Жаңа шарттар немесе уақыт табылмады. Қалауыңызды қолдануға болады: «Орындарды табу» түймесін басыңыз. Шарттар мен уақытты пішінде таңдаңыз.",
+    "No new constraints or time budget found. You can still search with this request: choose Find places. Set constraints and time in the form.",
   ],
 } as const;
 export function intentText(locale: Locale, key: keyof typeof copy) {

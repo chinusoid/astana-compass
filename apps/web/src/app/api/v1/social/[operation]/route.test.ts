@@ -56,6 +56,8 @@ it("sets a private cookie and never exposes the backend bearer token to JavaScri
   expect(cookie).toContain("HttpOnly");
   expect(cookie).toContain("SameSite=strict");
   expect(cookie).toContain("Secure");
+  expect(cookie).toContain("Max-Age=604800");
+  expect(cookie).toContain("Path=/");
   expect(response.headers.get("cache-control")).toBe("no-store");
 });
 
@@ -80,7 +82,7 @@ it("rejects cross-origin writes before reading credentials or forwarding", async
 it("forwards only the guest cookie as bearer, omitting unrelated cookies and injected authorization", async () => {
   const fetch = vi.fn().mockResolvedValue(Response.json(state));
   vi.stubGlobal("fetch", fetch);
-  await GET(
+  const response = await GET(
     new NextRequest("https://compass.example/api/v1/social/state", {
       headers: {
         Cookie: `other=private; astana_guest=${token}`,
@@ -89,9 +91,43 @@ it("forwards only the guest cookie as bearer, omitting unrelated cookies and inj
     }),
     context("state"),
   );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual(state);
+  expect(fetch.mock.calls[0][1].redirect).toBe("manual");
   expect(fetch.mock.calls[0][1].headers.Authorization).toBe(`Bearer ${token}`);
   expect(fetch.mock.calls[0][1].headers).not.toHaveProperty("Cookie");
+  // Reading state must not renew the original seven-day session deadline.
+  expect(response.headers.get("set-cookie")).toBeNull();
 });
+
+it.each([301, 302, 303, 307, 308])(
+  "rejects upstream %s redirects without forwarding the guest bearer",
+  async (status) => {
+    const cancel = vi.fn();
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(new ReadableStream({ cancel }), {
+        status,
+        headers: { Location: "https://other.example/private" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const response = await GET(
+      new NextRequest("https://compass.example/api/v1/social/state", {
+        headers: { Cookie: `astana_guest=${token}` },
+      }),
+      context("state"),
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: { code: "provider_unavailable" },
+    });
+    expect(response.headers.get("Location")).toBeNull();
+    expect(response.headers.get("Set-Cookie")).toBeNull();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0][1].redirect).toBe("manual");
+    expect(cancel).toHaveBeenCalledOnce();
+  },
+);
 
 it("clears expired guest sessions and rejects unknown resources", async () => {
   const fetch = vi

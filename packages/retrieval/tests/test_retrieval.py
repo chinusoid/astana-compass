@@ -71,9 +71,92 @@ def test_multilingual_coffee_category_excludes_unrelated_nearer_places(query, lo
     ("галерея", "ru", "gallery"), ("art exhibition", "en", "arts_centre"),
     ("серуен", "kk", "park"), ("ботанический сад", "ru", "garden"),
     ("children playground", "en", "playground"),
+    ("красивый торговый центр", "ru", "mall"), ("ТРЦ", "ru", "mall"),
+    ("торгово-развлекательный центр", "ru", "mall"),
+    ("shopping mall", "en", "mall"), ("shopping centre", "en", "mall"),
+    ("shopping center", "en", "mall"), ("сауда орталығы", "kk", "mall"),
+    ("сауда ойын-сауық орталығы", "kk", "mall"),
 ])
 def test_supported_categories_across_languages(query, locale, category):
     assert ids(search([place("Target", category), place("Other", "cinema")], query, locale)) == ["synthetic:Target"]
+
+
+@pytest.mark.parametrize("category", ["mall", "shopping_mall"])
+def test_structured_mall_type_requires_source_category_even_for_a_named_cafe(category):
+    mall = place("RetailCentre", "mall")
+    cafe = place("Mega", "cafe", description="Shopping mall nearby; this source record describes a cafe.")
+    result = search([cafe, mall], "a beautiful shopping centre", categories=[category])
+    assert ids(result) == [mall["id"]]
+    assert not search([cafe], "Mega", categories=[category])["hits"]
+
+
+@pytest.mark.parametrize("query,locale", [
+    ("место культурного искусства", "ru"), ("a cultural art place", "en"), ("мәдени өнер орны", "kk"),
+])
+def test_grounded_structured_types_are_not_vetoed_by_incidental_lexical_art_category(query, locale):
+    museum, theatre, gallery, cafe = (place("Museum", "museum"), place("Theatre", "theatre"),
+                                     place("Gallery", "gallery"), place("Cafe", "cafe"))
+    result = search([museum, theatre, gallery, cafe], query, locale, categories=["museum", "theatre"])
+    assert set(ids(result)) == {museum["id"], theatre["id"]}
+    # With no structured semantic filter, ordinary lexical intent still applies.
+    assert ids(search([museum, gallery], query, locale, categories=[])) == [gallery["id"]]
+
+
+def test_unknown_structured_type_cannot_substitute_a_lexical_cultural_match():
+    museum = place("Museum", "museum", description="A planetarium and art exhibition are mentioned here.")
+    assert ids(search([museum], "art museum planetarium", categories=["planetarium"])) == []
+
+
+@pytest.mark.parametrize("named", ["SYNTHETIC Museum", "Unlisted Museum"])
+def test_structured_category_does_not_replace_an_exact_or_unknown_named_destination(named):
+    museum, gallery = place("Museum", "museum"), place("Gallery", "gallery")
+    assert ids(search([museum, gallery], "art", named_place=named, categories=["gallery"])) == []
+
+
+def test_structured_cultural_categories_preserve_category_and_exact_name_exclusions():
+    museum, gallery = place("Museum", "museum"), place("Gallery", "gallery")
+    assert ids(search([museum, gallery], "art, not a museum", categories=["museum", "gallery"])) == [gallery["id"]]
+    assert ids(search([museum, gallery], "art, not SYNTHETIC Museum", categories=["museum", "gallery"])) == [gallery["id"]]
+
+
+@pytest.mark.parametrize("cuisine", [None, "pizza"])
+def test_structured_types_do_not_bypass_independent_food_cuisine_or_its_exclusion(cuisine):
+    pizza = place("Pizzeria", "restaurant", facts={"osm:cuisine": ["pizza"]})
+    unknown = place("Restaurant", "restaurant")
+    museum = place("Museum", "museum", facts={"osm:cuisine": ["pizza"]})
+    sources = [unknown, museum, pizza]
+    result = search(sources, "pizza art", cuisine=cuisine, categories=["restaurant", "museum"])
+    assert ids(result) == [pizza["id"]]
+    assert ids(search(sources, "art, not pizza", cuisine="pizza", categories=["restaurant"])) == []
+
+
+@pytest.mark.parametrize("query,cuisine", [("cafe art", "pizza"), ("pizza cafe art", None)])
+def test_structured_food_type_is_not_vetoed_by_lexical_type_when_cuisine_is_confirmed(query, cuisine):
+    restaurant = place("Restaurant", "restaurant", facts={"osm:cuisine": ["pizza"]})
+    unknown = place("UnknownCuisine", "restaurant")
+    museum = place("Museum", "museum", facts={"osm:cuisine": ["pizza"]})
+    result = search([unknown, museum, restaurant], query, cuisine=cuisine, categories=["restaurant"])
+    assert ids(result) == [restaurant["id"]]
+    assert "osm:cuisine" in result["hits"][0]["matched_fact_keys"]
+
+
+@pytest.mark.parametrize("category", ["museum", "theatre"])
+@pytest.mark.parametrize("actual", [False, None, True])
+def test_structured_cultural_types_keep_required_hard_facts_strict(category, actual):
+    target = place("Target", category, facts={"indoor": actual})
+    result = search([target], "a cultural art place", categories=["museum", "theatre"], constraints=[
+        {"key": "indoor", "value": True, "strength": "required"},
+    ])
+    if actual is False:
+        assert ids(result) == []
+    else:
+        assert ids(result) == [target["id"]]
+        if actual is None:
+            assert result["hits"][0]["matched_fact_keys"] == []
+            assert any("deferred" in warning for warning in result["warnings"])
+        else:
+            assert result["hits"][0]["matched_fact_keys"] == ["indoor"]
+            assert not any("deferred" in warning for warning in result["warnings"])
 
 
 @pytest.mark.parametrize("query,locale", [
@@ -405,3 +488,163 @@ def test_short_name_inside_a_larger_activity_does_not_capture_food_request():
     cafe, restaurant = named("Дәмді", "cafe"), named("Dinner", "restaurant")
     assert ids(search([cafe, restaurant], "Дәмді ас", "kk")) == [restaurant["id"]]
     assert ids(search([cafe, restaurant], "Дәмді", "kk")) == [cafe["id"]]
+
+
+@pytest.mark.parametrize("query,locale", [
+    ("живописные места", "ru"), ("красивые места", "ru"),
+    ("scenic places", "en"), ("әдемі орын", "kk"),
+])
+def test_scenic_discovery_expands_categories_without_claiming_a_scenic_fact(query, locale):
+    places = [place("Park", "park"), place("Garden", "garden"), place("View", "viewpoint"), place("Cafe")]
+    result = search(places, query, locale)
+    assert set(ids(result)) == {"synthetic:Park", "synthetic:Garden", "synthetic:View"}
+    assert all(hit["matched_fact_keys"] == [] for hit in result["hits"])
+
+
+def test_walk_by_river_keeps_discovery_but_discloses_unverified_proximity():
+    result = search([
+        place("Park", "park", description="Synthetic park by the river."),
+        place("Bridge", "attraction", description="Synthetic crossing on the embankment."),
+        place("Garden", "garden"), place("Cafe"),
+    ], "хочу гулять у реки", "ru")
+    assert set(ids(result)) == {"synthetic:Park", "synthetic:Bridge"}
+    assert any("Близость к упомянутому ориентиру пока не проверена" in warning for warning in result["warnings"])
+    assert all(hit["matched_fact_keys"] == [] for hit in result["hits"])
+
+
+@pytest.mark.parametrize("query", ["не хочу гулять", "гулять не хочу", "не хочу красивые места", "scenic places not needed"])
+def test_negated_discovery_does_not_turn_into_a_park_request(query):
+    assert not ids(search([place("Park", "park"), place("View", "viewpoint")], query))
+
+
+@pytest.mark.parametrize("query", ["живописное кафе", "гулять до кафе", "хочу кофе", "beautiful coffee"])
+def test_discovery_does_not_compete_with_explicit_coffee_category(query):
+    assert ids(search([place("Cafe"), place("Park", "park")], query)) == ["synthetic:Cafe"]
+
+
+def test_scenic_walk_preserves_named_goal_and_category_exclusion():
+    target = named("Astana Opera", "theatre")
+    assert ids(search([target, named("Other", "park")], "scenic walk to Astana Opera")) == [target["id"]]
+    result = search([place("Park", "park"), place("Garden", "garden"), place("View", "viewpoint")], "живописные места, не парк", "ru")
+    assert ids(result) == ["synthetic:View"]
+
+
+def test_category_score_does_not_penalize_more_source_text_or_repeated_category_words():
+    concise = place("Concise", "park", lat=51.101, description="Synthetic park.")
+    rich = place("Rich", "park", lat=51.102, description="Synthetic park with an extended documented history and botanical collection.")
+    result = search([rich, concise], "хочу гулять", "ru")
+    assert ids(result) == ["synthetic:Concise", "synthetic:Rich"]
+    assert result["hits"][0]["score"] == result["hits"][1]["score"]
+
+
+def test_equal_generic_category_relevance_prefers_available_description_then_distance():
+    sparse = place("Sparse", "park", lat=51.101, description=None)
+    described = place("Described", "park", lat=51.102, description="Synthetic historical collection.")
+    result = search([sparse, described], "хочу гулять", "ru")
+    assert ids(result) == ["synthetic:Described", "synthetic:Sparse"]
+    assert result["hits"][0]["score"] == result["hits"][1]["score"]
+    # A literal name remains stronger than the generic description tie-break.
+    assert ids(search([sparse, described], "SYNTHETIC Sparse")) == [sparse["id"]]
+
+
+@pytest.mark.parametrize("query,locale", [
+    ("Прогулка по паркам", "ru"), ("Саябақтарда серуендеу", "kk"), ("A walk through parks", "en"),
+])
+def test_park_preset_keeps_explicit_category(query, locale):
+    result = search([place("Green", "park"), place("Art", "artwork"), place("Opera", "theatre", description="Synthetic architecture.")], query, locale)
+    assert ids(result) == ["synthetic:Green"]
+
+
+@pytest.mark.parametrize("query,locale", [
+    ("Прогулка по набережной", "ru"), ("Жағалауда серуендеу", "kk"), ("A walk along the embankment", "en"),
+])
+def test_waterfront_preset_requires_source_wording_not_a_generic_park(query, locale):
+    river = place("RiverPark", "park", description="Synthetic park beside a river.")
+    result = search([river, place("Other", "park")], query, locale)
+    assert ids(result) == [river["id"]]
+    assert result["hits"][0]["matched_fact_keys"] == []
+
+
+@pytest.mark.parametrize("query,locale", [
+    ("Посмотреть архитектуру", "ru"), ("Сәулет нысандарын көру", "kk"), ("Explore architecture", "en"),
+])
+def test_architecture_preset_requires_source_wording_not_any_attraction(query, locale):
+    architecture = place("Opera", "theatre", description="Synthetic architecture with classical columns.")
+    result = search([architecture, place("Ride", "attraction"), place("Park", "park")], query, locale)
+    assert ids(result) == [architecture["id"]]
+
+
+@pytest.mark.parametrize("query,locale", [
+    ("Разнообразная прогулка: парки и архитектура", "ru"),
+    ("Әртүрлі серуен: саябақтар мен сәулет", "kk"),
+    ("A varied walk: parks and architecture", "en"),
+])
+def test_mixed_preset_covers_both_requested_categories(query, locale):
+    parks = [place(f"Park{i}", "park", lat=51.101+i*.0001) for i in range(3)]
+    architecture = place("Opera", "theatre", lat=51.11, description="Synthetic architecture.")
+    result = search([*parks, architecture, place("Cafe")], query, locale, candidate_limit=3)
+    assert architecture["id"] in ids(result)
+    assert len(result["hits"]) == 3
+    assert any("park" in p["categories"] for p in result["places"])
+    assert "synthetic:Cafe" not in ids(result)
+
+
+def test_generic_walk_diversifies_relevant_themes_and_excludes_unsourced_rides():
+    parks = [place(f"Park{i}", "park", lat=51.101+i*.0001) for i in range(3)]
+    river = place("River", "park", lat=51.11, description="Synthetic river embankment.")
+    architecture = place("Opera", "theatre", lat=51.12, description="Synthetic architecture.")
+    result = search([*parks, river, architecture, place("Ride", "attraction"), place("Cafe")], "хочу погулять", "ru", candidate_limit=3)
+    assert ids(result) == [parks[0]["id"], river["id"], architecture["id"]]
+    assert all(hit["matched_fact_keys"] == [] for hit in result["hits"])
+
+
+def test_walk_prefers_distinct_places_before_nearby_same_name_duplicates():
+    first = place("First", "park")
+    duplicate = place("Duplicate", "park", lat=51.1011)
+    first["name"] = duplicate["name"] = "Synthetic unnamed green space"
+    distinct = place("Different", "park", lat=51.102)
+    assert ids(search([first, duplicate, distinct], "прогулка по паркам", "ru", candidate_limit=2)) == [first["id"], distinct["id"]]
+
+
+def test_preferences_do_not_outweigh_literal_query_relevance_or_introduce_cafes():
+    historic = place("Historic", "park", description="Synthetic historic fortress grounds.")
+    convenient = place("Convenient", "park", facts={"has_wifi": True, "indoor": True, "quiet": True})
+    cafe = place("Cafe", facts={"has_wifi": True, "indoor": True, "quiet": True})
+    prefs = [{"key": key, "value": True, "strength": "preferred"} for key in ("has_wifi", "indoor", "quiet")]
+    result = search([convenient, cafe, historic], "historic scenic walk", constraints=prefs)
+    assert ids(result)[0] == historic["id"]
+    assert cafe["id"] not in ids(result)
+    assert set(result["hits"][1]["matched_fact_keys"]) == {"has_wifi", "indoor", "quiet"}
+
+
+def test_diversity_does_not_promote_a_weak_theme_over_a_strong_literal_match():
+    strong = [place(f"Historic{i}", "park", description="Synthetic historic fortress grounds.") for i in range(3)]
+    weak = place("Opera", "theatre", description="Synthetic architecture.")
+    assert set(ids(search([*strong, weak], "historic scenic walk", candidate_limit=3))) == {p["id"] for p in strong}
+
+
+def test_sourced_themes_preserve_negation_and_named_goal_priority():
+    river = place("River", "park", description="Synthetic river embankment.")
+    architecture = named("Astana Opera", "theatre", description="Synthetic architecture.")
+    assert not ids(search([river], "не хочу набережную", "ru"))
+    assert ids(search([river, architecture], "scenic walk to Astana Opera")) == [architecture["id"]]
+
+
+@pytest.mark.parametrize("query,excluded", [
+    ("прогулка, архитектура не нужна", "Opera"),
+    ("прогулка, не набережная", "River"),
+])
+def test_negated_theme_excludes_its_source_matches_without_excluding_all_parks(query, excluded):
+    places = [place("Plain", "park"), place("River", "park", description="Synthetic river."),
+              place("Opera", "theatre", description="Synthetic architecture.")]
+    result = search(places, query, "ru")
+    assert "synthetic:Plain" in ids(result)
+    assert "synthetic:" + excluded not in ids(result)
+
+
+def test_preferences_still_break_equal_text_relevance_ties_without_becoming_required():
+    unknown = place("Unknown", "park", lat=51.101)
+    known = place("Known", "park", lat=51.102, facts={"has_wifi": True})
+    result = search([unknown, known], "park", constraints=[{"key":"has_wifi", "value":True, "strength":"preferred"}])
+    assert ids(result) == [known["id"], unknown["id"]]
+    assert result["hits"][0]["score"] == result["hits"][1]["score"]

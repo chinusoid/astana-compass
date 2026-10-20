@@ -6,10 +6,10 @@ from dataclasses import dataclass
 import re
 import unicodedata
 
-LEXICON_VERSION = "ru-kk-en-2"
+LEXICON_VERSION = "ru-kk-en-6"
 CATEGORIES = {
     "cafe": r"кафе(?:ге|де|ден|ні|нің|лер(?:ге|де|ден|і|ін)?)?|кофе\w{0,12}|coffee|caf[eé]s?|cappuccino|капучино|латте",
-    "restaurant": r"рестора\w{0,12}|поесть|обед\w{0,12}|ужин\w{0,12}|еда|restaurants?|dining|lunch|dinner|eat|тамақ\w{0,12}|мейрамхана\w{0,12}",
+    "restaurant": r"рестора\w{0,12}|поесть|покушать|перекусить|пообедать|поужинать|обед\w{0,12}|ужин\w{0,12}|еда|restaurants?|dining|lunch|dinner|eat|тамақ\w{0,12}|мейрамхана\w{0,12}",
     "museum": r"музе\w{0,12}|museums?|мұражай\w{0,12}",
     "park": r"парк\w{0,12}|сквер\w{0,12}|parks?|саябақ\w{0,12}",
     "garden": r"сад|сада|саду|ботаническ\w{0,12}|gardens?|botanical|бақ|баққа|ботаникалық",
@@ -17,15 +17,29 @@ CATEGORIES = {
     "library": r"библиотек\w{0,12}|librar(?:y|ies)|кітапхана\w{0,12}",
     "theatre": r"театр\w{0,12}|theat(?:re|er)s?|спектакл\w{0,12}",
     "cinema": r"кино\w{0,12}|cinemas?|movies?|film|фильм\w{0,12}",
+    "mall": r"торгов(?:о[- ]развлекательн)?\w{0,8}\s+(?:центр\w{0,8}|комплекс\w{0,8})|трц|тц|"
+            r"(?:shopping\s+)?malls?|shopping\s+cent(?:re|er)s?|"
+            r"сауда\s+(?:ойын[- ]сауық\s+)?(?:орталы\w{0,8}|кешен\w{0,8})",
     "art": r"галере\w{0,12}|искусств\w{0,12}|выстав\w{0,12}|art|galler(?:y|ies)|exhibition\w{0,12}|өнер|көрме\w{0,12}",
     "viewpoint": r"смотров\w{0,12}|панорам\w{0,12}|viewpoints?|observation\s+deck|panoram\w{0,12}",
     "attraction": r"достопримечательност\w{0,12}|attractions?|sightseeing|көрікті\s+жер\w{0,12}",
+    "architecture": r"архитектур\w{0,12}|architectur\w{0,12}|сәулет\w{0,12}",
+    "waterfront": r"набережн\w{0,12}|рек[аиуе]|рекой|есил\w{0,4}|ишим\w{0,4}|rivers?|riverfront|waterfront|embankments?|өзен\w{0,8}|жағалау\w{0,8}",
 }
+OUTDOOR_CATEGORIES = frozenset({"park", "garden", "viewpoint", "artwork"})
+DISCOVERY_CATEGORIES = OUTDOOR_CATEGORIES | frozenset({"attraction", "theatre", "museum", "library", "arts_centre"})
+SOURCE_THEMES = frozenset({"architecture", "waterfront"})
+CATEGORY_ALIASES = {"shopping_mall": "mall"}
 CATEGORY_GROUPS = {
     **{key: frozenset({key}) for key in CATEGORIES},
     "art": frozenset({"art", "gallery", "arts_centre", "artwork"}),
     "park": frozenset({"park", "garden"}),
     "paintings": frozenset({"gallery", "museum"}),
+    # Discovery categories, never an assertion of beauty or proximity to water.
+    "scenic": DISCOVERY_CATEGORIES,
+    "walk": DISCOVERY_CATEGORIES,
+    "architecture": DISCOVERY_CATEGORIES,
+    "waterfront": DISCOVERY_CATEGORIES,
 }
 FEATURES = {
     "quiet": r"тих\w{0,12}|тишин\w{0,12}|спокойн\w{0,12}|quiet|peaceful|тыныш\w{0,12}|без\s+шума|not\s+noisy",
@@ -36,16 +50,34 @@ FEATURES = {
     "wheelchair_accessible": r"безбарьер\w{0,12}|инвалид\w{0,12}\s+коляс\w{0,12}|wheelchair\w{0,12}|step.free|кедергісіз|мүгедек\w{0,12}\s+арб\w{0,12}",
     "free_entry": r"бесплат\w{0,12}|free\s+(?:entry|admission)|no\s+(?:entry\s+)?fee|тегін",
 }
+FOOD_CATEGORIES = frozenset({"cafe", "restaurant"})
+CUISINES = {
+    # Bounded forms include the common missing-ц typo and Kazakh case suffixes.
+    "pizza": r"pizzas?|pizzerias?|пицц?(?:[ауые]|ей|ами|ах|аны|аның|аға|ада|адан|алар(?:ды|дың|ға|да|дан)?)|пиццери(?:я|ю|и|е|й|ей|ям|ями|ях|яға|яда|ядан|яны|яның)",
+    "sushi": r"sushi|суши|сушиге|сушиді|ролл(?:ы|ов|ами)?",
+    "burger": r"burgers?|hamburgers?|бургер\w{0,8}|гамбургер\w{0,8}",
+    "ice_cream": r"ice\s*cream|морожен\w{0,8}|балмұздақ\w{0,8}",
+    "kebab": r"kebabs?|кебаб\w{0,8}",
+    "steak_house": r"steaks?|стейк\w{0,8}",
+    "pasta": r"pasta|паст[ауы]|макарон\w{0,8}",
+}
+CUISINE_PATTERNS = {
+    key: re.compile(r"(?<!\w)(?:" + pattern + r")(?!\w)", re.I) for key, pattern in CUISINES.items()
+}
 PATTERNS = {
     key: re.compile(r"(?<!\w)(?:" + pattern + r")(?!\w)", re.I)
     for key, pattern in {**CATEGORIES, **FEATURES}.items()
 }
 CLAUSE = re.compile(r"[,;.!?\n]|\b(?:но|but|instead|однако|а|бірақ)\b", re.I)
-WALK = re.compile(r"(?<!\w)(?:погулять|прогул\w{0,12}|walk\w{0,8}|серуен\w{0,12})(?!\w)", re.I)
+WALK = re.compile(r"(?<!\w)(?:погулять|гулять|прогул\w{0,12}|walk\w{0,8}|серуен\w{0,12})(?!\w)", re.I)
 ACTIVITIES = {
     "library": re.compile(r"(?<!\w)(?:study|studying|read\s+books?|позаниматься|почитать|оқуға|кітап\s+оқу)(?!\w)", re.I),
     "restaurant": re.compile(r"(?<!\w)дәмді\s+ас(?!\w)", re.I),
     "paintings": re.compile(r"(?<!\w)(?:paintings?|картины|картиналар)(?!\w)", re.I),
+    "scenic": re.compile(
+        r"(?<!\w)(?:живописн\w{0,12}|красив\w{0,12}|scenic|picturesque|beautiful|көркем|әдемі)"
+        r"(?:\s+(?:мест[ао]|places?|spots?|орын(?:дар)?))?(?!\w)", re.I,
+    ),
 }
 ANCHOR_BEFORE = re.compile(
     r"(?<!\w)(?:near|by|beside|around|next\s+to|close\s+to|у|возле|около|от|рядом\s+с|недалеко\s+от)"
@@ -57,17 +89,19 @@ NEG_BEFORE = re.compile(r"(?<!\w)(?:не|без|not|no|without|avoid|don['’]?t
 # phrases must not negate a later goal: "no stairs museum", "без сахара кофе".
 NEG_BRIDGE = re.compile(
     r"\s*(?:(?:нуж\w{0,8}|хочу|хотим|надо|мне|нам|с|очень|тих\w{0,8}|спокойн\w{0,8}|"
-    r"need|want|like|a|an|the|any|to|for|very|quiet|peaceful|indoor|outdoor)\s+){0,6}", re.I,
+    r"в|во|на|к|до|идти|пойти|ходить|сходить|посетить|"
+    r"need|want|like|a|an|the|any|to|for|in|at|go|visit|eat|very|quiet|peaceful|indoor|outdoor)\s+){0,6}", re.I,
 )
 NEG_AFTER = re.compile(
     r"^\s*(?:(?:мне|нам|is|are)\s+)?(?:не\s+(?:нуж\w{0,12}|важ\w{0,12}|обязател\w{0,12}|хочу)|"
     r"(?:not|(?:isn|aren)['’]t)\s+(?:needed|required|important)|optional|doesn['’]t\s+matter|"
-    r"(?:керек|қажет|маңызды)\s+емес|емес)", re.I,
+    r"(?:керек|қажет|маңызды)\s+емес|емес|(?:барғым|барғымыз|жегім|жегіміз)\s+келмейді)", re.I,
 )
 WORDS = re.compile(r"[^\W_]+(?:['’][^\W_]+)*", re.UNICODE)
 STOPWORDS = frozenset("""
 я мы мне нам меня нас хочу хотим нужно нужна нужны нужен найти найди ищу есть где рядом около возле выпить сходить
-место места куда можно пожалуйста для чтобы и или на в во у с со к от до за по это тут там сейчас
+место места куда можно пожалуйста для чтобы и или на в во у с со к от до за по это тут там сейчас посмотреть
+разнообразная разнообразную смешанная смешанную самые самый самая самое
 а но не без час часа часов минут минуты минуту мин сегодня завтра вечером утром аст whereto
 i we me my our want would like find please need needs needed a an the to at in on near nearby with
 and or for of by is are it this somewhere place places go have has can now today tomorrow not no without
@@ -97,10 +131,15 @@ class Query:
     excluded_categories: frozenset[str]
     features: frozenset[str]
     has_unresolved_anchor: bool
+    diversify: bool = False
+    excluded_themes: frozenset[str] = frozenset()
+    cuisines: frozenset[str] = frozenset()
+    excluded_cuisines: frozenset[str] = frozenset()
 
 
 def understand(text: str, *, named_goal: bool = False) -> Query:
     terms, positive, negative, features, negative_features = set(), set(), set(), set(), set()
+    cuisines, negative_cuisines = set(), set()
     walk_requested, has_anchor, activities = False, False, set()
     for clause in CLAUSE.split(normalize(text)):
         covered: set[int] = set()
@@ -120,10 +159,14 @@ def understand(text: str, *, named_goal: bool = False) -> Query:
                     is_anchor = ANCHOR_BEFORE.search(clause[:match.start()]) or ANCHOR_AFTER.search(clause[match.end():])
                     if is_anchor:
                         has_anchor = True
-                    else:
+                    if not is_anchor or (key == "waterfront" and walk_requested):
                         (negative if is_negative else positive).add(key)
                 else:
                     (negative_features if is_negative else features).add(key)
+        for key, pattern in CUISINE_PATTERNS.items():
+            for match in pattern.finditer(clause):
+                covered.update(range(match.start(), match.end()))
+                (negative_cuisines if negated(clause, match.start(), match.end()) else cuisines).add(key)
         for match in WORDS.finditer(clause):
             token = match.group()
             if (
@@ -133,18 +176,45 @@ def understand(text: str, *, named_goal: bool = False) -> Query:
                 terms.add(token)
     positive -= negative
     features -= negative_features
+    cuisines -= negative_cuisines
     if not positive and not named_goal:
         positive.update(activities - negative)
     # A walk is an activity, not a competing park destination when the user
     # explicitly asks to walk to a cafe/museum. Spatial anchors are not goals.
-    if walk_requested and not positive and "park" not in negative and not named_goal:
-        positive.add("park")
+    if walk_requested and not positive and not named_goal:
+        positive.add("walk")
     terms.update("category:" + key for key in positive)
     terms.update("feature:" + key for key in features)
+    terms.update("cuisine:" + key for key in cuisines)
     return Query(
         frozenset(terms), frozenset().union(*(CATEGORY_GROUPS[k] for k in positive)),
-        frozenset().union(*(CATEGORY_GROUPS[k] for k in negative)), frozenset(features), has_anchor,
+        frozenset().union(*(CATEGORY_GROUPS[k] for k in negative - SOURCE_THEMES)), frozenset(features), has_anchor,
+        not named_goal and (walk_requested or "scenic" in positive or len(positive) > 1),
+        frozenset(negative & SOURCE_THEMES),
+        frozenset(cuisines), frozenset(negative_cuisines),
     )
+
+
+def known_cuisines(place: dict) -> frozenset[str]:
+    """Only explicit, known cuisine tags with present evidence establish a dish."""
+    evidence = {item["id"] for item in place["evidence"]}
+    cuisines = set()
+    for fact in place["facts"]:
+        if (fact["key"] != "osm:cuisine" or fact["status"] != "known"
+                or not fact["evidence_ids"] or not set(fact["evidence_ids"]).issubset(evidence)):
+            continue
+        raw = fact["value"]
+        items = [raw] if isinstance(raw, str) else raw[:64] if isinstance(raw, list) else []
+        values = {value.strip() for item in items if isinstance(item, str)
+                  for value in re.split(r"[;,]", normalize(item))}
+        cuisines.update(value for value in values if re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", value))
+        # These tags explicitly name the same dish; broader cuisines such as
+        # italian/japanese never establish pizza/sushi by themselves.
+        if "italian_pizza" in values:
+            cuisines.add("pizza")
+        if "hamburger" in values:
+            cuisines.add("burger")
+    return frozenset(cuisines)
 
 
 def document_terms(place: dict) -> Counter[str]:
@@ -152,19 +222,34 @@ def document_terms(place: dict) -> Counter[str]:
     from .names import source_names, source_texts, words
 
     terms: Counter[str] = Counter()
+    source_themes: set[str] = set()
     for name, _ in source_names(place):
         # Literal names are source data, never parsed as negation or category commands.
         for term in words(name):
             terms[term] = 3
+        source_themes.update(key for key in SOURCE_THEMES if PATTERNS[key].search(name))
     for text, _ in source_texts(place):
         parsed = understand(text)
         # A lexical feature token from wording is not a matched_fact_keys claim.
         for term in parsed.terms:
-            terms[term] = max(terms[term], 1)
+            if not term.startswith("cuisine:"):
+                terms[term] = max(terms[term], 1)
+        for key in SOURCE_THEMES:
+            if any(not negated(text, match.start(), match.end()) for match in PATTERNS[key].finditer(text)):
+                source_themes.add(key)
+    for key in source_themes:
+        terms["category:" + key] = 3
     for key, categories in CATEGORY_GROUPS.items():
+        if key in SOURCE_THEMES:
+            continue  # A broad category alone cannot establish a sourced theme.
+        if key in {"walk", "scenic"} and not (OUTDOOR_CATEGORIES.intersection(place["categories"]) or source_themes):
+            continue
         if categories.intersection(place["categories"]):
             terms["category:" + key] += 3
     for fact in place["facts"]:
         if fact["key"] in FEATURES and fact["status"] == "known" and fact["value"] is True:
             terms["feature:" + fact["key"]] += 2
+    if FOOD_CATEGORIES.intersection(place["categories"]):
+        for cuisine in known_cuisines(place):
+            terms["cuisine:" + cuisine] = 3
     return terms

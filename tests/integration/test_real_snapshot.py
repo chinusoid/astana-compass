@@ -47,8 +47,8 @@ def test_live_snapshot_is_ready_and_attributes_its_real_catalogue(offline_live):
     assert offline_live.get("/v1/health/ready").status_code == 200
     status = offline_live.get("/v1/data-status").json()
     validate_payload("DataStatusResponse", status)
-    assert status["total_places"] == 628
-    assert len(status["sources"]) == 2
+    assert status["total_places"] == 682
+    assert len(status["sources"]) == 18
     assert status["sources"][0]["status"] in {"ready", "stale"}
     assert status["sources"][0]["source_url"] == "https://www.openstreetmap.org/copyright"
     assert "ODbL" in " ".join(status["sources"][0]["warnings"])
@@ -61,21 +61,37 @@ def test_live_snapshot_is_ready_and_attributes_its_real_catalogue(offline_live):
         assert place["id"].startswith("osm:")
         assert "museum" in place["categories"]
         assert any(evidence["source_type"] == "osm" for evidence in place["evidence"])
-        assert all(evidence["source_type"] in {"osm", "provider"} for evidence in place["evidence"])
+        assert all(evidence["source_type"] in {"osm", "provider", "official"} for evidence in place["evidence"])
 
 
-def test_real_wikidata_description_has_separate_pinned_provenance(offline_live):
+def test_real_official_description_retains_separate_pinned_wikidata_provenance(offline_live):
     response = offline_live.get("/v1/places/osm:node/4894937300")
     assert response.status_code == 200
     place = response.json()
     description = next(fact for fact in place["facts"] if fact["key"] == "wikidata:description:ru")
-    assert description["status"] == "known" and place["description"] == description["value"]
+    assert description["status"] == "known" and description["value"] == "музей в Астане, Казахстан"
     evidence = [item for item in place["evidence"] if item["id"] in description["evidence_ids"]]
     assert len(evidence) == 1
     assert evidence[0]["source_type"] == "provider"
     assert "CC0" in evidence[0]["source_name"]
     assert "oldid=" in evidence[0]["source_url"]
     assert any(item["source_type"] == "osm" for item in place["evidence"])
+    facts = {fact["key"]: fact for fact in place["facts"]}
+    official = facts["official:description:ru"]
+    assert official["status"] == "known" and place["description"] == official["value"]
+    assert len(official["value"]) > len(description["value"])
+    assert facts["description:source"]["value"] == "official"
+    assert facts["description:language"]["value"] == "ru"
+    assert facts["description:source"]["evidence_ids"] == official["evidence_ids"]
+    official_evidence = [item for item in place["evidence"] if item["id"] in official["evidence_ids"]]
+    assert len(official_evidence) == 1
+    assert official_evidence[0]["source_type"] == "official"
+    assert official_evidence[0]["source_name"] == "Visit Astana"
+    assert official_evidence[0]["source_url"] == (
+        "https://www.visitastana.kz/ru/about-city/what-to-see/natsionalnyy-muzey-respubliki-kazakhstan/"
+    )
+    assert facts["opening_hours"]["evidence_ids"] == official["evidence_ids"]
+    assert all(facts[key]["status"] == "unknown" for key in ("has_wifi", "toilets", "free_entry"))
 
 
 def test_confirmed_real_wifi_and_toilets_satisfy_required_conditions(offline_live):
@@ -110,7 +126,7 @@ def test_unspecified_real_internet_never_satisfies_required_wifi(offline_live):
 
 @pytest.mark.parametrize(("query", "locale", "categories"), [
     ("кофе", "ru", {"cafe"}), ("мұражай", "kk", {"museum"}),
-    ("library", "en", {"library"}), ("серуен", "kk", {"park", "garden"}),
+    ("library", "en", {"library"}), ("серуен", "kk", {"park", "garden", "theatre", "attraction", "viewpoint", "artwork"}),
 ])
 def test_real_recommendations_and_itinerary_without_keys(offline_live, query, locale, categories):
     payload = request(query, locale)
@@ -119,7 +135,17 @@ def test_real_recommendations_and_itinerary_without_keys(offline_live, query, lo
     result = response.json()
     validate_payload("RecommendationResponse", result)
     assert 1 <= len(result["recommendations"]) <= 3
-    assert all(categories.intersection(place["categories"]) and not place["is_synthetic"] for place in result["places"])
+    by_id = {place["id"]: place for place in result["places"]}
+    core_ids = {item["place_id"] for item in result["recommendations"]}
+    idea_ids = {item["place_id"] for item in result.get("suggestions", [])}
+    assert not core_ids.intersection(idea_ids)
+    assert set(by_id) == core_ids | idea_ids
+    assert all(not place["is_synthetic"] for place in by_id.values())
+    core_places = [by_id[item["place_id"]] for item in result["recommendations"]]
+    assert all(categories.intersection(place["categories"]) for place in core_places)
+    if query == "серуен":
+        assert any({"park", "garden"}.intersection(place["categories"]) for place in core_places)
+        assert any({"theatre", "attraction", "viewpoint", "artwork"}.intersection(place["categories"]) for place in core_places)
     assert result["warnings"]  # Local search and unavailable model remain disclosed.
     for item in result["recommendations"]:
         assert item["route"]["method"] == "approximate"
@@ -150,6 +176,106 @@ def test_unrelated_query_is_not_filled_with_nearest_real_places(offline_live):
     assert response.status_code == 200
     assert response.json()["status"] == "no_match"
     assert response.json()["recommendations"] == []
+
+
+@pytest.mark.parametrize(("query", "locale", "categories"), [
+    ("Сначала хочу попить кофе, а потом сходить в какой-нибудь парк", "ru", [{"cafe"}, {"park", "garden"}]),
+    ("First coffee then a park", "en", [{"cafe"}, {"park", "garden"}]),
+    ("Алдымен кофе, содан кейін саябақ", "kk", [{"cafe"}, {"park", "garden"}]),
+    ("Сначала парк, затем кофе", "ru", [{"park", "garden"}, {"cafe"}]),
+    ("First coffee then a park then a museum", "en", [{"cafe"}, {"park", "garden"}, {"museum"}]),
+])
+def test_real_sequence_covers_each_requested_activity_in_order(offline_live, query, locale, categories):
+    payload = request(query, locale)
+    payload["available_seconds"] = 60  # Timing is a warning, never a lost stage.
+    response = offline_live.post("/v1/recommendations", json=payload)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    validate_payload("RecommendationResponse", result)
+    places = {place["id"]: place for place in result["places"]}
+    ids = [item["place_id"] for item in result["recommendations"]]
+    assert len(ids) == len(categories)
+    for place_id, expected in zip(ids, categories, strict=True):
+        assert expected.intersection(places[place_id]["categories"])
+        assert not places[place_id]["is_synthetic"]
+    itinerary_response = offline_live.post("/v1/itineraries", json={**payload, "place_ids": ids})
+    assert itinerary_response.status_code == 200, itinerary_response.text
+    itinerary = itinerary_response.json()
+    assert [stop["place_id"] for stop in itinerary["stops"]] == ids
+    assert itinerary["route"]["includes_return"]
+    assert itinerary["total_duration_seconds"] > payload["available_seconds"]
+
+
+def test_unmatched_sequence_stage_is_not_replaced_with_another_coffee_shop(offline_live):
+    response = offline_live.post("/v1/recommendations", json=request("First coffee then quantum teleportation", "en"))
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "partial"
+    assert len(result["recommendations"]) == 1
+    assert "cafe" in result["places"][0]["categories"]
+    assert "stage 2" in " ".join(result["warnings"])
+
+
+def test_required_wifi_is_not_relaxed_to_complete_a_park_stage(offline_live):
+    response = offline_live.post("/v1/recommendations", json=request(
+        "First Estet Coffee then Botanical Garden", "en",
+        constraints=[{"key": "has_wifi", "value": True, "strength": "required"}],
+    ))
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "partial"
+    assert [item["place_id"] for item in result["recommendations"]] == ["osm:way/1395465867"]
+    assert "stage 2" in " ".join(result["warnings"])
+
+
+def test_named_stages_keep_the_requested_real_venues(offline_live):
+    response = offline_live.post("/v1/recommendations", json=request(
+        "Сначала Ботанический сад, потом Центральный парк",
+    ))
+    assert response.status_code == 200
+    assert [item["place_id"] for item in response.json()["recommendations"]] == [
+        "osm:way/1196402246", "osm:relation/15957444",
+    ]
+
+
+@pytest.mark.parametrize("query,botanical_first", [
+    ("хочу в ботанический сад сходить и пицу покушать", False),
+    ("Сначала пицца, потом Ботанический сад", False),
+    ("Сначала Ботанический сад, потом поесть пиццу", True),
+])
+def test_real_pizza_and_named_botanical_request_become_one_complete_outing(
+    offline_live, query, botanical_first,
+):
+    payload = request(query)
+    payload.update(available_seconds=60, return_to_origin=False)
+    response = offline_live.post("/v1/recommendations", json=payload)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    validate_payload("RecommendationResponse", result)
+    ids = [item["place_id"] for item in result["recommendations"]]
+    assert len(ids) == 2
+    assert ids[0 if botanical_first else 1] == "osm:way/1196402246"
+    pizza_id = ids[1 if botanical_first else 0]
+    pizza = next(place for place in result["places"] if place["id"] == pizza_id)
+    cuisine = next(fact for fact in pizza["facts"] if fact["key"] == "osm:cuisine")
+    assert cuisine["status"] == "known" and cuisine["evidence_ids"]
+    assert set(str(cuisine["value"]).lower().split(";")) & {"pizza", "italian_pizza"}
+    assert set(cuisine["evidence_ids"]) <= {item["id"] for item in pizza["evidence"]}
+    assert not pizza["is_synthetic"]
+    built = offline_live.post("/v1/itineraries", json={**payload, "place_ids": ids})
+    assert built.status_code == 200, built.text
+    itinerary = built.json()
+    validate_payload("ItineraryResponse", itinerary)
+    assert [stop["place_id"] for stop in itinerary["stops"]] == ids
+    assert itinerary["total_duration_seconds"] > payload["available_seconds"]
+
+
+def test_single_named_botanical_request_is_not_padded_with_other_gardens(offline_live):
+    response = offline_live.post("/v1/recommendations", json=request("Хочу в Ботанический сад"))
+    assert response.status_code == 200, response.text
+    assert [item["place_id"] for item in response.json()["recommendations"]] == [
+        "osm:way/1196402246",
+    ]
 
 
 @pytest.mark.parametrize("path", [None, "missing-snapshot.json"])

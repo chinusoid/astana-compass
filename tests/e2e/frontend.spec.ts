@@ -19,19 +19,38 @@ import type {
 
 const results = (page: Page) => page.locator(".results");
 const cards = (page: Page) => results(page).getByTestId("place-card");
-async function fill(page: Page) {
+async function openFilters(page: Page) {
+  const toggle = page.locator(".filter-toggle");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true")
+    await toggle.click();
+  await expect(page.locator("#walk-filters")).toBeVisible();
+}
+async function manualStart(page: Page, query = "Прогулка без спешки") {
   if (!new URL(page.url()).pathname.startsWith("/walk")) {
     await page.getByRole("navigation").locator('a[href="/walk"]').click();
   }
+  const mobileSearch = page.getByTestId("mobile-sheet-controls").locator("a");
+  if (
+    (await mobileSearch.isVisible()) &&
+    (await page.locator(".app-shell").getAttribute("data-sheet-snap")) ===
+      "collapsed"
+  )
+    await mobileSearch.click();
   const advanced = page.locator("details.advanced-origin");
   if ((await advanced.getAttribute("open")) === null)
     await advanced.locator("summary").click();
-  await page.locator('textarea[name="query"]').fill("Прогулка без спешки");
+  await page.locator('textarea[name="query"]').fill(query);
   await page.locator('input[name="latitude"]').fill("51.090");
   await page.locator('input[name="longitude"]').fill("71.420");
   await advanced.getByRole("button").click();
+}
+async function fill(page: Page) {
+  await manualStart(page);
+  await openFilters(page);
   await page.locator('input[name="start"]').fill("2026-10-19T12:00");
   await page.locator('input[name="minutes"]').fill("90");
+  // Return is now an explicit choice, rather than a hidden default.
+  await page.locator('input[name="return"]').check();
 }
 async function search(page: Page) {
   await page.locator(".find-button").click();
@@ -53,12 +72,379 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/walk");
 });
 
+test("mobile map keeps the route visible and preserves the planner through sheet gestures", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const shell = page.locator(".app-shell");
+  const controls = page.getByTestId("mobile-sheet-controls");
+  const handle = controls.locator("[data-sheet-handle]");
+  await expect(shell).toHaveAttribute("data-sheet-snap", "collapsed");
+  await expect(controls).toBeVisible();
+  await expect(page.locator("#mobile-sheet-content")).toBeHidden();
+  expect(
+    (await page.locator(".app-map-stage").boundingBox())!.height,
+  ).toBeGreaterThan(844 * 0.8);
+  await screenshot(page, "mobile-map-collapsed");
+
+  const handleBox = (await handle.boundingBox())!;
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + 13);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y - 90, {
+    steps: 5,
+  });
+  await page.mouse.up();
+  await expect(shell).toHaveAttribute("data-sheet-snap", "half");
+  await handle.press("End");
+  await expect(shell).toHaveAttribute("data-sheet-snap", "expanded");
+  await handle.press("Home");
+  await expect(shell).toHaveAttribute("data-sheet-snap", "collapsed");
+
+  await fill(page);
+  await expect(shell).toHaveAttribute("data-sheet-snap", "expanded");
+  const response = page.waitForResponse(
+    (entry) =>
+      entry.url().endsWith("/itineraries") &&
+      entry.request().method() === "POST",
+  );
+  await search(page);
+  expect((await response).ok()).toBe(true);
+  await expect(shell).toHaveAttribute("data-sheet-snap", "collapsed");
+  await expect(handle).toBeFocused();
+  await expect(page.locator(".journey-preview .journey-stop")).toHaveCount(3);
+  await expect(page.getByTestId("map-journey-summary")).toBeVisible();
+  await screenshot(page, "mobile-map-route");
+
+  await controls.locator("a").click();
+  await expect(shell).toHaveAttribute("data-sheet-snap", "expanded");
+  await expect(page.locator('textarea[name="query"]')).toHaveValue(
+    "Прогулка без спешки",
+  );
+  await expect(page.locator('input[name="latitude"]')).toHaveValue("51.090");
+  await expect(page.locator('input[name="longitude"]')).toHaveValue("71.420");
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("90");
+  await expect(page.locator('input[name="return"]')).toBeChecked();
+  await expect(page.locator(".selected-stops > li")).toHaveCount(3);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollHeight <= innerHeight,
+    ),
+  ).toBe(true);
+  await screenshot(page, "mobile-planner-expanded");
+});
+
+test("mobile route failure keeps the planner open with the wish and filters", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/v1/itineraries", (route) => route.abort("failed"));
+  await fill(page);
+  await search(page);
+  await expect(page.locator(".journey [role=alert]")).toBeVisible();
+  await expect(page.locator(".app-shell")).toHaveAttribute(
+    "data-sheet-snap",
+    "expanded",
+  );
+  await expect(page.locator('textarea[name="query"]')).toHaveValue(
+    "Прогулка без спешки",
+  );
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("90");
+  await expect(page.locator(".selected-stops > li")).toHaveCount(3);
+});
+
+test("optional route ideas stay separate until explicitly added", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let coreIds: string[] = [];
+  let extraId = "";
+  await page.route("**/api/v1/recommendations", async (route) => {
+    const actual = await route.fetch();
+    const response = (await actual.json()) as RecommendationResponse;
+    expect(response.recommendations.length).toBeGreaterThanOrEqual(3);
+    const core = response.recommendations.slice(0, 2);
+    const extra = response.recommendations[2];
+    coreIds = core.map((item) => item.place_id);
+    extraId = extra.place_id;
+    await route.fulfill({
+      response: actual,
+      json: {
+        ...response,
+        recommendations: core,
+        places: response.places.filter((place) =>
+          [...coreIds, extraId].includes(place.id),
+        ),
+        suggestions: [
+          {
+            place_id: extraId,
+            why: "Дополнительная идея по данным каталога",
+            suggested_activity: "Рассмотрите здание",
+            constraint_evaluations: extra.constraint_evaluations,
+          },
+        ],
+      },
+    });
+  });
+  await fill(page);
+  const initial = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/itineraries") && request.method() === "POST",
+  );
+  await page.locator(".find-button").click();
+  expect((await initial).postDataJSON().place_ids).toEqual(coreIds);
+  await expect(cards(page)).toHaveCount(2);
+  await expect(page.locator(".app-shell")).toHaveAttribute(
+    "data-sheet-snap",
+    "collapsed",
+  );
+  await page.getByRole("button", { name: "Идеи по пути: 1" }).click();
+  const ideas = page.getByTestId("route-ideas");
+  await expect(ideas.getByText("Предложение", { exact: true })).toBeVisible();
+  const added = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/itineraries") &&
+      request.method() === "POST" &&
+      request.postDataJSON().place_ids.length === 3,
+  );
+  await ideas.getByRole("button", { name: /^Добавить в маршрут:/ }).click();
+  expect((await added).postDataJSON().place_ids).toEqual([...coreIds, extraId]);
+  await expect(page.locator(".app-shell")).toHaveAttribute(
+    "data-sheet-snap",
+    "collapsed",
+  );
+  await page.getByRole("button", { name: "Идеи по пути: 1" }).click();
+  await expect(
+    ideas.getByRole("button", { name: /^Уже в маршруте:/ }),
+  ).toBeDisabled();
+  await expect(cards(page)).toHaveCount(2);
+  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(3);
+});
+
+test("walk starts without filters and searches without adding a return or time target", async ({
+  page,
+}) => {
+  const toggle = page.getByRole("button", { name: "Фильтры", exact: true });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).toHaveAttribute("aria-controls", "walk-filters");
+  await expect(page.locator("#walk-filters")).toBeHidden();
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("");
+  await expect(page.locator('input[name="return"]')).not.toBeChecked();
+  await expect(page.locator(".filter-count")).toHaveCount(0);
+  await expect(page.locator(".filter-summary")).toHaveText("Без фильтров");
+  await manualStart(page, "Хочу посмотреть город");
+  const sent = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/recommendations") && request.method() === "POST",
+  );
+  await search(page);
+  const request = (await sent).postDataJSON() as RecommendationRequest;
+  expect(request.available_seconds).toBe(86400);
+  expect(request.return_to_origin).toBe(false);
+  expect(request.constraints).toEqual([]);
+  await expect(page.locator("#walk-filters")).toBeHidden();
+  await expect(page.locator(".journey-preview .journey-stop")).toHaveCount(3);
+});
+
+test("the description supplies 90 minutes and the whole walk appears beside the map automatically", async ({
+  page,
+}) => {
+  await manualStart(page, "Хочу погулять по городу 90 минут");
+  const sent = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/recommendations") && request.method() === "POST",
+  );
+  const itinerary = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/itineraries") && request.method() === "POST",
+  );
+  const itineraryResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/itineraries") &&
+      response.request().method() === "POST",
+  );
+  await page.locator('textarea[name="query"]').press("Enter");
+  const request = (await sent).postDataJSON() as RecommendationRequest;
+  expect(request.available_seconds).toBe(5400);
+  expect(request.return_to_origin).toBe(false);
+  expect((await itinerary).postDataJSON().place_ids).toHaveLength(3);
+  const plan = (await (await itineraryResponse).json()) as ItineraryResponse;
+  expect(plan.route?.method).toBe("approximate");
+  expect(plan.stops).toHaveLength(3);
+  await expect(cards(page)).toHaveCount(3);
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("");
+  await expect(page.locator(".intent-summary")).toContainText("90 мин");
+  await expect(page.locator("#walk-filters")).toBeHidden();
+  await expect(page.locator(".journey-preview .journey-stop")).toHaveCount(3);
+  await expect(page.locator(".journey-preview")).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
+  await expect(page.locator(".journey-preview-heading")).toContainText(
+    "Все остановки на карте · путь пока не подтверждён",
+  );
+  await expect(page.getByTestId("map-journey-summary")).toBeVisible();
+  await expect(page.getByTestId("map-panel")).toBeInViewport();
+});
+
+test("the map-side plan opens a readable side card and removes its middle destination", async ({
+  page,
+}) => {
+  await fill(page);
+  const itinerary = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/itineraries") && request.method() === "POST",
+  );
+  const itineraryResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/itineraries") &&
+      response.request().method() === "POST",
+  );
+  await search(page);
+  const originalIds = (await itinerary).postDataJSON().place_ids as string[];
+  const plan = (await (await itineraryResponse).json()) as ItineraryResponse;
+  expect(plan.route?.method).toBe("approximate");
+  expect(plan.stops).toHaveLength(3);
+  await expect(page.locator(".journey-preview")).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
+  await expect(page.locator(".journey-preview-heading")).toContainText(
+    "Все остановки на карте · путь пока не подтверждён",
+  );
+  const stopNames = await page
+    .locator(".journey-preview .journey-stop strong")
+    .allTextContents();
+  await page.locator(".journey-preview .journey-stop").nth(1).click();
+  const drawer = page.getByRole("dialog");
+  await expect(drawer).toHaveClass(/place-drawer/);
+  await expect(
+    drawer.getByRole("heading", { level: 2, name: stopNames[1], exact: true }),
+  ).toBeVisible();
+  const box = await drawer.boundingBox();
+  const viewport = page.viewportSize()!;
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThan(viewport.width / 2);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width + 1);
+  const recalculated = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/itineraries") &&
+      request.method() === "POST" &&
+      request.postDataJSON().place_ids.length === 2,
+  );
+  const recalculatedResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/itineraries") &&
+      response.request().method() === "POST" &&
+      response.request().postDataJSON().place_ids.length === 2,
+  );
+  await drawer
+    .getByRole("button", { name: "Убрать остановку", exact: true })
+    .click();
+  expect((await recalculated).postDataJSON().place_ids).toEqual([
+    originalIds[0],
+    originalIds[2],
+  ]);
+  const newPlan = (await (
+    await recalculatedResponse
+  ).json()) as ItineraryResponse;
+  expect(newPlan.route?.method).toBe("approximate");
+  expect(newPlan.stops).toHaveLength(2);
+  await page.keyboard.press("Escape");
+  await expect(
+    page.locator(".journey-preview .journey-stop strong"),
+  ).toHaveText([stopNames[0], stopNames[2]]);
+  await expect(
+    page.getByTestId("selected-stops").locator("li strong"),
+  ).toHaveText([stopNames[0], stopNames[2]]);
+  await expect(page.locator(".map-marker.selected")).toHaveCount(2);
+  await expect(page.locator(".journey-preview")).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
+  await expect(page.locator(".journey-preview-heading")).toContainText(
+    "Все остановки на карте · путь пока не подтверждён",
+  );
+});
+
+test("compound time beyond four hours is used automatically without enabling manual filters", async ({
+  page,
+}) => {
+  await manualStart(page, "Хочу погулять по паркам 5 часов 30 минут");
+  const sent = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/recommendations") && request.method() === "POST",
+  );
+  await page.locator(".find-button").click();
+  const request = (await sent).postDataJSON() as RecommendationRequest;
+  expect(request.available_seconds).toBe(19800);
+  expect(request.return_to_origin).toBe(false);
+  await expect(cards(page)).toHaveCount(3);
+  await expect(page.locator(".intent-summary")).toContainText("330 мин");
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("");
+  await expect(page.locator("#walk-filters")).toBeHidden();
+});
+
+test("the visible companion explains actual plan times and can search with less walking", async ({
+  page,
+}, testInfo) => {
+  await fill(page);
+  const response = page.waitForResponse(
+    (r) => r.url().endsWith("/itineraries") && r.request().method() === "POST",
+  );
+  await search(page);
+  const plan = (await (await response).json()) as ItineraryResponse;
+  await page
+    .getByRole("button", {
+      name: "Открыть спутника и разбор прогулки",
+      exact: true,
+    })
+    .click();
+  const brief = page.getByRole("region", {
+    name: "Разбор вашей прогулки",
+    exact: true,
+  });
+  await expect(brief).toBeVisible();
+  await expect(
+    brief.getByText("Ваш ориентир:", { exact: false }),
+  ).toContainText("90 мин");
+  await expect(brief.locator("ol > li")).toHaveCount(plan.stops.length);
+  await brief
+    .getByRole("heading", { name: "Разбор вашей прогулки", exact: true })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath("walk-plan-brief.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+  const original = await page.locator('textarea[name="query"]').inputValue();
+  const next = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/recommendations") && request.method() === "POST",
+  );
+  await brief
+    .getByRole("button", { name: "Найти с меньшей ходьбой", exact: true })
+    .click();
+  const refined = (await next).postDataJSON() as RecommendationRequest;
+  expect(refined.query).toContain(original);
+  expect(refined.query).toContain("короткие переходы");
+  expect(refined.available_seconds).toBe(5400);
+  expect(refined.return_to_origin).toBe(true);
+  await expect(cards(page)).toHaveCount(3);
+  await page
+    .getByRole("button", { name: "Закрыть спутника", exact: true })
+    .click();
+  await expect(brief).toHaveCount(0);
+});
+
 test("real foundation API: manual start, sources, exact seconds, return itinerary, feedback, favorites", async ({
   page,
 }) => {
   await fill(page);
   const sent = page.waitForRequest(
     (r) => r.url().endsWith("/recommendations") && r.method() === "POST",
+  );
+  const itineraryRequest = page.waitForRequest((r) =>
+    r.url().endsWith("/itineraries"),
   );
   await search(page);
   const request = (await sent).postDataJSON() as RecommendationRequest;
@@ -76,6 +462,8 @@ test("real foundation API: manual start, sources, exact seconds, return itinerar
     .first()
     .getByRole("button", { name: "Факты и источники" });
   await detailsButton.click();
+  const records = page.getByRole("dialog").getByTestId("place-source-records");
+  await records.locator(":scope > summary").click();
   await expect(
     page
       .getByRole("dialog")
@@ -86,24 +474,12 @@ test("real foundation API: manual start, sources, exact seconds, return itinerar
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(detailsButton).toBeFocused();
-  await cards(page)
-    .nth(0)
-    .getByRole("button", { name: "В мой план", exact: true })
-    .click();
-  await cards(page)
-    .nth(1)
-    .getByRole("button", { name: "В мой план", exact: true })
-    .click();
   const selectedBefore = await page
     .getByTestId("selected-stops")
     .locator("li strong")
     .allTextContents();
-  const itineraryRequest = page.waitForRequest((r) =>
-    r.url().endsWith("/itineraries"),
-  );
-  await page.getByRole("button", { name: "Рассчитать весь маршрут" }).click();
   const body = (await itineraryRequest).postDataJSON();
-  expect(body.place_ids).toHaveLength(2);
+  expect(body.place_ids).toHaveLength(3);
   expect(body.return_to_origin).toBe(true);
   await expect(page.locator(".journey-total")).toBeVisible();
   expect(
@@ -158,6 +534,7 @@ test("real API: unknown required is excluded without weakening it", async ({
   page,
 }) => {
   await fill(page);
+  await page.locator(".strict-constraints > summary").click();
   await page
     .getByRole("combobox", { name: "Доступно на коляске" })
     .selectOption("required");
@@ -177,6 +554,7 @@ test("presets preserve existing must-haves in the form and HTTP request", async 
   page,
 }) => {
   await fill(page);
+  await page.locator(".strict-constraints > summary").click();
   const indoor = page.getByRole("combobox", {
     name: "В помещении",
     exact: true,
@@ -211,19 +589,35 @@ test("presets preserve existing must-haves in the form and HTTP request", async 
   );
 });
 
+test("ordinary amenities remain preferences and keep the walk description", async ({
+  page,
+}) => {
+  await fill(page);
+  const query = "Хочу прогулку по живописным местам, а по пути кофе";
+  await page.locator('textarea[name="query"]').fill(query);
+  const strict = page.locator(".strict-constraints");
+  await expect(strict).not.toHaveAttribute("open");
+  await expect(strict.getByRole("combobox", { name: "Wi-Fi" })).toBeHidden();
+  await page.getByRole("checkbox", { name: "Wi-Fi", exact: true }).check();
+  const sent = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/recommendations") && request.method() === "POST",
+  );
+  await page.locator(".find-button").click();
+  const request = (await sent).postDataJSON() as RecommendationRequest;
+  expect(request.query).toBe(query);
+  expect(request.constraints).toEqual([
+    { key: "has_wifi", value: true, strength: "preferred" },
+  ]);
+  await page.getByRole("checkbox", { name: "Wi-Fi", exact: true }).uncheck();
+  await expect(page.locator('textarea[name="query"]')).toHaveValue(query);
+});
+
 test("real API: no-match keeps every stop; explicit reorder clears the previous route", async ({
   page,
 }) => {
   await fill(page);
   await search(page);
-  await cards(page)
-    .nth(0)
-    .getByRole("button", { name: "В мой план", exact: true })
-    .click();
-  await cards(page)
-    .nth(1)
-    .getByRole("button", { name: "В мой план", exact: true })
-    .click();
   const original = await page
     .getByTestId("selected-stops")
     .locator("li strong")
@@ -238,15 +632,18 @@ test("real API: no-match keeps every stop; explicit reorder clears the previous 
       .getByTestId("selected-stops")
       .locator("li strong")
       .allTextContents(),
-  ).toEqual([...original].reverse());
-  await page.locator('input[name="minutes"]').fill("1");
+  ).toEqual([original[1], original[0], original[2]]);
+  await page.locator(".strict-constraints > summary").click();
+  await page
+    .getByRole("combobox", { name: "Доступно на коляске" })
+    .selectOption("required");
   await page.getByRole("button", { name: "Рассчитать весь маршрут" }).click();
   await expect(
     page
       .locator(".itinerary-result")
       .getByRole("heading", { name: "Подтверждённого варианта пока нет" }),
   ).toBeVisible();
-  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(2);
+  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(3);
   await expect(page.locator(".journey-total")).toHaveCount(0);
   await expect(page.getByTestId("map-panel")).toHaveAttribute(
     "data-route-geometry",
@@ -258,16 +655,6 @@ test("synthetic response fault: server must not reorder the selected stops", asy
   page,
 }) => {
   await fill(page);
-  await search(page);
-  for (const index of [0, 1])
-    await cards(page)
-      .nth(index)
-      .getByRole("button", { name: "В мой план", exact: true })
-      .click();
-  const selected = await page
-    .getByTestId("selected-stops")
-    .locator("li strong")
-    .allTextContents();
   await page.route("**/api/v1/itineraries", async (route) => {
     const actual = await route.fetch();
     const payload = (await actual.json()) as ItineraryResponse;
@@ -277,7 +664,11 @@ test("synthetic response fault: server must not reorder the selected stops", asy
     });
     await route.fulfill({ response: actual, json: payload });
   });
-  await page.getByRole("button", { name: "Рассчитать весь маршрут" }).click();
+  await search(page);
+  const selected = await page
+    .getByTestId("selected-stops")
+    .locator("li strong")
+    .allTextContents();
   await expect(page.locator(".journey").getByRole("alert")).toContainText(
     "Не удалось проверить ответ",
   );
@@ -356,6 +747,140 @@ for (const code of ["provider_unavailable", "rate_limited"] as const) {
   });
 }
 
+test("repeated temporary location errors keep loading until a later retry finds the start", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    let attempts = 0;
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: {
+        getCurrentPosition: (
+          success: (position: {
+            coords: { latitude: number; longitude: number };
+          }) => void,
+          failure: (error: { code: number }) => void,
+        ) => {
+          if (attempts++ < 2) failure({ code: 2 });
+          else
+            success({ coords: { latitude: 51.123456, longitude: 71.456789 } });
+        },
+      },
+    });
+  });
+  await page
+    .getByRole("button", { name: "Моё местоположение", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Определяем точку…", exact: true }),
+  ).toBeDisabled();
+  await expect(page.locator(".start-card .warning-text")).toHaveCount(0);
+  await expect(page.locator('input[name="latitude"]')).toHaveValue("51.123456");
+  await expect(page.locator('input[name="longitude"]')).toHaveValue(
+    "71.456789",
+  );
+  await expect(page.locator(".start-card .warning-text")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Моё местоположение", exact: true }),
+  ).toBeEnabled();
+});
+
+test("location recovery expires with a retryable timeout and a new fix clears the error", async ({
+  page,
+}) => {
+  const now = new Date("2026-10-20T12:00:00Z");
+  await page.clock.install({ time: now });
+  await page.clock.pauseAt(new Date(now.getTime() + 1_000));
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: {
+        getCurrentPosition: (
+          _success: unknown,
+          failure: (error: { code: number }) => void,
+        ) => failure({ code: 3 }),
+      },
+    });
+  });
+  await page
+    .getByRole("button", { name: t("ru", "locate"), exact: true })
+    .click();
+  await page.clock.fastForward(19_999);
+  await expect(
+    page.getByRole("button", { name: t("ru", "locating"), exact: true }),
+  ).toBeDisabled();
+  await expect(page.locator(".start-card .warning-text")).toHaveCount(0);
+  await page.clock.fastForward(1);
+  await expect(page.getByText(t("ru", "geoTimeout"))).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: {
+        getCurrentPosition: (
+          success: (position: {
+            coords: { latitude: number; longitude: number };
+          }) => void,
+        ) => success({ coords: { latitude: 51.123456, longitude: 71.456789 } }),
+      },
+    });
+  });
+  await page
+    .getByRole("button", { name: t("ru", "locate"), exact: true })
+    .click();
+  await expect(page.locator('input[name="latitude"]')).toHaveValue("51.123456");
+  await expect(page.locator(".start-card .warning-text")).toHaveCount(0);
+});
+
+test("a map camera fix clears an earlier planner denial while preserving the chosen start", async ({
+  page,
+}) => {
+  await manualStart(page);
+  await expect(page.locator(".maplibregl-ctrl-geolocate")).toBeEnabled();
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: {
+        getCurrentPosition: (
+          _success: unknown,
+          failure: (error: { code: number }) => void,
+        ) => failure({ code: 1 }),
+        watchPosition: (success: PositionCallback) => {
+          (
+            window as unknown as { finishMapLocation: () => void }
+          ).finishMapLocation = () =>
+            success({
+              coords: {
+                latitude: 51.123456,
+                longitude: 71.456789,
+                accuracy: 20,
+                altitude: null,
+                altitudeAccuracy: null,
+                heading: null,
+                speed: null,
+              },
+              timestamp: Date.now(),
+            } as GeolocationPosition);
+          return 7;
+        },
+        clearWatch: () => {},
+      },
+    });
+  });
+  await page
+    .getByRole("button", { name: t("ru", "locate"), exact: true })
+    .click();
+  await expect(page.getByText(t("ru", "geoPermissionDenied"))).toBeVisible();
+  await page.locator(".maplibregl-ctrl-geolocate").click();
+  await page.evaluate(() =>
+    (
+      window as unknown as { finishMapLocation: () => void }
+    ).finishMapLocation(),
+  );
+  await expect(page.locator(".start-card .warning-text")).toHaveCount(0);
+  await expect(page.locator('input[name="latitude"]')).toHaveValue("51.090");
+  await expect(page.locator('input[name="longitude"]')).toHaveValue("71.420");
+});
+
 test("geolocation denial preserves manual entry; late callbacks cannot overwrite a manual edit", async ({
   page,
 }) => {
@@ -370,8 +895,10 @@ test("geolocation denial preserves manual entry; late callbacks cannot overwrite
       },
     });
   });
-  await page.getByRole("button", { name: "Моё местоположение" }).click();
-  await expect(page.getByText(/Местоположение недоступно/)).toBeVisible();
+  await page
+    .getByRole("button", { name: "Моё местоположение", exact: true })
+    .click();
+  await expect(page.getByText(t("ru", "geoPermissionDenied"))).toBeVisible();
   await fill(page);
   await search(page);
   await page.evaluate(() => {
@@ -389,7 +916,9 @@ test("geolocation denial preserves manual entry; late callbacks cannot overwrite
       },
     });
   });
-  await page.getByRole("button", { name: "Моё местоположение" }).click();
+  await page
+    .getByRole("button", { name: "Моё местоположение", exact: true })
+    .click();
   await page.locator('input[name="latitude"]').fill("51.095");
   await page.evaluate(() =>
     (window as unknown as { finishLocation: () => void }).finishLocation(),
@@ -401,11 +930,6 @@ test("synthetic routed response draws a line, and editing removes it", async ({
   page,
 }) => {
   await fill(page);
-  await search(page);
-  await cards(page)
-    .first()
-    .getByRole("button", { name: "В мой план", exact: true })
-    .click();
   await page.route("**/api/v1/itineraries", async (route) => {
     const actual = await route.fetch();
     const payload = (await actual.json()) as ItineraryResponse;
@@ -421,7 +945,7 @@ test("synthetic routed response draws a line, and editing removes it", async ({
     payload.route!.provider = "synthetic:e2e-route-renderer";
     await route.fulfill({ response: actual, json: payload });
   });
-  await page.getByRole("button", { name: "Рассчитать весь маршрут" }).click();
+  await search(page);
   await expect(page.getByTestId("map-panel")).toHaveAttribute(
     "data-route-geometry",
     "routed",
@@ -438,7 +962,7 @@ test("synthetic routed response draws a line, and editing removes it", async ({
     "data-route-geometry",
     "none",
   );
-  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(3);
 });
 
 test("editing during a slow request cancels obsolete results", async ({
@@ -529,6 +1053,30 @@ for (const [locale, name] of [
       await page.locator(".language-select select").selectOption(locale);
       await fill(page);
       await search(page);
+      if (width <= 760) {
+        await expect(page.locator(".app-shell")).toHaveAttribute(
+          "data-sheet-snap",
+          "collapsed",
+        );
+        await page.getByTestId("mobile-sheet-controls").locator("a").click();
+        await expect(page.locator('textarea[name="query"]')).toBeVisible();
+        const destinations = page.locator(".app-rail .rail-link");
+        await expect(destinations).toHaveCount(6);
+        for (const destination of await destinations.all()) {
+          await expect(destination).toBeVisible();
+          const size = await destination.evaluate((element) => {
+            const text = element.querySelector("span:not(.count)")!;
+            return {
+              fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
+              labelWidth: text.getBoundingClientRect().width,
+              cellWidth: element.getBoundingClientRect().width,
+            };
+          });
+          expect(size.fontSize).toBeGreaterThanOrEqual(10);
+          expect(size.labelWidth).toBeLessThanOrEqual(size.cellWidth);
+        }
+        await expect(page.locator(".rail-language select")).toBeVisible();
+      }
       await expect(page.locator("html")).toHaveAttribute("lang", locale);
       expect(
         await page.evaluate(
@@ -541,7 +1089,10 @@ for (const [locale, name] of [
       expect(
         audit.violations.map((v) => ({
           id: v.id,
-          nodes: v.nodes.map((n) => n.target),
+          nodes: v.nodes.map((n) => ({
+            target: n.target,
+            failureSummary: n.failureSummary,
+          })),
         })),
       ).toEqual([]);
       await screenshot(page, `${locale}-${width}`);
@@ -569,7 +1120,9 @@ test("keyboard, separate data page, empty catalog and map point selection", asyn
     .getByRole("button", { name: "Найти", exact: true })
     .click();
   await expect(
-    page.locator(".catalog").getByText(t("ru", "catalogNoMatch"), { exact: true }),
+    page
+      .locator(".catalog")
+      .getByText(t("ru", "catalogNoMatch"), { exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: t("ru", "catalogShowAll") }).click();
   await expect(page.locator("#catalog-query")).toHaveValue("");
@@ -590,10 +1143,6 @@ test("navigation preserves the private plan in memory and offers direct URLs", a
 }) => {
   await fill(page);
   await search(page);
-  await cards(page)
-    .first()
-    .getByRole("button", { name: "В мой план", exact: true })
-    .click();
   const coordinates = await page.locator('input[name="latitude"]').inputValue();
   await page.getByRole("link", { name: "Избранное", exact: true }).click();
   await expect(page).toHaveURL(/\/saved$/);
@@ -602,7 +1151,7 @@ test("navigation preserves the private plan in memory and offers direct URLs", a
     "Прогулка без спешки",
   );
   await expect(page.locator('input[name="latitude"]')).toHaveValue(coordinates);
-  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("selected-stops").locator("li")).toHaveCount(3);
   expect(page.url()).not.toContain("51.");
   for (const route of ["/saved", "/about", "/party", "/events"]) {
     const response = await page.goto(route);
@@ -612,6 +1161,10 @@ test("navigation preserves the private plan in memory and offers direct URLs", a
 });
 
 async function interpret(page: Page): Promise<IntentResponse> {
+  await openFilters(page);
+  const advanced = page.locator("details.advanced-intent");
+  if ((await advanced.getAttribute("open")) === null)
+    await advanced.locator("summary").click();
   const received = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/v1/intent") &&
@@ -644,6 +1197,7 @@ test("real intent API: review before apply, keep must-haves and never geocode a 
   const query =
     "У меня 30 минут рядом с Байтереком. Хочу в помещении, нужны розетки.";
   await page.locator('textarea[name="query"]').fill(query);
+  await page.locator(".strict-constraints > summary").click();
   const indoor = page.getByRole("combobox", {
     name: "В помещении",
     exact: true,

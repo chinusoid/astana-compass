@@ -8,13 +8,17 @@ import {
   Footprints,
   Plus,
 } from "lucide-react";
-import type { Place, Recommendation } from "@astana/api-client";
+import type { JourneyPlan, Place, Recommendation } from "@astana/api-client";
 import { duration } from "@/lib/format";
 import { t, label, type Locale } from "@/lib/i18n";
 import { Sources, RouteNotes, Warnings } from "./details";
 import OsmAttribution from "./osm-attribution";
 import PlaceOverview from "./place-overview";
+import PlacePhoto from "./place-photo";
+import PlaceVisitGuide from "./place-visit-guide";
+import TimeBudgetNote from "./time-budget-note";
 import { factLabel, placeText } from "@/lib/place-presentation";
+import { recommendationRationale } from "@/lib/recommendation-rationale";
 
 const cardCopy = {
   ru: {
@@ -52,6 +56,9 @@ const cardCopy = {
 type Props = {
   place: Place;
   recommendation?: Recommendation;
+  budgetSeconds?: number;
+  requestQuery?: string;
+  journeyPlan?: JourneyPlan;
   locale: Locale;
   active: boolean;
   selected: boolean;
@@ -65,6 +72,9 @@ type Props = {
 export default function PlaceCard({
   place,
   recommendation: item,
+  budgetSeconds,
+  requestQuery,
+  journeyPlan,
   locale,
   active,
   selected,
@@ -100,6 +110,7 @@ export default function PlaceCard({
       id={`place-${item ? "result" : "catalog"}-${place.id}`}
       data-testid="place-card"
     >
+      <PlacePhoto place={place} locale={locale} />
       <div className="card-top">
         <span className="place-number">
           {item ? String(item.rank).padStart(2, "0") : <Footprints size={21} />}
@@ -127,6 +138,7 @@ export default function PlaceCard({
           <Bookmark size={20} fill={saved ? "currentColor" : "none"} />
         </button>
       </div>
+      <PlaceVisitGuide place={place} locale={locale} compact />
       {item ? (
         <>
           <div className="timings">
@@ -144,6 +156,11 @@ export default function PlaceCard({
               <b>{duration(item.visit_duration_seconds, locale)}</b>
             </div>
           </div>
+          <TimeBudgetNote
+            totalSeconds={item.total_duration_seconds}
+            budgetSeconds={budgetSeconds}
+            locale={locale}
+          />
           <p className="walk-distance">
             <Footprints size={15} aria-hidden="true" />
             {copy.distance}: {distance}{" "}
@@ -164,7 +181,7 @@ export default function PlaceCard({
           </span>
           <div className="why-summary">
             <strong>{t(locale, "why")}</strong>
-            <p>{item.why}</p>
+            <p>{recommendationRationale(place, item, requestQuery, locale, journeyPlan)}</p>
           </div>
           {item.constraint_evaluations.some(
             (e) => e.outcome !== "satisfied",
@@ -202,7 +219,7 @@ export default function PlaceCard({
           </div>
         </>
       ) : null}
-      <PlaceOverview place={place} locale={locale} />
+      <PlaceOverview place={place} locale={locale} showSummary={false} />
       {!place.is_synthetic &&
         place.evidence.some(
           (e) => e.source_type === "osm" && !e.is_synthetic,

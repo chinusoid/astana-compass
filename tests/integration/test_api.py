@@ -102,6 +102,27 @@ def test_provider_error_does_not_leak_secrets():
         validate_payload("ErrorResponse", response.json())
 
 
+@pytest.mark.parametrize("failure,reason", [
+    (RuntimeError, "dependency_error"), (TimeoutError, "deadline"),
+])
+def test_support_number_correlates_safe_unavailability_logs(caplog, failure, reason):
+    secret = "private-user-query exact-location secret-api-key"
+
+    class BrokenRepository:
+        async def list_places(self, **kwargs):
+            raise failure(secret)
+
+    with caplog.at_level("WARNING", logger="astana_api.app"):
+        with TestClient(create_app(Settings(), Services(BrokenRepository(), None))) as client:
+            response = client.get("/v1/places", params={"query": secret})
+    assert response.status_code == 503
+    request_id = response.json()["request_id"]
+    assert f"request_id={request_id} route=/v1/places reason={reason} elapsed_ms=" in caplog.text
+    assert secret not in caplog.text
+    assert failure.__name__ not in caplog.text
+    assert secret not in response.text
+
+
 def test_pagination_search_bbox_and_lookup(client):
     first = client.get("/v1/places?limit=1").json()
     second = client.get("/v1/places", params={"limit": 1, "cursor": first["next_cursor"]}).json()

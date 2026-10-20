@@ -5,8 +5,10 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import asyncio
 import json
+import logging
 import math
 import os
+import time
 import uuid
 
 from fastapi import FastAPI, Request, Query
@@ -17,12 +19,20 @@ from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 from astana_contracts import ContractValidationError, load_schema, validate_payload
 from astana_recommender import RecommenderError
-from .composition import build_services
+from .composition import StartupProgress, build_services
+from .contract_diagnostics import diagnostic
 from .demo_examples import request_examples
 from .sandbox import sandbox_router
 from .settings import Settings
 from .social import SocialError, SocialStore, social_error_handler, social_router
 from .traffic import TrafficService
+from .tomtom_places import create_map_service
+from .twogis_places import TwoGisPlacesService
+from .place_photos import WikimediaPlacePhotos
+from astana_city_context.common import ProviderError
+
+
+logger = logging.getLogger(__name__)
 
 
 MESSAGES = {
@@ -59,6 +69,7 @@ class BoundaryMiddleware:
             return await self.app(scope, receive, send)
         request_id = str(uuid.uuid4())
         scope.setdefault("state", {})["request_id"] = request_id
+        scope["state"]["started_at"] = time.monotonic()
         chunks, size = [], 0
         # Read with a deadline: Content-Length alone does not bound chunked bodies.
         try:
@@ -174,18 +185,33 @@ def create_app(settings=None, services=None):
     @asynccontextmanager
     async def lifespan(app):
         async with AsyncExitStack() as stack:
+            progress = StartupProgress()
+            progress.enter("traffic")
             app.state.traffic = TrafficService(os.getenv("TOMTOM_API_KEY", ""))
             stack.push_async_callback(app.state.traffic.aclose)
+            progress.enter("map")
+            app.state.map_features = create_map_service(enabled=settings.mode == "live" and os.getenv("ASTANA_MAP_LOOKUP_ENABLED", "false").lower() == "true")
+            stack.push_async_callback(app.state.map_features.aclose)
+            app.state.place_directory = TwoGisPlacesService(enabled=settings.mode == "live")
+            stack.push_async_callback(app.state.place_directory.aclose)
+            app.state.place_photos = WikimediaPlacePhotos()
+            stack.push_async_callback(app.state.place_photos.aclose)
             app.state.services = services
             if app.state.services is None:
                 try:
                     async with asyncio.timeout(settings.request_timeout_seconds):
-                        app.state.services = await build_services(settings, stack)
-                except Exception:
+                        app.state.services = await build_services(settings, stack, progress=progress)
+                except Exception as error:
                     # Keep liveness available, readiness fails closed; never emit provider text.
+                    # Do not pass the exception object, traceback, settings or raw env to logging.
+                    logger.error(
+                        "Service initialization failed: stage=%s exception=%s",
+                        progress.stage, type(error).__name__, exc_info=False, stack_info=False,
+                    )
                     app.state.services = None
             app.state.gate = asyncio.Semaphore(settings.max_concurrent_requests)
             app.state.feedback = deque(maxlen=settings.feedback_capacity)
+            progress.enter("ready" if app.state.services is not None else "unavailable")
             yield
 
     app = FastAPI(title="Astana Compass API", version="0.1.0", lifespan=lifespan,
@@ -198,6 +224,16 @@ def create_app(settings=None, services=None):
 
     @app.exception_handler(APIError)
     async def api_error(request, exc):
+        if exc.code == "provider_unavailable":
+            # The support number must identify the failure without logging the
+            # wish, exact location, credentials or exception/provider contents.
+            logger.warning(
+                "API unavailable: request_id=%s route=%s reason=%s elapsed_ms=%d",
+                request.state.request_id,
+                getattr(request.scope.get("route"), "path", "unknown"),
+                getattr(request.state, "failure_reason", "unavailable"),
+                max(0, round((time.monotonic() - request.state.started_at) * 1000)),
+            )
         return error_response(request.state.request_id, exc.code)
 
     @app.exception_handler(RequestValidationError)
@@ -221,18 +257,31 @@ def create_app(settings=None, services=None):
 
     async def call(request, operation):
         if app.state.services is None:
+            request.state.failure_reason = "not_ready"
             raise APIError("provider_unavailable")
         await acquire_gate()
         try:
             async with asyncio.timeout(settings.request_timeout_seconds):
                 return await operation(app.state.services)
         except RecommenderError as exc:
+            request.state.failure_reason = "recommender_error"
             raise APIError(exc.code if exc.code in STATUS else "provider_unavailable") from None
         except APIError:
             raise
-        except (TimeoutError, ContractValidationError):
+        except TimeoutError:
+            request.state.failure_reason = "deadline"
+            raise APIError("provider_unavailable") from None
+        except ContractValidationError as error:
+            details = diagnostic(error)
+            logger.warning(
+                "API contract rejected: request_id=%s definition=%s code=%s stage=%s path=%s rule=%s",
+                request.state.request_id, details["definition"], details["code"],
+                details["stage"], details["path"], details["rule"],
+            )
+            request.state.failure_reason = "invalid_dependency_response"
             raise APIError("provider_unavailable") from None
         except Exception:
+            request.state.failure_reason = "dependency_error"
             raise APIError("provider_unavailable") from None
         finally:
             app.state.gate.release()
@@ -331,6 +380,21 @@ def create_app(settings=None, services=None):
         result["request_id"] = request.state.request_id
         return checked("ItineraryResponse", result, settings)
 
+    @app.post("/v1/map-features")
+    async def map_features(request: Request):
+        payload = await read_payload(request, "MapFeatureRequest")
+        await acquire_gate()
+        try:
+            async with asyncio.timeout(min(15, settings.request_timeout_seconds)):
+                result = await app.state.map_features.inspect(payload["location"], payload["locale"])
+        except TimeoutError:
+            raise APIError("provider_unavailable") from None
+        except ProviderError as error:
+            raise APIError(error.code if error.code in STATUS else "provider_unavailable") from None
+        finally:
+            app.state.gate.release()
+        return checked("MapFeatureResponse", result, settings)
+
     @app.post("/v1/feedback", status_code=201)
     async def feedback(request: Request):
         payload = await read_payload(request, "FeedbackRequest")
@@ -338,6 +402,46 @@ def create_app(settings=None, services=None):
         # Bounded, volatile queue. No automatic training collection or persistent identity.
         app.state.feedback.append({"feedback_id": feedback_id, "request_id": payload["request_id"], "rating": payload["rating"], "comment": payload["comment"], "created_at": utcnow()})
         return {"feedback_id": feedback_id, "accepted": True}
+
+    @app.post("/v1/place-directory")
+    async def place_directory(request: Request):
+        payload = await read_payload(request, "PlaceDirectoryRequest")
+        # Only the canonical public catalog provides the search name/location.
+        # The browser cannot submit credentials, arbitrary queries or coordinates.
+        place = await call(request, lambda s: s.repository.get(payload["place_id"]))
+        if place is None:
+            raise APIError("not_found")
+        place = checked("Place", place, settings)
+        await acquire_gate()
+        try:
+            async with asyncio.timeout(min(8, settings.request_timeout_seconds)):
+                result = await app.state.place_directory.search(place, payload["locale"])
+        except TimeoutError:
+            raise APIError("provider_unavailable") from None
+        except ProviderError as error:
+            raise APIError(error.code if error.code in STATUS else "provider_unavailable") from None
+        finally:
+            app.state.gate.release()
+        # Directory data is returned for this view only. It never changes Place
+        # facts, recommendations, stored groups, or model grounding.
+        return checked("MapFeatureResponse", result, settings)
+
+    @app.post("/v1/place-photo")
+    async def place_photo(request: Request):
+        payload = await read_payload(request, "PlacePhotoRequest")
+        place = await call(request, lambda s: s.repository.get(payload["place_id"]))
+        if place is None:
+            raise APIError("not_found")
+        place = checked("Place", place, settings)
+        await acquire_gate()
+        try:
+            async with asyncio.timeout(min(8, settings.request_timeout_seconds)):
+                result = await app.state.place_photos.photo(place, payload["locale"])
+        except (TimeoutError, ProviderError):
+            result = {"status": "unavailable", "photo": None}
+        finally:
+            app.state.gate.release()
+        return checked("PlacePhotoResponse", result, settings)
 
     @app.get("/v1/data-status")
     async def data_status(request: Request):
@@ -359,6 +463,9 @@ def create_app(settings=None, services=None):
             "/v1/recommendations": ("post", "RecommendationRequest", "RecommendationResponse", "200"),
             "/v1/intent": ("post", "IntentRequest", "IntentResponse", "200"),
             "/v1/traffic": ("post", "TrafficRequest", "TrafficResponse", "200"),
+            "/v1/map-features": ("post", "MapFeatureRequest", "MapFeatureResponse", "200"),
+            "/v1/place-directory": ("post", "PlaceDirectoryRequest", "MapFeatureResponse", "200"),
+            "/v1/place-photo": ("post", "PlacePhotoRequest", "PlacePhotoResponse", "200"),
             "/v1/social/session": ("post", "SocialSessionRequest", "SocialSessionResponse", "200"),
             "/v1/social/state": ("get", None, "SocialState", "200"),
             "/v1/social/events": ("get", None, "CommunityEvents", "200"),
@@ -386,7 +493,9 @@ def create_app(settings=None, services=None):
                 operation["requestBody"] = {"required": True, "content": {"application/json": {"schema": {"$ref": f"#/components/schemas/{input_type}"}, "examples": examples.get(input_type, {})}}}
         schema["paths"]["/v1/health/ready"]["get"]["responses"]["503"] = {"description": "Unavailable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthResponse"}}}}
         schema["paths"]["/v1/places/{place_id}"]["get"]["responses"]["404"] = {"description": "Not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
+        schema["paths"]["/v1/place-directory"]["post"]["responses"]["404"] = {"description": "Catalog place not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
         schema["components"].setdefault("securitySchemes", {})["GuestBearer"] = {"type": "http", "scheme": "bearer", "description": "Temporary guest session token. The web proxy keeps it in an HttpOnly cookie."}
+        schema["paths"]["/v1/place-photo"]["post"]["responses"]["404"] = {"description": "Catalog place not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
         app.openapi_schema = schema
         return schema
 

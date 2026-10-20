@@ -73,6 +73,7 @@ export default function IntentReview({
   }
   return (
     <section className="intent-review" aria-label={text("review")}>
+      <p className="field-hint">{text("analysisOnly")}</p>
       <button
         type="button"
         className="secondary"

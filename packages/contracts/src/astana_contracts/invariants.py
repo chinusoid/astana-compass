@@ -100,13 +100,27 @@ def validate_invariants(definition: str, instance: dict[str, Any]) -> None:
     validate_invariants("ItineraryRequest" if definition == "ItineraryResponse" else "RecommendationRequest", request)
     key = "recommendations" if definition == "RecommendationResponse" else "stops"
     items = instance[key]
-    if len(items) > request["limit"]:
+    suggestions = instance.get("suggestions", []) if key == "recommendations" else []
+    plan = instance.get("journey_plan") if definition == "RecommendationResponse" else None
+    if plan is not None:
+        for stage in plan["stages"]:
+            if stage["source_quote"] not in request["query"]:
+                raise ValueError("journey stage must cite the original query")
+            if stage["named_place"] is not None and stage["named_place"] not in stage["source_quote"]:
+                raise ValueError("named journey destination must be quoted by the user")
+    concrete_stages = sum(stage["kind"] != "unresolved" for stage in plan["stages"]) if plan else 0
+    limit = min(6, concrete_stages) if concrete_stages else request["limit"]
+    if len(items) > limit:
         raise ValueError("response exceeds requested limit")
     if request["transport"] != "walking":
         raise ValueError("initial release must return unsupported_transport ErrorResponse")
-    unique([item["place_id"] for item in items], "recommended place")
-    if {item["place_id"] for item in items} != places.keys():
+    if suggestions and (not items or len(items) + len(suggestions) > 6):
+        raise ValueError("optional ideas need a core result and available stop slots")
+    unique([item["place_id"] for item in [*items, *suggestions]], "recommended or suggested place")
+    if {item["place_id"] for item in [*items, *suggestions]} != places.keys():
         raise ValueError("recommended place references and returned places must resolve exactly")
+    for suggestion in suggestions:
+        check_constraints(suggestion["constraint_evaluations"], request, places[suggestion["place_id"]])
     rank_key = "rank" if key == "recommendations" else "order"
     if [item[rank_key] for item in items] != list(range(1, len(items) + 1)):
         raise ValueError("recommendations/stops must have contiguous ordered ranks")
@@ -116,8 +130,6 @@ def validate_invariants(definition: str, instance: dict[str, Any]) -> None:
             check_route(item["route"], request)
             if item["total_duration_seconds"] != item["visit_duration_seconds"] + item["route"]["duration_seconds"]:
                 raise ValueError("recommendation total must include visit and all travel")
-            if item["total_duration_seconds"] > request["available_seconds"]:
-                raise ValueError("recommendation exceeds time budget")
     if key == "stops" and items:
         if [item["place_id"] for item in items] != request["place_ids"]:
             raise ValueError("itinerary must preserve all selected place IDs in requested order")
@@ -125,6 +137,4 @@ def validate_invariants(definition: str, instance: dict[str, Any]) -> None:
         expected = instance["route"]["duration_seconds"] + sum(s["visit_duration_seconds"] for s in items)
         if instance["total_duration_seconds"] != expected:
             raise ValueError("itinerary total must include every visit and complete route")
-        if expected > request["available_seconds"]:
-            raise ValueError("itinerary exceeds time budget")
 

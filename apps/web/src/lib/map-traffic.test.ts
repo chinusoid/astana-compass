@@ -8,6 +8,7 @@ import {
   roadSamplePoints,
   startTrafficLayer,
   trafficParticles,
+  trafficModels,
   TRAFFIC_TTL_MS,
 } from "./map-traffic";
 
@@ -143,7 +144,7 @@ it.each([
   if (kind === "unavailable-with-segment") data.status = "unavailable";
   expect(() => checkedTraffic(data, now)).toThrow();
 });
-it("maps low speeds to red, denser and slower illustrative dots; closure has no moving cars", () => {
+it("maps low speeds to red, denser and slower illustrative cars; closure has no moving cars", () => {
   const slow = { ...segment(), current_speed_kmh: 6 };
   const fast = { ...segment(), current_speed_kmh: 60 };
   expect(flowStyle(slow).color).toBe("#d74432");
@@ -164,6 +165,28 @@ it("maps low speeds to red, denser and slower illustrative dots; closure has no 
   expect(
     trafficParticles([{ ...slow, road_closed: true }], 10).features,
   ).toHaveLength(0);
+  const models = trafficModels([slow], 2, 17);
+  expect(
+    new Set(models.features.map((part) => part.properties.actor)).size,
+  ).toBe(flowStyle(slow).count);
+  expect(
+    models.features.every(
+      (part) =>
+        part.geometry.type === "Polygon" && part.properties.illustrative,
+    ),
+  ).toBe(true);
+  expect(
+    trafficModels([{ ...slow, road_closed: true }], 10, 17).features,
+  ).toHaveLength(0);
+  expect(
+    new Set(
+      trafficModels(
+        Array.from({ length: 6 }, () => slow),
+        2,
+        17,
+      ).features.map((part) => part.properties.actor),
+    ).size,
+  ).toBeLessThanOrEqual(24);
 });
 it("removes expired flow layers and stops listeners without background refresh", () => {
   vi.useFakeTimers();
@@ -180,6 +203,9 @@ it("removes expired flow layers and stops listeners without background refresh",
   vi.stubGlobal("requestAnimationFrame", frames);
   vi.stubGlobal("cancelAnimationFrame", vi.fn());
   const map = {
+    getZoom: () => 17,
+    on: vi.fn(),
+    off: vi.fn(),
     addSource: (id: string, value: unknown) => sources.set(id, value),
     addLayer: ({ id }: { id: string }) => layers.add(id),
     getLayer: (id: string) => layers.has(id),
@@ -200,4 +226,80 @@ it("removes expired flow layers and stops listeners without background refresh",
   stop();
   vi.advanceTimersByTime(TRAFFIC_TTL_MS);
   expect(stale).toHaveBeenCalledOnce();
+});
+
+it("pauses the traffic models when hidden, reduced or too far out, and resumes without a time jump", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(now);
+  let zoom = 17;
+  let reduce = false;
+  let hidden = false;
+  const mediaListeners = new Set<() => void>();
+  vi.stubGlobal("matchMedia", () => ({
+    get matches() {
+      return reduce;
+    },
+    addEventListener: (_: string, fn: () => void) => mediaListeners.add(fn),
+    removeEventListener: (_: string, fn: () => void) =>
+      mediaListeners.delete(fn),
+  }));
+  vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => {
+    frames.set(++frameId, fn);
+    return frameId;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+  const sources = new Map<string, { setData: ReturnType<typeof vi.fn> }>();
+  const layers = new Set<string>();
+  const listeners = new Map<string, () => void>();
+  const map = {
+    getZoom: () => zoom,
+    on: (event: string, fn: () => void) => listeners.set(event, fn),
+    off: (event: string) => listeners.delete(event),
+    addSource: (id: string) => sources.set(id, { setData: vi.fn() }),
+    addLayer: ({ id }: { id: string }) => layers.add(id),
+    getLayer: (id: string) => layers.has(id),
+    getSource: (id: string) => sources.get(id),
+    removeLayer: (id: string) => layers.delete(id),
+    removeSource: (id: string) => sources.delete(id),
+  };
+  const stop = startTrafficLayer(
+    map as unknown as LibreMap,
+    response(),
+    vi.fn(),
+  );
+  const tick = (time: number) => {
+    const [id, fn] = [...frames.entries()][0];
+    frames.delete(id);
+    fn(time);
+  };
+  expect(frames.size).toBe(1);
+  tick(100);
+  const data = sources.get("compass-traffic-illustration")!;
+  const initial = data.setData.mock.lastCall![0];
+  hidden = true;
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(frames.size).toBe(0);
+  hidden = false;
+  document.dispatchEvent(new Event("visibilitychange"));
+  tick(10_000);
+  expect(data.setData.mock.lastCall![0]).toEqual(initial);
+  reduce = true;
+  for (const listener of mediaListeners) listener();
+  expect(frames.size).toBe(0);
+  reduce = false;
+  for (const listener of mediaListeners) listener();
+  zoom = 13;
+  listeners.get("moveend")!();
+  expect(frames.size).toBe(0);
+  zoom = 17;
+  listeners.get("moveend")!();
+  expect(frames.size).toBe(1);
+  stop();
+  expect(frames.size).toBe(0);
+  expect(listeners.size).toBe(0);
+  expect(mediaListeners.size).toBe(0);
+  expect(sources.size).toBe(0);
 });

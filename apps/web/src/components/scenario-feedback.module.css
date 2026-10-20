@@ -1,0 +1,50 @@
+.action {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.action > button {
+  width: 100%;
+}
+
+.action > p,
+.status p {
+  margin: 0;
+}
+
+.status {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.8rem;
+  border: 1px solid #c8d8cf;
+  border-radius: 12px;
+  background: #f5f8f5;
+  color: #274638;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.status[data-state="pending"] {
+  background: #edf5ff;
+  border-color: #9bbbe0;
+  color: #234d76;
+}
+
+.status[data-state="dirty"],
+.status[data-state="invalid"],
+.status[data-state="error"] {
+  background: #fff6e8;
+  border-color: #d9b678;
+  color: #704815;
+}
+
+.status[data-state="matched"],
+.status[data-state="partial"] {
+  background: #eaf5ec;
+  border-color: #81af8c;
+}
+
+.query {
+  font-weight: 600;
+}

@@ -50,6 +50,13 @@ class ContextProvider(Protocol):
 
 
 @runtime_checkable
+class JourneyPlanner(Protocol):
+    async def plan(self, query: str, locale: str) -> JSON:
+        """Query and locale only -> JourneyPlan; no coordinates or POI facts."""
+        ...
+
+
+@runtime_checkable
 class RecommendationService(Protocol):
     async def recommend(self, request: JSON) -> JSON:
         """RecommendationRequest -> RecommendationResponse."""

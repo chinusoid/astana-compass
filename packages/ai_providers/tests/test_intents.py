@@ -45,10 +45,10 @@ def envelope(provider, text):
     return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": text}}]}
 
 
-def hosted(provider, handler, query=QUERY, **config):
+def hosted(provider, handler, query=QUERY, *, model="configured/model", **config):
     async def execute():
         async with create_intent_analyzer(
-            provider, "configured/model", SECRET, transport=httpx.MockTransport(handler), **config
+            provider, model, SECRET, transport=httpx.MockTransport(handler), **config
         ) as analyzer:
             return await analyzer.analyze(query, "ru")
 
@@ -194,7 +194,7 @@ def test_negated_category_and_conflicting_condition_require_review():
 @pytest.mark.parametrize(
     "query",
     [
-        "5 часов", "0 минут", "1 час 30 минут", "не 45 минут", "60–30 минут",
+        "25 часов", "0 минут", "1 час 90 минут", "не 45 минут", "60–30 минут",
         "0.001 hours", "0.060 minutes", "0,060 минут", ".001 hours", ",060 minutes",
     ],
 )
@@ -210,6 +210,86 @@ def test_ambiguous_or_out_of_bounds_duration_is_not_clamped(query):
 )
 def test_word_and_fraction_time_units(query, seconds):
     assert rules(query)["available_seconds"] == seconds
+
+
+@pytest.mark.parametrize("locale,query,quote,seconds", [
+    ("ru", "Хочу прогулку на 1 час 30 минут", "1 час 30 минут", 5400),
+    ("ru", "Есть 1час30мин", "1час30мин", 5400),
+    ("ru", "На прогулку полтора часа", "полтора часа", 5400),
+    ("ru", "Есть час с половиной", "час с половиной", 5400),
+    ("ru", "Хочу гулять час и 15 минут", "час и 15 минут", 4500),
+    ("ru", "На полчаса", "полчаса", 1800),
+    ("ru", "На 8 часов", "8 часов", 28800),
+    ("ru", "На 24 часа", "24 часа", 86400),
+    ("kk", "Бір жарым сағат серуен", "Бір жарым сағат", 5400),
+    ("kk", "1 сағат 30 минут бар", "1 сағат 30 минут", 5400),
+    ("kk", "сегіз сағат бар", "сегіз сағат", 28800),
+    ("en", "For one and a half hours", "one and a half hours", 5400),
+    ("en", "For an hour and a half", "an hour and a half", 5400),
+    ("en", "For 1h30min", "1h30min", 5400),
+    ("en", "I have 1 hour and 20 minutes", "1 hour and 20 minutes", 4800),
+    ("en", "For 1/2 hour", "1/2 hour", 1800),
+    ("en", "I have half an hour", "half an hour", 1800),
+    ("en", "For 2 and a half hours", "2 and a half hours", 9000),
+    ("en", "For one and half hours", "one and half hours", 5400),
+    ("en", "For half an hour and 15 minutes", "half an hour and 15 minutes", 2700),
+    ("en", "For 1.5 hours 30 minutes", "1.5 hours 30 minutes", 7200),
+    ("ru", "Есть 1,5 часа", "1,5 часа", 5400),
+    ("en", "I have five hours", "five hours", 18000),
+])
+def test_compound_fractional_and_full_day_budget_preserve_exact_evidence(locale, query, quote, seconds):
+    result = rules(query, locale)
+    assert result["available_seconds"] == seconds
+    assert result["time_evidence"] == quote
+    validate_payload("IntentResponse", result)
+
+
+@pytest.mark.parametrize("query", [
+    "24 часа 1 минута", "1 час 60 минут", "1.5 hours 75 minutes", "-1h30min",
+    "не полтора часа", "less than 1 hour 30 minutes", "1/0 hour", "2–1 hours",
+    "1 час или 2 часа", "30 минут и 45 минут", "5 сағат емес", "not an hour and a half",
+    "1000000 hours", "1 hour 30 minutes and 15 minutes", "до 8 часов",
+    "Не хочу 30 минут", "not for 30 minutes", "I don't have 30 minutes",
+    "30 минут жоқ", "1 сағаттан артық", "30 минуттан кем", "В час пик хочу в парк",
+])
+def test_invalid_or_ambiguous_compound_budget_is_never_partially_applied(query):
+    result = rules(query)
+    assert result["available_seconds"] is None
+    assert result["time_evidence"] is None
+    assert result["clarification_questions"]
+
+
+@pytest.mark.parametrize("locale,query,expected", [
+    ("ru", "Не кафе, а парк", ["park"]),
+    ("ru", "Не кафе а музей", ["museum"]),
+    ("en", "Not coffee but a park", ["park"]),
+    ("kk", "Кафе емес, саябақ", ["park"]),
+    ("kk", "Кафе емес бірақ мұражай", ["museum"]),
+    ("kk", "Кафе қажет емес, саябақ", ["park"]),
+])
+def test_contrast_excludes_only_the_unwanted_category(locale, query, expected):
+    assert rules(query, locale)["categories"] == expected
+
+
+@pytest.mark.parametrize("provider", ["openai", "nvidia"])
+@pytest.mark.parametrize("query,seconds,quote", [
+    ("На прогулку 1 час 30 минут", 5400, "1 час 30 минут"),
+    ("На прогулку 8 часов", 28800, "8 часов"),
+    ("Рейс через полтора часа", None, None),
+])
+def test_hosted_time_validation_accepts_arithmetic_and_keeps_flight_deadlines_separate(provider, query, seconds, quote):
+    def handle(request):
+        payload = json.loads(request.content)
+        if provider == "openai":
+            assert payload["text"]["format"]["schema"]["properties"]["available_seconds"]["anyOf"][0]["maximum"] == 86400
+        result = {"categories": [], "constraints": [], "available_seconds": seconds,
+                  "time_evidence": quote, "anchor_text": None, "clarifications": []}
+        return httpx.Response(200, json=envelope(provider, json.dumps(result)))
+
+    result = hosted(provider, handle, query=query)
+    assert result["provider"] == provider
+    assert result["available_seconds"] == seconds
+    assert result["time_evidence"] == quote
 
 
 @pytest.mark.parametrize("query", ["Дай мне 30 минут", "В Астане 30 минут", "У меня вполне 30 минут"])
@@ -249,6 +329,36 @@ def test_hosted_payload_and_grounded_response(provider):
     assert result["available_seconds"] == 2700
     assert keys(result) == {"quiet", "has_power_outlets"}
     assert result["constraints"][0]["source_quote"] == "тихое"
+    validate_payload("IntentResponse", result)
+
+
+@pytest.mark.parametrize("provider,model,reasoning", [
+    ("openai", "gpt-6-luna", {"effort": "none"}),
+    ("openai", "configured/model", None),
+    ("nvidia", "gpt-6-luna", None),
+])
+def test_luna_intent_uses_same_scoped_responses_options(provider, model, reasoning):
+    def handle(request):
+        payload = json.loads(request.content)
+        assert payload["model"] == model
+        assert payload.get("reasoning") == reasoning
+        assert not {"temperature", "top_p", "max_completion_tokens", "reasoning_effort"} & payload.keys()
+        if provider == "openai":
+            assert str(request.url) == "https://api.openai.com/v1/responses"
+            assert "max_tokens" not in payload
+            assert payload["max_output_tokens"] == 1536
+            assert payload["store"] is False
+            assert payload["text"]["format"]["strict"] is True
+        else:
+            assert str(request.url) == "https://integrate.api.nvidia.com/v1/chat/completions"
+            assert payload["max_tokens"] == 1536
+            assert "max_output_tokens" not in payload
+        return httpx.Response(200, json=envelope(provider, json.dumps(extracted())))
+
+    result = hosted(provider, handle, model=model)
+    assert result["provider"] == provider
+    assert result["available_seconds"] == 2700
+    assert keys(result) == {"quiet", "has_power_outlets"}
     validate_payload("IntentResponse", result)
 
 

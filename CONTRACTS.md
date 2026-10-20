@@ -6,16 +6,39 @@ The installable `astana-contracts` package contains generated copies, runtime va
 
 ## Public endpoints
 
+Live recommendations first interpret a scenario through the query-only `JourneyPlanner.plan(query, locale) -> JourneyPlan` port. The model supplies ordered activities and exact user excerpts, never venue IDs, coordinates, opening hours or place facts. `JourneyStage.categories`, `named_place` and `cuisine` constrain retrieval against actual source categories, aliases and evidenced cuisine tags. Unsupported or ambiguous goals remain visible; missing stops are not filled with unrelated places.
+
+`RecommendationRequest.limit` still limits discovery alternatives to three. A concrete `journey_plan` can cover up to six requested goals, independently of that alternative count. Its ordered recommendations and their source quotes are validated together. One concrete goal selects one stop; broad discovery can retain three varied alternatives. More than six concrete goals produces an explicit coverage warning. `ItineraryRequest.limit` and `place_ids` allow six selected stops; the complete itinerary preserves their order and includes every selected leg. Older responses without a `journey_plan` retain the original alternative-limit semantics.
+
+`RecommendationResponse.suggestions` is an optional list of separately labelled ideas, each
+`PlaceSuggestion {place_id, why, suggested_activity, constraint_evaluations}`. These
+are never requested stages, ranked recommendations or already selected stops. They
+resolve to additional source places in `places`; core and suggestion IDs are unique
+and disjoint, their exact union equals the returned places, and the total cannot
+exceed six. Suggestions require nonempty core results and are empty for `no_match`
+or `needs_clarification`. Required predicates are checked on every suggestion too.
+The current service offers at most two varied cultural ideas after all explicit
+stages are covered, using one bounded local source lookup near the final stop.
+A one-kilometre straight-line candidate bound is not a verified walking detour.
+No extra model, context or route call is made for ideas; a user explicitly adds one
+before its complete route and duration are calculated. A timed-out idea lookup
+leaves the core result intact. Older responses may omit this field.
+
+The live composition uses the configured server-side LLM and a shared request budget. Missing credentials, refusals, invalid extraction or provider failures select a clearly disclosed local-rules fallback. Synthetic fixture mode retains its deterministic discovery adapter; offline semantic tests use MockTransport and the real checked-in catalog. Neither those fixtures nor schema validation prove arbitrary language will always be understood.
+
 | Method/path | Request | Success | Notes |
 |---|---|---|---|
 | GET `/v1/health/live` | none | `HealthResponse` | Process liveness; no provider probe. |
 | GET `/v1/health/ready` | none | `HealthResponse` | Essential local dependencies ready; 503 if unavailable. |
 | GET `/v1/places` | bbox, query, categories, cursor | `PlaceListResponse` | `bbox=west,south,east,north`; comma-separated categories. |
 | GET `/v1/places/{id}` | URL-encoded canonical ID | `Place` | Preserve source-based IDs; 404 if absent. |
-| POST `/v1/recommendations` | `RecommendationRequest` | `RecommendationResponse` | Alternatives: each option fits the budget separately. |
-| POST `/v1/itineraries` | `ItineraryRequest` | `ItineraryResponse` | Explicit selected `place_ids`; one ordered trip fits the budget. |
+| POST `/v1/recommendations` | `RecommendationRequest` | `RecommendationResponse` | Alternatives: full durations and explicit warnings when the target is exceeded. |
+| POST `/v1/itineraries` | `ItineraryRequest` | `ItineraryResponse` | Explicit selected `place_ids`; one ordered trip with its complete duration. |
 | POST `/v1/feedback` | `FeedbackRequest` | `FeedbackResponse` | Anonymous product feedback; never require location. |
 | GET `/v1/data-status` | none | `DataStatusResponse` | Source freshness and ingestion status. |
+| POST `/v1/map-features` | `MapFeatureRequest` | `MapFeatureResponse` | Explicit clicked point; source identities remain separate. |
+| POST `/v1/place-directory` | `PlaceDirectoryRequest` | `MapFeatureResponse` | Explicit full-card lookup by canonical `place_id` and `locale`; separate 2GIS branch candidates, not catalog updates. |
+| POST `/v1/traffic` | `TrafficRequest` | `TrafficResponse` | Bounded road-flow samples; not simulated vehicle positions. |
 
 Errors use `ErrorResponse`: `invalid_request` (422), `unsupported_transport` (422), `provider_unavailable` (503), `rate_limited` (429), `internal_error` (500), `not_found` (404). Do not expose stack traces or provider secrets. User location and free-text query must not be logged by default.
 
@@ -25,15 +48,19 @@ Errors use `ErrorResponse`: `invalid_request` (422), `unsupported_transport` (42
 - `walking` must work initially. Accept `cycling`/`driving` as recognized request values but return `unsupported_transport` until implemented. Never silently route as walking.
 - `origin` uses named latitude/longitude. GeoJSON geometry uses `[longitude, latitude]`. A routed `LineString` is allowed only for an actual route calculation. Approximate estimates always have `geometry: null` and nonempty assumptions. Never draw a straight line as a pedestrian route.
 - `return_to_origin` covers the complete return trip. A recommendation route covers origin → its place → origin when requested. An itinerary route covers origin → all ordered stops → origin when requested. Travel duration must include every leg. Visit duration is explicitly an estimate.
-- `ItineraryRequest.place_ids` is a required ordered list of 1–3 selected IDs. Preserve that order and every selected stop; never silently drop or replace a selected place. If the whole trip cannot meet required constraints or fit the budget, return `no_match` with an explanation. The list length cannot exceed `limit`.
-- A recommendation's total is travel + visit. An itinerary's total is complete travel + the sum of every visit. Totals cannot exceed the available budget. Recommendation alternatives are not summed into one itinerary.
+- `ItineraryRequest.place_ids` is a required ordered list of 1–6 selected IDs. Preserve that order and every selected stop; never silently drop or replace a selected place. If the whole trip cannot meet required constraints, return `no_match` with an explanation. Exceeding `available_seconds` alone never removes a stop or rejects the trip. The list length cannot exceed `limit`.
+- A recommendation's total is travel + visit. An itinerary's total is complete travel + the sum of every visit. `available_seconds` is a duration target: longer trips are allowed, marked `partial`, and carry a localized warning with full duration and extra time. Recommendation alternatives are not summed into one itinerary.
 - `known` facts require a nonnull value and supporting evidence. `unknown` facts have null value and no evidence claim. `conflicting` facts have null value and at least two evidence IDs. Unknown/conflicting does not mean false. Source freshness is not a truth guarantee.
 - Evidence records retain actual source identity, URL, record ID and retrieval time. An LLM is not a source for a place fact. Synthetic evidence and places must be explicitly marked and use `synthetic:` IDs; do not put synthetic data into the live dataset.
-- Every place fact/evaluation references evidence in that place. Every recommendation/stop/hit resolves to a returned place. Duplicate IDs, duplicate fact keys and duplicate constraint keys are invalid. Responses contain only their referenced places.
+- Every place fact/evaluation references evidence in that place. Every recommendation/stop/hit/suggestion resolves to a returned place. Duplicate IDs, duplicate fact keys and duplicate constraint keys are invalid. Responses contain only their referenced places.
 - Constraints are predicates expressed as `{key, value, strength}`. In v0.1, a key matches the same place fact key and comparison is exact JSON value equality (booleans are distinct from numbers). Do not introduce undocumented range or fuzzy semantics. Suggested predicate keys: `indoor`, `wheelchair_accessible`, `child_friendly`, `free_entry`, `open_at_requested_time`. Time-dependent predicates are computed from source schedules for the request instant before evaluation, retaining schedule evidence and an explanatory note.
 - Every requested constraint gets one evaluation per candidate. A required constraint must be **known and satisfied**, with its fact evidence cited. An absent or conflicting required fact excludes the place. Preferred unknown/unsatisfied constraints may remain, but must be explained. Relaxing a required constraint requires a new user request.
+- The plain UI amenity controls submit `preferred`; only an explicit mandatory choice submits `required`. Free-text destination intent is primary in ranking. Preferences may break equal-relevance ties, but cannot replace the requested goal. Diversity operates within comparable relevance and does not relax required predicates or invent evidence. This is selection policy, not a new wire field or fuzzy constraint comparison.
 - `matched` means results meet required constraints; it does not promise three results or all preferences. `partial` means some preferences/desired coverage could not be met, with warnings. `no_match` has empty places/results. `needs_clarification` also has empty results and at least one question. No hidden substitute recommendations may appear in either state.
 - `suggested_activity` is an explicitly labelled AI suggestion. `why` cannot invent factual amenities. Retrieval scores are backend-specific and are not confidence probabilities; declare their `score_kind`.
+- A `MapFeature` is not a catalog `Place`. OSM, TomTom and 2GIS nearby entries retain distinct source IDs and attribution; proximity never establishes identity or building containment. Date-specific provider hours remain display attributes, not automatically verified `open_at_requested_time` facts. Unknown fields stay unknown. `retrieved_at` denotes retrieval, not an on-site survey.
+- `PlaceDirectoryRequest` contains only `place_id` and `locale`. The server resolves the public catalog place before querying 2GIS; caller-supplied coordinates, query text, provider endpoints and credentials are rejected. Branch candidates keep their own names/addresses and `twogis:branch:` identities. Directory responses are transient, `no-store`, and never copied into catalog facts, shared rooms, durable storage or LLM grounding.
+- Route `provider` and assumptions identify the actual pedestrian source or fallback. TomTom/OSRM routing must preserve ordered stops and every return leg; neither a traffic sample nor 3D simulation establishes a walking route. Live provider access is verified separately from canonical/offline tests.
 
 ## Python async service ports
 
@@ -81,7 +108,7 @@ class RecommendationService(Protocol):  # packages/recommender
     # ItineraryRequest -> ItineraryResponse
 ```
 
-A backend exception crossing ports must be normalized by the API adapter to `ErrorResponse`; callers must not consume arbitrary provider response dictionaries. The recommender rechecks required constraints and budget **after** context enrichment and routing. Retrieval is candidate selection, not the final policy decision. Source data that cannot satisfy a required dynamic predicate yet must remain unknown; context-aware orchestration can enrich a bounded pool before final exclusion.
+A backend exception crossing ports must be normalized by the API adapter to `ErrorResponse`; callers must not consume arbitrary provider response dictionaries. The recommender rechecks required constraints and complete durations **after** context enrichment and routing. Retrieval is candidate selection, not the final policy decision. Source data that cannot satisfy a required dynamic predicate yet must remain unknown; context-aware orchestration can enrich a bounded pool before final exclusion.
 
 The current context wire contract is `ContextResult {places, warnings, degraded_services}`. Weather is a planned explicit contract extension, not an opaque unvalidated payload; do not expose a weather field until its units, provider timestamps, provenance and freshness policy are jointly defined.
 

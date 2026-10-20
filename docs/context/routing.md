@@ -1,6 +1,6 @@
 # Ordered walking routing
 
-`astana_city_context.routing.ORSWalkingRouter` implements the canonical asynchronous `estimate_route` port. It receives an origin, one to three **ordered Location objects**, a walking transport, return flag and timezone-aware `start_at`. It never chooses or reorders places. Cycling/driving fail with `ProviderError("unsupported_transport")`, including when degraded estimates are enabled.
+`astana_city_context.routing.ORSWalkingRouter` implements the canonical asynchronous `estimate_route` port. It receives an origin, one to six **ordered Location objects**, a walking transport, return flag and timezone-aware `start_at`. ORS, OSRM and TomTom adapters share this destination limit. It never chooses or reorders places. Cycling/driving fail with `ProviderError("unsupported_transport")`, including when degraded estimates are enabled.
 
 ## Real provider
 
@@ -18,6 +18,16 @@ Without a key, or on provider errors/timeout/quota/malformed response, the defau
 
 Set `allow_approximate=False` to fail instead. Missing key gives `provider_unavailable`; safe provider codes and retryability propagate for transport failures. Malformed provider responses become `provider_unavailable`. `available` indicates credential configuration only and `unavailable_reason` explains absent configuration. Context enrichment can therefore expose a missing routing key in `degraded_services`. The canonical RouteEstimate has no `degraded_services` field: errors occurring later during route estimation are visible through the estimate's method, provider and assumptions.
 
+OSRM applies a total deadline of at most six seconds to queue acquisition, paced
+dispatch and HTTP together. Its request-start lock is released before network
+I/O while starts remain at least 1.05 seconds apart. A timeout therefore reaches
+the existing approximate/strict policy before the caller's eight-second port
+deadline cancels the operation. No HTTP request starts after the router's own
+deadline, and requests that expire while queued or pacing do not reserve an
+upstream attempt. External cancellation is not converted into a route. Offline
+tests exercise queued and active expiry, cancellation followed by a healthy
+request, concurrent paced starts, and cooldown arriving during a pacing wait.
+
 ## Cache, requests and secrets
 
 Each router instance uses a bounded 128-entry LRU cache: successful routes live for 300 seconds, degraded calculations for 30 seconds. Copies on insertion and return prevent caller mutations from poisoning future responses. The key includes the exact origin and ordered destinations/return, normalized start instant, transport, explicit walking profile, endpoint, snapping tolerance, custom pace, fallback policy and a SHA-256 credential fingerprint. No credentials or exact coordinates appear in public evidence IDs or URLs. Expired entries are never served; failures in strict mode are not cached. `JsonHTTP` supplies bounded timeouts/retries/concurrency and does not retry 429. Before each logical upstream call, a bounded rolling deque enforces at most 10 logical requests per minute and 600 per day, including failed calls. Cache hits do not consume budget. The transport allows at most three attempts per logical request, conservatively budgeting 30 attempts/minute and 1,800/day against the Standard allowance. A local budget refusal yields `rate_limited` in fallback assumptions or a retryable `ProviderError("rate_limited")` under strict policy. Reservations occur before awaiting I/O, so concurrent tasks cannot overbook the local budget. The rolling history stores at most 600 timestamps and never stores coordinates. Independent concurrent identical calls can still produce more than one upstream request. Quotas are shared across all deployment instances and any other applications using the same key; deployment-wide shared-key accounting is still required when scaling. The per-instance limiter does not claim to enforce a shared account quota.
@@ -28,7 +38,7 @@ Sources checked 2026-10-19:
 
 - [Official Directions request/return documentation](https://giscience.github.io/openrouteservice/api-reference/endpoints/directions/requests-and-return-types): GeoJSON endpoint, summary, segments, geometry indices and metadata.
 - [Official GIScience client profile documentation](https://giscience.github.io/openrouteservice-r/articles/openrouteservice.html): explicit `foot-walking` profile, separately from driving and cycling profiles.
-- [Official API restrictions](https://openrouteservice.org/restrictions/): currently 50 waypoints and maximum 6,000 km for foot profiles. This module requests at most five waypoints (origin, three destinations and optional origin).
+- [Official API restrictions](https://openrouteservice.org/restrictions/): currently 50 waypoints and maximum 6,000 km for foot profiles. This module requests at most eight waypoints (origin, six destinations and optional origin).
 - [Current HeiGIT plans](https://account.heigit.org/info/plans), verified from the rendered authoritative page: Standard Directions V2 allows 2,000 requests/day and 40/minute; Collaborative allows 10,000/day and 60/minute. Actual account allowance and other shared-key use must be checked before deployment.
 - [Current service terms](https://account.heigit.org/info/tos), verified from the rendered authoritative page: API results are licensed CC-BY-SA 4.0; the required attribution is `© openrouteservice by HeiGIT | Data from OpenStreetMap`. The terms disallow transmission of personal data. Provider instructions, attribution and licensing must remain with displayed/reused route data. Older staging terms are not the source for these claims.
 
@@ -36,6 +46,6 @@ Every routed result retains `© openrouteservice by HeiGIT | Data from OpenStree
 
 ## Validation and live smoke status
 
-Tests mock the HTTP boundary explicitly and cover one/two/three stops with/without return, exact profile/request ordering, unsupported transport, malformed/partial geometry and totals, provider failure/quota, missing key, strict policy, pace, stale/future provider timestamps, post-response retrieval time, cache expiration/bounds/copies, request changes and minute/day rolling quotas. Clock-driven quota tests perform no real network calls and do not sleep. They are not a claim of a live network check.
+Tests mock the HTTP boundary explicitly and cover one/two/three/six stops with/without return, rejection of seven stops, exact profile/request ordering, unsupported transport, malformed/partial geometry and totals, provider failure/quota, missing key, strict policy, pace, stale/future provider timestamps, post-response retrieval time, cache expiration/bounds/copies, request changes and minute/day rolling quotas. Clock-driven quota tests perform no real network calls and do not sleep. They are not a claim of a live network check.
 
 Live ORS smoke is blocked in this environment because neither `ROUTING_API_KEY` nor `ORS_API_KEY` is configured. No real walking route response has been observed or fabricated. With a privately configured backend key, the smoke command documented by the module's README can verify an actual short Astana trip; record its provider/geometry/method and safe timestamps without printing credentials or precise user coordinates.

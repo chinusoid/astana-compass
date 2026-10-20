@@ -4,6 +4,81 @@ import { label, locales, t, type Locale } from "./i18n";
 export type PlaceFact = Place["facts"][number];
 type Translations = readonly [string, string, string];
 const labels: Record<string, Translations> = {
+  "official:website": ["Официальный сайт", "Ресми сайт", "Official website"],
+  "official:phone": [
+    "Контактный телефон",
+    "Байланыс телефоны",
+    "Contact phone",
+  ],
+  "official:address": [
+    "Адрес по официальному источнику",
+    "Ресми дереккөздегі мекенжай",
+    "Official source address",
+  ],
+  "official:ticket_office_hours": [
+    "Часы кассы",
+    "Касса уақыты",
+    "Ticket office hours",
+  ],
+  "osm:phone": [
+    "Телефон из источника",
+    "Дереккөздегі телефон",
+    "Source-listed phone",
+  ],
+  "osm:contact:phone": [
+    "Телефон из контактов источника",
+    "Дереккөздің байланыс телефоны",
+    "Source-listed contact phone",
+  ],
+  "osm:email": ["Электронная почта", "Электрондық пошта", "Email"],
+  "osm:contact:email": [
+    "Электронная почта из источника",
+    "Дереккөздегі электрондық пошта",
+    "Source-listed email",
+  ],
+  "osm:website:menu": [
+    "Меню из источника",
+    "Дереккөздегі мәзір",
+    "Source-listed menu",
+  ],
+  "official:waterfront": ["У воды", "Су жағасында", "Waterfront"],
+  "official:walking_paths": [
+    "Прогулочные дорожки",
+    "Серуен жолдары",
+    "Walking paths",
+  ],
+  "official:cycle_paths": ["Велодорожки", "Веложолдар", "Cycle paths"],
+  "official:running_paths": [
+    "Беговые дорожки",
+    "Жүгіру жолдары",
+    "Running paths",
+  ],
+  "official:playground": ["Детская площадка", "Балалар алаңы", "Playground"],
+  "official:fountains": ["Фонтаны", "Субұрқақтар", "Fountains"],
+  "official:greenhouse": ["Оранжерея", "Жылыжай", "Greenhouse"],
+  "official:greenhouse_hours": [
+    "Часы оранжереи",
+    "Жылыжай уақыты",
+    "Greenhouse hours",
+  ],
+  "official:greenhouse_entry_hours": [
+    "Вход в оранжерею",
+    "Жылыжайға кіру уақыты",
+    "Greenhouse admission hours",
+  ],
+  "official:published_hours": [
+    "Опубликованное расписание",
+    "Жарияланған кесте",
+    "Published hours",
+  ],
+  "official:opened_year": ["Год открытия", "Ашылған жылы", "Opened in"],
+  "official:highlights": ["Что посмотреть", "Не көруге болады", "Highlights"],
+  "official:architecture": ["Архитектура", "Сәулет", "Architecture"],
+  "official:visitor_note": [
+    "Перед посещением",
+    "Барар алдында",
+    "Before visiting",
+  ],
   opening_hours: [
     "Расписание из источника",
     "Дереккөздегі жұмыс кестесі",
@@ -47,6 +122,16 @@ const labels: Record<string, Translations> = {
     "Исходная отметка помещения",
     "Ғимараттың бастапқы белгісі",
     "Original indoor tag",
+  ],
+  "osm:building": [
+    "Отметка здания в источнике",
+    "Дереккөздегі ғимарат белгісі",
+    "Source building tag",
+  ],
+  "osm:shop": [
+    "Тип магазина в источнике",
+    "Дереккөздегі дүкен түрі",
+    "Source shop type",
   ],
   "osm:fee": [
     "Исходная отметка оплаты",
@@ -190,12 +275,28 @@ export function placeText(locale: Locale, key: keyof typeof copy): string {
 }
 export function factLabel(locale: Locale, key: string): string {
   if (labels[key]) return labels[key][locales.indexOf(locale)];
-  if (/^(osm|wikidata):description:(ru|kk|en)$/.test(key))
+  if (key.startsWith("official:claim:"))
+    return [
+      "Отдельное утверждение источника",
+      "Дереккөздің жеке мәліметі",
+      "Individual source claim",
+    ][locales.indexOf(locale)];
+  if (key.startsWith("source:prior:"))
+    return `${["Прежние сведения", "Бұрынғы мәлімет", "Previous source record"][locales.indexOf(locale)]}: ${factLabel(locale, key.slice("source:prior:".length))}`;
+  if (/^(osm|wikidata|official):description:(ru|kk|en)$/.test(key))
     return `${placeText(locale, "description")} (${key.split(":").at(-1)})`;
   if (
-    /^(osm:(alt_name|short_name|int_name)|wikidata:(aliases|label))/.test(key)
+    /^(osm:(alt_name|short_name|int_name)|(wikidata|official):(aliases|label))/.test(
+      key,
+    )
   )
     return `${placeText(locale, "aliases")} (${key})`;
+  if (key.startsWith("osm:"))
+    return [
+      "Сведения источника OpenStreetMap",
+      "OpenStreetMap дереккөзінің мәліметтері",
+      "OpenStreetMap source field",
+    ][locales.indexOf(locale)];
   return label(locale, key);
 }
 export function rawFactValue(fact: PlaceFact): string {
@@ -207,6 +308,7 @@ export function factValue(locale: Locale, fact: PlaceFact): string {
   if (typeof fact.value === "boolean")
     return t(locale, fact.value ? "yes" : "no");
   const raw = rawFactValue(fact);
+  if (fact.key === "osm:shop" && raw === "mall") return label(locale, "mall");
   if (fact.key === "osm:cuisine")
     return raw
       .split(";")
@@ -267,6 +369,7 @@ export function sourcedFact(place: Place, key: string): PlaceFact | undefined {
 }
 export function sourceDescription(place: Place, locale: Locale) {
   const localized =
+    sourcedFact(place, `official:description:${locale}`) ??
     sourcedFact(place, `osm:description:${locale}`) ??
     sourcedFact(place, `wikidata:description:${locale}`);
   const text =
@@ -301,11 +404,34 @@ export const overviewKeys = [
   "toilets",
   "wheelchair_accessible",
   "free_entry",
+  "official:waterfront",
+  "official:walking_paths",
+  "official:cycle_paths",
+  "official:running_paths",
+  "official:playground",
+  "official:fountains",
+  "official:greenhouse",
+  "official:greenhouse_hours",
+  "official:greenhouse_entry_hours",
+  "official:published_hours",
+  "official:highlights",
+  "official:visitor_note",
 ];
 export function primaryFact(fact: PlaceFact): boolean {
   return (
     amenityKeys.includes(fact.key) ||
     overviewKeys.includes(fact.key) ||
+    [
+      "official:website",
+      "official:phone",
+      "official:address",
+      "official:ticket_office_hours",
+      "osm:phone",
+      "osm:contact:phone",
+      "osm:email",
+      "osm:contact:email",
+      "osm:website:menu",
+    ].includes(fact.key) ||
     /^osm:(addr:|website$|contact:website$)/.test(fact.key)
   );
 }

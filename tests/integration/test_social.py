@@ -164,7 +164,12 @@ def test_events_public_with_provenance_expiry_and_author_only_delete(client):
 def test_guest_and_location_expiry_and_bounded_capacity():
     now = [0.0]
     store = SocialStore(clock=lambda: now[0], capacity=2)
+    before = datetime.now(timezone.utc)
     token, a = store.create("A")
+    after = datetime.now(timezone.utc)
+    expires_at = store.state(a)["expires_at"]
+    assert before + timedelta(days=7) <= datetime.fromisoformat(expires_at) <= after + timedelta(days=7)
+    assert store.profiles[a]["deadline"] == 7 * 86400
     _, b = store.create("B")
     with pytest.raises(SocialError):
         store.create("C")
@@ -174,10 +179,37 @@ def test_guest_and_location_expiry_and_bounded_capacity():
     now[0] = 901
     store.prune()
     assert store.state(a)["parties"][0]["locations"] == []
-    now[0] = 86401
-    with pytest.raises(SocialError):
+    now[0] = 86400
+    assert store.authenticate(token) == a
+    assert store.profiles and store.tokens
+    assert store.state(a)["parties"] == []  # Rooms still expire after one day.
+    now[0] = 7 * 86400 - 1
+    assert store.authenticate(token) == a
+    # An action near expiry cannot slide the account's original deadline.
+    store.act(a, {"action": "party_create", "name": "Last walk"})
+    assert store.state(a)["expires_at"] == expires_at
+    now[0] = 7 * 86400
+    with pytest.raises(SocialError) as expired:
         store.authenticate(token)
+    assert (expired.value.code, expired.value.status) == ("session_required", 401)
     assert not store.profiles and not store.parties and not store.tokens
+
+
+def test_guest_logout_stays_revoked_through_the_new_week_long_lifetime():
+    now = [0.0]
+    store = SocialStore(clock=lambda: now[0])
+    token, profile_id = store.create("Guest")
+    now[0] = 2 * 86400
+    assert store.authenticate(token) == profile_id
+    store.act(profile_id, {"action": "logout"})
+    replacement, replacement_id = store.create("Guest")
+    for moment in (now[0], 7 * 86400 - 1):
+        now[0] = moment
+        with pytest.raises(SocialError) as revoked:
+            store.authenticate(token)
+        assert (revoked.value.code, revoked.value.status) == ("session_required", 401)
+        assert store.authenticate(replacement) == replacement_id
+    assert profile_id not in store.profiles
 
 
 def test_non_ascii_friend_code_is_a_regular_not_found_response(client):
@@ -434,16 +466,18 @@ def test_profile_expiry_erases_photos_locations_and_events_from_a_surviving_room
     token, b = store.create("B")
     store.act(a, {"action": "friend_request", "code": store.state(b)["friend_code"]})
     store.act(b, {"action": "friend_accept", "profile_id": a})
+    # Create the room late enough that its separate one-day TTL survives A.
+    now[0] = 7 * 86400 - 1000
     store.act(a, {"action": "party_create", "name": "Walk"})
     room = store.state(a)["parties"][0]
     store.act(a, {"action": "party_invite", "party_id": room["id"], "profile_id": b})
     store.act(b, {"action": "party_join", "party_id": room["id"]})
     store.act(a, {"action": "message", "party_id": room["id"], "text": "", "photo": PHOTO})
-    now[0] = 86390
+    now[0] = 7 * 86400 - 10
     store.act(a, {"action": "location", "party_id": room["id"], "coordinates": {"lat": 51.1, "lon": 71.4}})
     wall = datetime.now(timezone.utc)
     store.act(a, {"action": "event_create", "title": "Temporary", "description": "Synthetic test event", "location": {"lat": 51.1, "lon": 71.4}, "starts_at": wall.isoformat(), "ends_at": (wall + timedelta(hours=1)).isoformat()})
-    now[0] = 86401
+    now[0] = 7 * 86400 + 1
     assert store.authenticate(token) == b
     remaining = store.state(b)["parties"][0]
     assert remaining["owner_id"] == b

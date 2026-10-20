@@ -1,0 +1,109 @@
+.voice {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.record,
+.cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 2.6rem;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--line, #c7d9d0);
+  border-radius: 0.8rem;
+  background: var(--white, #fff);
+  color: var(--green-dark, #23533e);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.record:hover:not(:disabled),
+.cancel:hover {
+  background: var(--soft-green, #edf6f0);
+}
+.record:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.record:focus-visible,
+.cancel:focus-visible {
+  outline: 3px solid #e1b12a;
+  outline-offset: 3px;
+}
+.voice[data-recording="true"] .record {
+  background: #a52b43;
+  color: #fff;
+  border-color: #a52b43;
+}
+.hint,
+.status,
+.error,
+.draft p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.hint {
+  max-width: 46rem;
+  color: var(--muted, #537364);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+.status {
+  color: var(--voice-status, #74334b);
+  font-size: 0.82rem;
+}
+.error {
+  color: var(--voice-error, #8b451c);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.draft {
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--line, #bad6c8);
+  border-radius: 0.8rem;
+  background: var(--white, #f0f8f3);
+  color: var(--ink, #192c22);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.draft small {
+  color: var(--muted, #537364);
+}
+.indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 1.5rem;
+}
+.indicator i {
+  display: block;
+  width: 4px;
+  height: 0.55rem;
+  background: var(--voice-status, #a52b43);
+  border-radius: 3px;
+  animation: listening 0.75s ease-in-out infinite alternate;
+}
+.indicator i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.indicator i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes listening {
+  to {
+    transform: scaleY(2);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .indicator i {
+    animation: none;
+  }
+}

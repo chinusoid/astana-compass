@@ -9,7 +9,8 @@ import type {
   MapGeoJSONFeature,
 } from "maplibre-gl";
 import { valid } from "./contracts";
-import { motionPaths, pointOnPath } from "./map-motion";
+import { motionPaths, pointOnPath, poseOnPath } from "./map-motion";
+import { modelLayer, modelParts } from "./map-motion-models";
 import type { Locale } from "./i18n";
 
 export const TRAFFIC_TTL_MS = 90_000;
@@ -74,9 +75,9 @@ const copy = {
     "TomTom: data available for only some sampled roads",
   ],
   illustration: [
-    "Плотность условная по скорости потока; точки — не реальные машины. Не карта всех пробок города.",
-    "Тығыздық ағын жылдамдығымен шартты көрсетіледі; нүктелер нақты көлік емес. Бұл қаланың барлық кептеліс картасы емес.",
-    "Density is illustrative from flow speed; dots are not real vehicles. This is not citywide traffic coverage.",
+    "3D-машины иллюстрируют скорость потока: это не отслеживаемые автомобили. Данные есть только для выбранных участков.",
+    "3D-көліктер ағын жылдамдығын шартты көрсетеді, нақты көліктер бақыланбайды. Дерек тек таңдалған бөліктерге бар.",
+    "3D cars illustrate flow speed; they are not tracked vehicles. Data covers only the sampled segments.",
   ],
   colors: [
     "Зелёный — свободнее, жёлтый — медленнее, красный — затор или закрытие",
@@ -236,7 +237,43 @@ export function trafficParticles(segments: TrafficSegment[], elapsed: number) {
   };
 }
 
-/** Draw only the provider geometry; animate illustrative dots, not tracked vehicles. */
+export function trafficModels(
+  segments: TrafficSegment[],
+  elapsed: number,
+  zoom: number,
+) {
+  let remaining = 24;
+  return {
+    type: "FeatureCollection" as const,
+    features: segments.flatMap((segment, segmentIndex) => {
+      const path = motionPaths([
+        { geometry: segment.geometry, properties: { class: "minor" } },
+      ])[0];
+      if (!path || remaining <= 0) return [];
+      const flow = flowStyle(segment);
+      const count = Math.min(flow.count, remaining);
+      remaining -= count;
+      return Array.from({ length: count }, (_, index) =>
+        modelParts({
+          actor: `flow-${segmentIndex}-${index}`,
+          kind: "car",
+          ...poseOnPath(
+            path,
+            (index * path.length) / count + elapsed * flow.speed,
+          ),
+          color: flow.color,
+          phase: 0,
+          zoom,
+        }).map((part) => ({
+          ...part,
+          properties: { ...part.properties, illustrative: true },
+        })),
+      ).flat();
+    }),
+  };
+}
+
+/** Draw only provider geometry; the moving 3D cars illustrate flow, not tracking. */
 export function startTrafficLayer(
   map: LibreMap,
   response: TrafficResponse,
@@ -259,7 +296,9 @@ export function startTrafficLayer(
   });
   map.addSource(PARTICLES, {
     type: "geojson",
-    data: trafficParticles(response.segments, 0),
+    tolerance: 0,
+    maxzoom: 20,
+    data: trafficModels(response.segments, 0, map.getZoom()),
   });
   map.addLayer(
     {
@@ -275,17 +314,7 @@ export function startTrafficLayer(
     },
     map.getLayer("journey-line") ? "journey-line" : undefined,
   );
-  map.addLayer({
-    id: LAYERS[1],
-    type: "circle",
-    source: PARTICLES,
-    paint: {
-      "circle-color": "#ffffff",
-      "circle-radius": 3.2,
-      "circle-stroke-color": ["get", "color"],
-      "circle-stroke-width": 1.5,
-    },
-  });
+  map.addLayer(modelLayer(LAYERS[1], PARTICLES));
   const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
   const expiry = Math.min(
     ...response.segments.map(
@@ -297,16 +326,21 @@ export function startTrafficLayer(
     elapsed = 0,
     previous = 0,
     lastWrite = 0;
-  const paused = () => document.hidden || preference.matches;
+  const paused = () =>
+    document.hidden || preference.matches || map.getZoom() < 14;
+  const draw = () => {
+    if (!disposed)
+      (map.getSource(PARTICLES) as GeoJSONSource | undefined)?.setData(
+        trafficModels(response.segments, elapsed, map.getZoom()),
+      );
+  };
   const tick = (now: number) => {
     frame = null;
     if (disposed || paused()) return;
     if (previous) elapsed += Math.min(250, now - previous) / 1000;
     previous = now;
     if (now - lastWrite >= 100) {
-      (map.getSource(PARTICLES) as GeoJSONSource | undefined)?.setData(
-        trafficParticles(response.segments, elapsed),
-      );
+      draw();
       lastWrite = now;
     }
     frame = requestAnimationFrame(tick);
@@ -317,6 +351,10 @@ export function startTrafficLayer(
     previous = 0;
     if (!disposed && !paused()) frame = requestAnimationFrame(tick);
   };
+  const moved = () => {
+    draw();
+    update();
+  };
   const stop = () => {
     if (disposed) return;
     disposed = true;
@@ -324,6 +362,7 @@ export function startTrafficLayer(
     if (frame !== null) cancelAnimationFrame(frame);
     document.removeEventListener("visibilitychange", update);
     preference.removeEventListener("change", update);
+    map.off("moveend", moved);
     try {
       for (const layer of [...LAYERS].reverse())
         if (map.getLayer(layer)) map.removeLayer(layer);
@@ -342,6 +381,7 @@ export function startTrafficLayer(
   );
   document.addEventListener("visibilitychange", update);
   preference.addEventListener("change", update);
+  map.on("moveend", moved);
   update();
   return stop;
 }

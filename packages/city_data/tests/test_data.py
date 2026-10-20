@@ -64,6 +64,22 @@ def test_no_properties_inferred_from_categories_and_negative_tags_preserved():
     assert all(second[key]["value"] is False for key in ("indoor", "free_entry", "wheelchair_accessible"))
 
 
+def test_mall_import_requires_explicit_shop_type_and_preserves_its_source_tag():
+    places, report = normalize_response(response(
+        node(1, amenity="", shop="mall", building="retail", name="Source shopping centre"),
+        node(2, name="Mega", description="A cafe next to a shopping mall"),
+        node(3, amenity="", building="retail", name="Retail building without a mall tag"),
+    ), NOW.isoformat())
+    mall, cafe = places
+    assert mall["categories"] == ["mall"] and cafe["categories"] == ["cafe"]
+    facts = {fact["key"]: fact for fact in mall["facts"]}
+    assert facts["osm:shop"]["value"] == "mall"
+    assert facts["osm:shop"]["evidence_ids"] == [mall["evidence"][0]["id"]]
+    assert facts["indoor"]["status"] == "unknown"
+    assert report["excluded"] == {"outside_selection": 1}
+    assert '["shop"~"^(mall)$"]' in query()
+
+
 def test_duplicates_stable_ids_and_centers_are_not_merged_by_name():
     way = {"type": "way", "id": 1, "center": {"lat": 51.12, "lon": 71.42}, "tags": node()["tags"]}
     places, report = normalize_response(response(node(), node(), way), NOW.isoformat())
@@ -260,8 +276,11 @@ def test_committed_real_sample_replays_from_raw_cache_without_network():
     from astana_city_data.wikidata import enrich
     enriched, enrichment = enrich(select_sample(places, manifest["sample_limit"]),
                                  load_json(root / "data/samples/astana-wikidata-cache.json"))
-    assert enriched == snapshot["places"]
     assert enrichment == manifest["wikidata_enrichment"]
+    from astana_city_data.official import enrich as enrich_official
+    enriched, official = enrich_official(enriched, load_json(root / "data/samples/astana-official-supplement.json"))
+    assert official == manifest["official_enrichment"]
+    assert enriched == snapshot["places"]
     assert manifest["places_sha256"] == digest(snapshot["places"])
     assert len(snapshot["places"]) == manifest["place_count"] > 0
     assert all(not place["is_synthetic"] for place in snapshot["places"])

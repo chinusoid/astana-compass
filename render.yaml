@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+# Low-volume evaluation API; Cloudflare hosts the frontend separately.
+# A new Blueprint creates/deploys the service only through the Render UI flow.
+services:
+  - type: web
+    name: astana-compass-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    numInstances: 1
+    dockerfilePath: ./infra/render/Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    healthCheckPath: /v1/health/ready
+    envVars:
+      - key: ASTANA_MODE
+        value: live
+      - key: ASTANA_POI_PATH
+        value: /app/data/astana-osm.json
+      - key: ASTANA_POI_STALE_SECONDS
+        value: "604800"
+      - key: ASTANA_REPOSITORY_FACTORY
+        value: astana_city_data:create_repository
+      - key: ASTANA_RETRIEVER_FACTORY
+        value: astana_retrieval:create_retriever
+      - key: ASTANA_CONTEXT_FACTORY
+        value: astana_city_context:create_context
+      - key: ASTANA_RETRIEVAL_POOL_LIMIT
+        value: "1000"
+      - key: LLM_PROVIDER
+        value: openai
+      # Enter these in Render's secure initial Blueprint form; never in Git.
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: ASTANA_LLM_REQUESTS_PER_MINUTE
+        value: "10"
+      - key: ASTANA_LLM_REQUESTS_PER_DAY
+        value: "100"
+      - key: ROUTING_PROVIDER
+        value: osrm_public
+      - key: ASTANA_ROUTE_ALLOW_APPROXIMATE
+        value: "true"
+      - key: ASTANA_CONTEXT_TIMEOUT_SECONDS
+        value: "10"
+      - key: ASTANA_CONTEXT_RETRIES
+        value: "0"
+      - key: ASTANA_MAP_LOOKUP_ENABLED
+        value: "true"
+      - key: ASTANA_MAP_LOOKUP_PROVIDER
+        value: nominatim
+      - key: ASTANA_WEATHER_ENABLED
+        value: "false"
+      - key: REQUEST_TIMEOUT_SECONDS
+        value: "30"

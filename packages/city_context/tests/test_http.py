@@ -6,7 +6,7 @@ import gzip
 import httpx
 import pytest
 
-from astana_city_context.common import JsonHTTP, ProviderError, parse_instant
+from astana_city_context.common import JsonHTTP, ProviderError, log_tomtom_failure, parse_instant
 
 
 @pytest.mark.parametrize("value", ["2026-10-19", "2026-10-19T12:00:00", "tomorrow", "2026-02-30T12:00:00Z", "2026-10-19T25:00:00Z", "2026-10-19 12:00:00Z", "2026-10-19T12:00:00+05:99", "2026-10-19T12:00:00+00:60", "2026-10-19T12:00:00-24:00"])
@@ -35,11 +35,42 @@ def test_provider_failure_sanitized_bounded_and_no_redirect(status, expected, ca
             with pytest.raises(ProviderError) as failure:
                 await http.request("GET", "https://weather.invalid/", headers={"Authorization": "backend-secret"})
             assert str(failure.value) == expected
+            assert failure.value.upstream_status == status and failure.value.reason == "http_error"
             assert "secret" not in str(failure.value)
             assert len(seen) == calls
         finally:
             await http.aclose()
             assert client.is_closed
+    asyncio.run(run())
+
+
+def test_diagnostic_allowlist_never_formats_exception_or_untrusted_category(caplog):
+    secret = "private-key-and-provider-body"
+    error = ProviderError(secret, upstream_status=secret, reason=secret)
+    log_tomtom_failure(secret, error, reason=secret)
+    assert secret not in caplog.text
+    assert "service=unknown reason=unclassified code=provider_error upstream_status=None" in caplog.text
+
+
+@pytest.mark.parametrize("problem,reason", [("encoding", "rejected_encoding"), ("json", "invalid_json"),
+                                           ("shape", "invalid_shape"), ("size", "response_too_large")])
+def test_response_rejection_diagnostics_keep_status_without_body(problem, reason):
+    async def run():
+        def respond(_):
+            if problem == "encoding":
+                return httpx.Response(200, content=gzip.compress(b'{"secret":"provider-body"}'), headers={"Content-Encoding": "gzip"})
+            if problem == "shape":
+                return httpx.Response(200, json=["secret-provider-body"])
+            return httpx.Response(200, content=b"secret-provider-body")
+        http = JsonHTTP(client=httpx.AsyncClient(transport=httpx.MockTransport(respond)), retries=0,
+                        max_bytes=5 if problem == "size" else 1000)
+        try:
+            with pytest.raises(ProviderError) as failure:
+                await http.request("GET", "https://example.invalid/?key=private-key")
+            assert failure.value.upstream_status == 200 and failure.value.reason == reason
+            assert str(failure.value) == "invalid_provider_response"
+        finally:
+            await http.aclose()
     asyncio.run(run())
 
 
@@ -235,3 +266,27 @@ def test_close_is_idempotent_and_requests_after_close_fail():
         with pytest.raises(ProviderError, match="provider_unavailable"):
             await http.request("GET", "https://provider.invalid/")
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("url,body,expected", [
+    ("https://api.tomtom.com/maps/orbis/places/discover", '{"detailedError":{"target":"Attributes","message":"Invalid openingHours; private-secret-value"}}', ("Attributes", "openingHours")),
+    ("https://other.invalid/", "Attributes private-secret-value", ()),
+    ("https://api.tomtom.com/maps/orbis/places/discover", "Attributes " + "x" * 20_000, ()),
+])
+def test_tomtom_bad_request_diagnostics_only_emit_constant_field_names(url, body, expected, caplog):
+    from astana_city_context.common import log_tomtom_failure
+
+    async def run():
+        http = JsonHTTP(client=httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda _: httpx.Response(400, text=body))))
+        try:
+            with pytest.raises(ProviderError) as failure:
+                await http.request("POST", url, json={})
+            assert failure.value.upstream_status == 400
+            assert failure.value.field_hints == expected
+            log_tomtom_failure("places", failure.value)
+        finally:
+            await http.aclose()
+    asyncio.run(run())
+    assert "private-secret-value" not in caplog.text
+    assert url not in caplog.text

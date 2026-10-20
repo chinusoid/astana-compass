@@ -29,10 +29,13 @@ CLI не требует ключей. Путь к кэшу должен оста
 Область `(west,south,east,north) = (71.20,50.95,71.65,51.30)` — область исследования,
 а не административная граница. Выбираются именованные cafe, restaurant, library,
 theatre, cinema, arts_centre, museum, gallery, attraction, viewpoint, artwork,
-park, garden и playground. Private/no-access и disused=yes исключаются.
+park, garden, playground и торговые центры с явным `shop=mall`.
+`building=retail` без `shop=mall` не доказывает торговый центр.
+Private/no-access и disused=yes исключаются.
 Данные отбираются детерминированно по категориям и сетке около 5 км, затем по ID.
-`--limit` — от 1 до 1000, по умолчанию 1000. Текущий кэш содержит 628 подходящих
-объектов; включены все 628. Это ограниченная выборка категорий и области, не весь город.
+`--limit` — от 1 до 1000, по умолчанию 1000. Кэш от 20 октября содержит 682 подходящих
+объекта; включены все 682: прежние 628 OSM ID и 54 записи `shop=mall`.
+Это ограниченная выборка категорий и области, не весь город.
 
 Успешный raw-кэш используется 24 часа. После неудачи действует cooldown 60 s;
 автоматических retries нет. HTTP 429/504, `remark`/`error`, неполный JSON,
@@ -49,10 +52,11 @@ park, garden и playground. Private/no-access и disused=yes исключают�
 
 ### Воспроизведение без сети и Wikidata
 
-Точный снимок из двух опубликованных кэшей, без нового внешнего запроса:
+Точный снимок из двух опубликованных кэшей и официального редакционного дополнения,
+без нового внешнего запроса:
 
 ```powershell
-uv run --locked python -m astana_city_data.importer --offline --output data/samples/astana-osm.json --cache data/samples/astana-overpass-cache.json --manifest data/manifests/astana-osm.json --wikidata-cache data/samples/astana-wikidata-cache.json
+uv run --locked python -m astana_city_data.importer --offline --output data/samples/astana-osm.json --cache data/samples/astana-overpass-cache.json --manifest data/manifests/astana-osm.json --wikidata-cache data/samples/astana-wikidata-cache.json --official-supplement data/samples/astana-official-supplement.json
 ```
 
 `--offline` требует существующий полный OSM-кэш с правильными query/raw SHA-256,
@@ -84,6 +88,39 @@ info/labels/aliases/descriptions для ru/kk/en, `maxlag=5`, User-Agent с ко
 Cache Wikidata имеет отдельные hash, время загрузки и revisions. Его обновление
 не обновляет дату исходных OSM-фактов. `data_status` показывает оба источника
 отдельно; `total_places` считает уникальные места, а не сумму source counts.
+
+### Официальное редакционное дополнение
+
+`--official-supplement` читает только локальные проверенные заметки. Автоматической
+загрузки сайтов, поиска по имени или присвоения ближайшего объекта нет. Дополнение
+содержит точные OSM ID, исходные имена и координаты; изменение любого из них
+требует пересмотра привязки. Source URLs разрешены точным списком в `official.py`.
+Новый источник добавляется после чтения страницы, проверки её условий/robots и
+review. Максимум: 256 KiB входа, 20 мест, 40 утверждений на место; новых зависимостей нет.
+
+Каждое утверждение указывает источники и область действия. `Evidence` использует
+существующий canonical type `official`, с URL конкретной страницы. Русский
+`official:description:ru` становится явным display synopsis; исходные OSM/Wikidata
+факты остаются. `official:aliases:ru/kk/en` доступны поиску без переименования OSM.
+Проверенные контакты и адреса сохраняются как `official:phone`/`official:address`,
+часы кассы — `official:ticket_office_hours`. `official:website` требует точный
+операторский URL из отдельного списка; туристическая статья им не считается.
+Часы оранжереи не подтверждают открытость всего сада; опубликованные часы без ясной
+области не становятся `open_at_requested_time`. Нет вывода Wi-Fi, туалетов,
+бесплатного входа или доступности из категории/отзывов/описания прогулки.
+
+Совпадающий факт получает оба evidence. Разные значения дают `conflicting` с
+`value=null`; прежнее значение и отдельные утверждения сохраняются в
+`source:prior:*` и `official:claim:*` для аудита. Такой факт не удовлетворяет required.
+Manifest хранит checksum заметок и исходные обогащаемые Place. Repository заново
+воспроизводит дополнение, проверяет точное совпадение результата и отклоняет
+необъявленные официальные факты. Это проверка целостности и воспроизводимости,
+а не цифровая подпись или независимое доказательство истинности публикации.
+
+`data_status` показывает каждую официальную страницу со своим временем чтения,
+числом связанных мест и свежестью; unique total остаётся 682. Сейчас улучшены
+11 карточек; это ограниченное дополнение каталога. Источники и конкретные ограничения:
+[`docs/data/official-sources.md`](../../docs/data/official-sources.md).
 
 ## Подключение к API
 
@@ -151,7 +188,7 @@ internet_access, contact:website и исходные aliases. Контактны
 SSID и brand QID не переносятся в публичные Place facts. `osm:check_date*`
 сохранены как строки источника, а не как наша полевая проверка.
 
-Описание — исходный OSM `description`, при отсутствии OSM `description:ru/kk/en`,
+Без официального редакционного дополнения описание — исходный OSM `description`, при отсутствии OSM `description:ru/kk/en`,
 затем Wikidata `description:ru/kk/en` в этом порядке. Переводов и заполнения одной
 лишь категорией нет. `description:source`/`:language` указывают выбор; язык обычного
 OSM `description` не угадывается. Все localized descriptions/labels/aliases

@@ -2,28 +2,85 @@
 
 Installable Python package, Python 3.12–3.14. The public entry point is
 astana_recommender.DefaultRecommendationService(repository, retriever, context,
-generator=None). Dependencies implement the async ports from astana_contracts.
+generator=None, planner=None). Dependencies implement the async ports from astana_contracts.
 Importing the package creates no clients, makes no requests and reads no secrets.
+
+`planner_timeout_seconds` can give semantic planning a different per-port limit
+from other provider work; it still shares `request_budget_seconds`. API wiring
+uses 11 seconds for the planner port, leaving room for the hosted ten-second
+deadline and its local fallback, inside a 26-second total work budget.
 
 ## Implemented behavior
 
 - Validates requests, dependency boundaries and final responses against the
   canonical schema and invariants.
 - Bounds retrieval candidates, context enrichment, provider timeouts and route
-  concurrency. Preserves retrieval ordering for ties while favoring satisfied
-  preferences. It never treats a retrieval score as a confidence probability.
+  concurrency. Preserves query relevance after required-condition checks, with
+  broad source-category variety inside comparable lexical scores. Richer park
+  descriptions cannot fill all discovery slots as separate waterfront and
+  architecture themes while an equally relevant landmark is available.
+  Strong literal matches retain priority. Preferences stay visible and do not override
+  the user's destination intent. It never treats a retrieval score as a confidence probability.
 - Checks every required condition after context enrichment using JSON equality:
   true is not the number 1. Unknown, absent and conflicting required facts exclude
   a place. Unmet preferences remain visible and produce a partial response.
 - Requires valid route mode, return flag and complete travel plus visit time.
-  Alternatives are checked individually. Selected itinerary stops must all fit
-  together and preserve the requested ID order.
-- Uses an explicit nearby-catalog fallback if retrieval fails. Context failure
+  The selected time is a preference: longer alternatives and complete selected
+  itineraries remain visible with a localized duration/overrun warning and a
+  partial status. Selected stops preserve their requested ID order.
+- An injected `JourneyPlanner.plan(query, locale)` interprets the user's wishes
+  without receiving coordinates, catalog places or the complete request. The
+  canonical `JourneyPlan` preserves source quotes, explicit or suggested order,
+  named destinations, food goals and unresolved wishes. Invalid extraction or
+  planner failure retains an unresolved goal and asks for clarification.
+- Planner-backed requests interpret the whole scenario once. Per-stop reasons
+  use source facts and localized templates rather than additional model calls,
+  including when a user removes a stop and rebuilds the itinerary. The legacy
+  no-planner path still supports an optional grounded explanation generator.
+- Each concrete goal retrieves independently with grounded `named_place`,
+  `cuisine` and optional source `categories` filters. The retrieval port must verify names against source aliases
+  and food against known, cited cuisine facts. A name or description cannot
+  establish that a dish is served. The orchestration does not apply a separate
+  scenario-specific matching rule to planned stages. It also rejects a returned
+  place whose source categories match none of the stage's requested categories;
+  incidental words in a restaurant description cannot satisfy a shop or pool goal.
+- A single concrete goal yields one stop. Multiple goals yield one distinct
+  place per goal in plan order, up to six concrete stops, independently of the
+  request's one-to-three discovery alternative limit. Unresolved stages do not
+  consume stop slots. The full extracted plan remains in `journey_plan`, with
+  explicit warnings for missing or additional goals. An empty plan denotes broad
+  discovery and retains ordinary relevance/diversity alternatives.
+- Geographic proximity to neighboring stages only selects a bounded shortlist;
+  it is not a route claim. Recommendation cards retain their routes from the
+  original start. `build_itinerary` constructs the complete connected route in
+  selected order, including a requested return. All required-condition checks
+  and soft time preferences apply to plans and itineraries.
+- An empty, unmatched or unroutable sequence stage is disclosed as an
+  incomplete plan, with its original stage number. Available stops remain a
+  partial result. If none are available, understood concrete goals return
+  `no_match`; unresolved wishes or planner questions return `needs_clarification`.
+  A failed stage search never substitutes an arbitrary nearby place.
+- With no planner injected, the legacy API behavior remains available to direct
+  package callers. Production wiring supplies the planner. Planned requests never
+  replace a failed search with arbitrary nearby places. The legacy ordinary path
+  uses an explicit nearby-catalog fallback if retrieval fails. Context failure
   invalidates request-time facts; static facts may still support a partial result.
   Route failure excludes a candidate rather than fabricating a path.
 - Marks synthetic data, approximate routing, visit estimates, generator failure
   and an unconfigured language model. Error text never echoes provider exceptions.
 - Returns Russian, Kazakh or English template explanations without credentials.
+- Museum, art, architecture, historic/memorial and viewpoint categories receive
+  distinct activities and grounded category explanations. Source names and
+  descriptions cannot assign these categories or imply amenities or access.
+- Explicit requests for less walking or a longer walk use an internal geographic
+  heuristic within the top nine retrieved candidates, then rank returned options
+  by their actual route distance. Only the usual returned alternatives are routed;
+  no extra LLM calls are added. The heuristic is never displayed as a route.
+  Conflicting or negated pace requests preserve normal relevance behavior.
+  Ordered stages retain their requested order; an explicit pace preference
+  selects within each stage using the previous chosen stop as its geographic
+  anchor. Only chosen stops are routed, with no claim of a globally shortest
+  path. Durations remain a soft preference.
 
 The default visit estimate is 1,200 seconds. A positive integer source fact named
 visit_duration_seconds can override it. Durations are not shortened simply to fit
@@ -49,14 +106,25 @@ are separate from this package.
 
 ## Configuration and errors
 
-Keyword-only settings: candidate_limit=24, radius_meters=10000,
-timeout_seconds=8, default_visit_seconds=1200, route_concurrency=4, clock=None.
+Keyword-only settings: planner=None, candidate_limit=24, radius_meters=10000,
+timeout_seconds=8, request_budget_seconds=26, default_visit_seconds=1200,
+route_concurrency=4, clock=None, budget_clock=None.
 The injected clock must return a timezone-aware datetime.
+The optional budget clock returns monotonic seconds and is useful for deterministic tests.
 
-Each external call has its own timeout; route calls run in bounded batches and
-stop once enough valid recommendations are found. The package does not promise
-an overall HTTP latency SLA. The API layer should impose its own total deadline.
-Cancellation propagates normally.
+All provider work in one recommendation or itinerary shares a request deadline.
+Each external call is capped by the smaller of its own timeout and the remaining
+request budget. Routing stops starting new waves after expiry. Verified completed
+recommendations remain visible with missing-stage and time-budget warnings;
+selected itineraries still require every stop and a complete provider route.
+Deadlines belong to individual request tasks, including when the service handles
+overlapping requests. Cancellation from the caller propagates normally.
+Planned requests make at most six route attempts. Route calls run in bounded batches no
+larger than the number of remaining result slots and stop once enough valid
+recommendations are found. Explanations are generated only for returned places.
+The API layer should leave a reserve between this provider-work deadline and its
+HTTP deadline for local validation and response serialization. The work budget
+does not preempt synchronous Python work.
 
 Invalid input raises astana_contracts.ContractValidationError. An unsupported
 transport raises RecommenderError with code unsupported_transport and a safe
@@ -73,7 +141,10 @@ Or:
 
     pytest packages/recommender/tests
 
-The tests use explicitly synthetic local ports. They exercise required/preferred
+The tests use explicitly synthetic local ports. Named garden and food regressions
+also exercise the checked-in 682-place OSM snapshot with local lexical retrieval;
+their route provider remains synthetic and makes no network requests.
+They exercise required/preferred
 semantics, unknown/conflicting facts, dynamic enrichment, bool/number equality,
 source references, budgets and return trips, itinerary order, timeouts,
 cancellation, invalid provider output, generator grounding and all three locales.
@@ -88,3 +159,15 @@ has a total duration rather than per-leg arrival times; a future canonical
 extension is needed for arrival-aware itinerary schedule guarantees. The service
 does not parse additional hard constraints out of free text: the API/input layer
 must make such constraints explicit in the canonical request.
+
+## Optional nearby ideas
+
+After every explicit core stage is covered, a bounded source lookup can propose
+up to two diverse cultural stops as separate `suggestions`, never as silently
+inserted recommendations. Required facts are rechecked, core IDs/names and nearby
+duplicates are excluded, and unsupported exclusions suppress extras. The single
+lookup uses the final stop as its local anchor, considers at most 12 candidates
+within 1 km straight-line, and has a 2-second cap within the remaining request
+budget. This is a candidate bound, not a pedestrian detour estimate. No model,
+context or route calls are added. An optional failure preserves the core result;
+an explicit user add triggers the ordinary complete itinerary calculation.

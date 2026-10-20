@@ -1,0 +1,219 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import type { Place } from "@astana/api-client";
+import { expect, it, vi } from "vitest";
+import { locales, t } from "@/lib/i18n";
+import { factLabel, placeText } from "@/lib/place-presentation";
+import { visitText } from "@/lib/place-visit-guide";
+import PlaceVisitGuide from "./place-visit-guide";
+import { PlaceFacts } from "./details";
+import { directoryText } from "./place-directory";
+
+vi.mock("./place-photo", () => ({
+  default: () => <div data-testid="photo-placeholder" />,
+}));
+const places = JSON.parse(
+  readFileSync(
+    path.resolve(process.cwd(), "../../data/samples/astana-osm.json"),
+    "utf8",
+  ),
+).places as Place[];
+const opera = places.find((place) => place.id === "osm:way/917478479")!;
+const botanical = places.find((place) => place.id === "osm:way/1196402246")!;
+
+for (const locale of locales)
+  it(`separates attributed highlights, category ideas and estimated visit times in ${locale}`, () => {
+    render(<PlaceVisitGuide place={botanical} locale={locale} />);
+    expect(
+      screen.getByRole("region", { name: visitText(locale, "practical") }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: visitText(locale, "highlights") }),
+    ).toHaveTextContent("Аллеи хвойных деревьев");
+    const idea = screen.getByRole("region", {
+      name: visitText(locale, "idea"),
+    });
+    expect(within(idea).getByText(visitText(locale, "ideaNote"))).toBeVisible();
+    expect(
+      within(idea).getByText(visitText(locale, "estimateNote")),
+    ).toBeVisible();
+    expect(within(idea).getByText(/30–60/)).toBeVisible();
+    expect(
+      screen.queryByText(visitText(locale, "rating")),
+    ).not.toBeInTheDocument();
+  });
+
+it("puts practical details and important notes above explicit 2GIS, while preserving collapsed raw sources", () => {
+  const { container } = render(<PlaceFacts place={opera} locale="ru" />);
+  const guide = screen.getByTestId("place-visit-guide");
+  const directory = screen.getByRole("button", {
+    name: directoryText("ru", "check"),
+  });
+  expect(
+    guide.compareDocumentPosition(directory) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("link", {
+      name: /^(Официальный сайт|Сайт из источника)$/,
+    }),
+  ).toHaveAttribute("href", "https://astanaopera.kz/");
+  expect(guide).toHaveTextContent(
+    String(
+      opera.facts.find((fact) => fact.key === "official:visitor_note")!.value,
+    ),
+  );
+  expect(screen.getByText(visitText("ru", "records"))).toBeVisible();
+  expect(screen.getByTestId("place-source-records")).not.toHaveAttribute(
+    "open",
+  );
+  expect(screen.getByTestId("unknown-place-facts")).not.toHaveAttribute("open");
+  expect(container.querySelectorAll(".source-description")).toHaveLength(1);
+  fireEvent.click(screen.getByText(visitText("ru", "records")));
+  expect(
+    within(screen.getByTestId("place-source-records")).getByText(
+      placeText("ru", "otherFacts"),
+      { exact: false },
+    ),
+  ).toBeVisible();
+});
+
+it("keeps a compact card useful without repeating the full visit guide", () => {
+  const place = {
+    ...structuredClone(opera),
+    facts: opera.facts.filter((fact) => fact.key !== "official:address"),
+  };
+  render(<PlaceVisitGuide place={place} locale="ru" compact />);
+  expect(screen.getByText(/Қонаев көшесі, 1, Астана/)).toBeVisible();
+  expect(
+    screen.getByRole("link", {
+      name: /^(Официальный сайт|Сайт из источника)$/,
+    }),
+  ).toBeVisible();
+  expect(screen.queryByText(visitText("ru", "idea"))).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(visitText("ru", "estimate")),
+  ).not.toBeInTheDocument();
+});
+
+it("uses the current plan visit estimate when it is supplied instead of showing a contradictory category range", () => {
+  render(<PlaceFacts place={botanical} locale="ru" visitSeconds={1500} />);
+  const idea = screen.getByRole("region", { name: visitText("ru", "idea") });
+  expect(within(idea).getByText("25 мин")).toBeVisible();
+  expect(
+    within(idea).getByText(visitText("ru", "planEstimateNote")),
+  ).toBeVisible();
+  expect(within(idea).queryByText("30–60 мин")).not.toBeInTheDocument();
+});
+
+it("keeps confirmed hours and amenities visible on compact cards, distinguishes a negative fact and links its evidence", () => {
+  const source = opera.evidence[0];
+  const place: Place = {
+    ...structuredClone(opera),
+    evidence: [source],
+    facts: [
+      {
+        key: "opening_hours",
+        status: "known",
+        value: "24/7",
+        evidence_ids: [source.id],
+      },
+      {
+        key: "has_wifi",
+        status: "known",
+        value: true,
+        evidence_ids: [source.id],
+      },
+      {
+        key: "toilets",
+        status: "known",
+        value: false,
+        evidence_ids: [source.id],
+      },
+      {
+        key: "has_power_outlets",
+        status: "unknown",
+        value: null,
+        evidence_ids: [],
+      },
+      {
+        key: "indoor",
+        status: "known",
+        value: true,
+        evidence_ids: ["not-present"],
+      },
+      {
+        key: "quiet",
+        status: "conflicting",
+        value: null,
+        evidence_ids: [source.id],
+      },
+    ],
+  };
+  render(<PlaceVisitGuide place={place} locale="ru" compact />);
+  const summary = screen.getByTestId("place-visit-summary");
+  expect(summary).toHaveTextContent("24/7");
+  expect(summary).toHaveTextContent("Wi-FiДа");
+  expect(summary).toHaveTextContent("ТуалетНет");
+  expect(
+    within(summary).getByRole("link", {
+      name: `Источники: Wi-Fi — ${source.source_name}`,
+    }),
+  ).toHaveAttribute("href", source.source_url);
+  expect(
+    within(summary).queryByText(factLabel("ru", "has_power_outlets")),
+  ).not.toBeInTheDocument();
+  expect(
+    within(summary).queryByText(factLabel("ru", "indoor")),
+  ).not.toBeInTheDocument();
+  expect(
+    within(summary).queryByText(factLabel("ru", "quiet")),
+  ).not.toBeInTheDocument();
+});
+
+it("renders an amenity-only compact summary without requiring an address or website", () => {
+  const source = opera.evidence[0];
+  const place: Place = {
+    ...structuredClone(opera),
+    evidence: [source],
+    facts: [
+      {
+        key: "has_wifi",
+        status: "known",
+        value: true,
+        evidence_ids: [source.id],
+      },
+    ],
+  };
+  render(<PlaceVisitGuide place={place} locale="en" compact />);
+  expect(screen.getByTestId("compact-place-amenities")).toHaveTextContent(
+    "Wi-FiYes",
+  );
+});
+
+it("keeps a conflicting operator contact visible while suppressing its call action", () => {
+  const source = opera.evidence[0];
+  const place: Place = {
+    ...structuredClone(opera),
+    evidence: [source],
+    facts: [
+      {
+        key: "official:phone",
+        status: "conflicting",
+        value: null,
+        evidence_ids: [source.id],
+      },
+    ],
+  };
+  render(<PlaceFacts place={place} locale="ru" />);
+  expect(screen.getByText(t("ru", "conflicting"))).toBeVisible();
+  expect(
+    screen.getByRole("heading", { name: visitText("ru", "conflicts") }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("link", { name: /^Позвонить/ }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByTestId("place-source-records")).not.toHaveAttribute(
+    "open",
+  );
+});

@@ -8,7 +8,40 @@ The API composes shared validated contracts and `DefaultRecommendationService` w
 
 From repository root, `uv sync --locked`, then `uv run uvicorn astana_api.app:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log`. `ASTANA_MODE=fixture` is the default. It serves **three synthetic places only**, distance-based candidate selection (query intent is ignored), and an explicitly approximate route with no geometry. These adapters are integration tooling, not a second implementation of team modules.
 
-`ASTANA_MODE=live` loads the team factories below. Missing imports/configuration result in liveness 200 and readiness/API 503. It never substitutes fixture data. All returned place payloads reject synthetic markers in live mode. In live mode readiness requires a populated source with a successful import (ready or explicitly stale), a positive total count, and a valid non-synthetic sample place. It does not probe the retrieval index. Essential readiness probes repository data status; it does not guarantee every external provider is up. Optional generation failures produce a clearly reported deterministic fallback. This is not a deployed public service.
+`ASTANA_MODE=live` loads the team factories below. Missing imports/configuration result in liveness 200 and readiness/API 503. It never substitutes fixture data. All returned place payloads reject synthetic markers in live mode. In live mode readiness requires a populated source with a successful import (ready or explicitly stale), a positive total count, and a valid non-synthetic sample place. It does not probe the retrieval index. Essential readiness probes repository data status; it does not guarantee every external provider is up. Optional generation failures produce a clearly reported deterministic fallback. See the [project README](../../README.md) for the published demo and deployment context; availability of individual providers requires separate live checks.
+
+Recommendations and itineraries share one per-request work deadline, normally
+26 seconds within the outer 30-second HTTP limit. Every phase and route retry
+uses the remaining allowance; finished recommendations survive a slow provider
+as a disclosed partial result. A selected itinerary still needs its complete
+ordered route. OpenAI journey planning has a ten-second hosted deadline and an
+eleven-second port limit so its local fallback can finish. Shorter configured
+HTTP limits also shorten the work budget. Concurrent requests have independent
+budgets, and external cancellation propagates.
+
+Unavailable operations log the response's support `request_id`, route template,
+fixed failure category and elapsed milliseconds. Raw wishes, coordinates,
+credentials, exception text and provider bodies are not logged. A support number
+from a version before this diagnostic change cannot retroactively identify a
+failure whose category was not recorded.
+
+## Optional ideas beside a planned walk
+
+A completely covered concrete scenario can return `suggestions` separately from
+its requested `recommendations`. The service performs at most one extra local
+retrieval (12 source candidates, at most two varied cultural ideas within one
+kilometre straight-line of the final stop). This optional phase has a two-second
+cap, respects the remaining request budget and preserves finish headroom. It
+makes no additional model, provider-enrichment or routing request. Failure leaves
+the requested route unchanged. Unresolved/unfinished scenarios and unsupported
+negative or exclusive wishes do not receive speculative extras.
+
+Each idea resolves to an attributed real catalog place and carries its own
+constraint evaluations. Missing required facts exclude it. It is a proposal for
+an activity, not evidence of amenities, opening at arrival, admission, or a
+verified detour. The UI labels ideas separately and initially selects only core
+recommendations; adding an idea explicitly rebuilds the complete ordered route.
+The collapsed phone sheet shows the available idea count.
 
 ## Factory contract for teams
 
@@ -26,9 +59,9 @@ Default imports are `astana_city_data`, `astana_retrieval`, `astana_city_context
 
 ## Data and retrieval configuration
 
-Set server-side `ASTANA_POI_PATH` to a valid snapshot, for example the committed `data/samples/astana-osm.json` with 300 real OSM POI. The repository validates the snapshot, loads it once and returns independent records; missing/corrupt data fails closed. A separate bounded Overpass importer creates/replaces the snapshot and manifest. It is never called by a user HTTP request. Restart the API after importing a replacement. Source attribution and ODbL terms are in [the data documentation](../data/README.md).
+Set server-side `ASTANA_POI_PATH` to a valid snapshot, for example the committed `data/samples/astana-osm.json`. The repository validates the snapshot, loads it once and returns independent records; missing/corrupt data fails closed. A separate bounded Overpass importer creates/replaces the snapshot and manifest. It is never called by a user HTTP request. Restart the API after importing a replacement. `GET /v1/data-status` reports the currently loaded place count and source status. Snapshot provenance, coverage and ODbL terms are in [the data documentation](../data/README.md).
 
-`ASTANA_POI_STALE_SECONDS` defaults to 604800 (seven days). `data-status` distinguishes ready/stale/unavailable/not_configured and reports import time; no status certifies current opening or accessibility. The sample has 86 opening-hours values and one source description. Unknown required facts cannot pass the recommender's final constraint check.
+`ASTANA_POI_STALE_SECONDS` defaults to 604800 (seven days). `data-status` distinguishes ready/stale/unavailable/not_configured and reports import time; no status certifies current opening or accessibility. Description and opening-hours coverage varies by source and snapshot; consult the actual attributed place records rather than treating a missing field as a negative fact. Unknown required facts cannot pass the recommender's final constraint check.
 
 The retriever uses local BM25 and a versioned RU/KK/EN lexicon, with `score_kind=lexical` and explicit warnings. It makes one bounded nearby call, preserves evidence, and defers unknown/dynamic conditions for final context checks. `ASTANA_RETRIEVAL_POOL_LIMIT` defaults to 500; `ASTANA_RETRIEVAL_TIMEOUT_SECONDS` defaults to 5. There are no embeddings, vector index, network retrieval or paid inference in this adapter. [Ranking and configuration](../../packages/retrieval/README.md), [separate synthetic evaluation and snapshot smoke](../retrieval/QUALITY.md).
 
@@ -41,6 +74,52 @@ Configure the server-only `ROUTING_API_KEY` (or `ORS_API_KEY`) for ORS. Missing 
 ## AI configuration
 
 Set `LLM_PROVIDER=openai` and `LLM_MODEL` plus `OPENAI_API_KEY`, or `LLM_PROVIDER=nvidia` and `LLM_MODEL` plus `NVIDIA_API_KEY`. `LLM_API_KEY` is an alternate server-only key. `none` disables external generation. Values are loaded from environment; copying `.env.example` does not automatically load secrets. Model names have no guessed default. The optional provider gets a reduced grounding payload; it does not get the user's coordinate object. See `packages/ai_providers/README.md` and `docs/ai/TRAINING.md` for its precise privacy and generation boundaries. No live model call or training is implied by passing mocked tests.
+
+## Optional organization directory
+
+`POST /v1/place-directory` takes canonical `PlaceDirectoryRequest`: only `place_id`
+and `locale`. The backend resolves the catalog place, then uses its public name
+and location to query 2GIS Places API. Set server-only `TWOGIS_API_KEY`; fixture
+mode never calls this provider. An unknown catalog ID returns 404 before any
+provider request. Missing access or provider failure returns 503, not an empty
+claim about the organization.
+
+The response is `MapFeatureResponse` with separate `twogis:branch:` candidates,
+their names, addresses, descriptions where present, and source schedules. Nearby
+results are not established matches. The user must check the branch's identity;
+hours are not automatically promoted to `Place` facts or opening-at-arrival
+claims. The frontend requests this data only after the user selects the directory
+button in a full place card. Responses have `Cache-Control: no-store`; no provider
+payload is retained in a catalog, response cache, browser storage, room or model
+prompt. See [limits, attribution and access](../operations/twogis.md).
+
+## Optional place photographs
+
+`POST /v1/place-photo` accepts canonical `PlacePhotoRequest`: only `place_id`
+and `locale`. The server resolves the catalogue record; callers cannot supply
+a photo URL, coordinates, a search name or a Wikidata ID. An unknown catalogue ID
+returns 404 before any provider request. Synthetic places, unsupported identities
+and places without linked OSM Wikidata evidence return an unavailable cover without
+network access.
+
+Canonical `PlacePhotoResponse` is `{status: "available" | "unavailable", photo}`.
+For `available`, `photo` requires `url`, `source_url`, `author`, `license`,
+`license_url` and `alt`; for `unavailable`, it must be `null`. The optional
+Wikimedia adapter follows existing Wikidata P18 statements to Commons metadata,
+uses a finite seven-place identity allowlist, and requires complete attribution.
+A live metadata check on 2026-10-20 returned photographs for five linked places;
+this is not a guarantee of complete or permanent coverage. Missing images use an
+explicitly labelled category illustration. There is no stock-photo or name-search
+substitution.
+
+The frontend requests metadata when the cover approaches the visible viewport.
+Cancellation, provider failure and image errors leave the card and its route
+actions usable. API responses and the client fetch use `no-store`; the backend
+keeps a bounded 24-hour in-memory Commons metadata cache. This is separate from
+2GIS, whose responses remain uncached. Images are loaded directly from bounded
+Wikimedia thumbnail URLs with visible author, licence and original-file links;
+the API does not proxy or store image bytes. See [identity, limits, attribution
+and fallback behavior](../operations/place-photos.md).
 
 ## Operational boundaries
 
@@ -58,10 +137,24 @@ Run `uv run --locked pytest tests/integration` for API tests; use `scripts/check
 
 ## Intent, traffic and social endpoints
 
-`POST /v1/intent` accepts canonical `IntentRequest` (`query`, `locale`) and returns `IntentResponse`: proposed time, categories, literal quoted evidence for preferred constraints and clarification questions. Only explicit review applies these proposals; required conditions are never inferred or weakened automatically. The selected LLM provider receives raw request text and locale for this endpoint. With `LLM_PROVIDER=none` or invalid/unavailable inference, local rules run with an explicit warning. See [intent behavior and tests](../ai/intent.md).
+`POST /v1/intent` accepts canonical `IntentRequest` (`query`, `locale`) and returns
+`IntentResponse`: proposed time, categories, literal quoted evidence for preferred
+constraints and clarification questions. In the Walk interface, pressing Search
+automatically interprets the current text before requesting recommendations.
+The description supplies its stated time and additional **preferred** conditions;
+existing explicitly selected conditions retain their strength. Required conditions
+are never inferred from prose or weakened automatically. Explicit manual review
+remains available as an optional way to inspect and apply proposals. The time
+target remains soft: longer walks stay visible with their actual duration and an
+overrun notice. The selected LLM provider receives raw request text and locale for
+this endpoint. With `LLM_PROVIDER=none` or invalid/unavailable inference, local
+rules run with an explicit warning. If the intent request itself fails, search
+continues using the description and current form with a visible notice. See
+[intent behavior and tests](../ai/intent.md); the Walk automatic-application policy
+is implemented in `apps/web/src/lib/walk-intent.ts`.
 
 `POST /v1/traffic` accepts up to six public road points inside Astana. It queries the fixed TomTom flow endpoint using backend-only `TOMTOM_API_KEY`, rounds request points to 3 decimals, caches for 60 seconds and limits provider requests to 12/minute per process. It returns validated geometry/speeds/confidence and timestamp, or `not_configured` / `unavailable`; missing data never means empty roads. No caller's personal location is required. The UI expires flow after 90 seconds and distinguishes symbolic animation from vehicle counts.
 
 Social routes are `POST /v1/social/session`, `GET /v1/social/state`, `POST /v1/social/action`, `GET /v1/social/events`. Session creation returns a random token once to the same-origin Next server; the browser receives only a HttpOnly, SameSite=Strict cookie. Secure is set on HTTPS. Backend stores a hash, not the raw token. State/actions require Bearer authentication; the public event list does not. `SocialActionRequest`, `SocialState`, `PartyState` and `CommunityEvents` are canonical definitions in the root schema. The Next social proxy restricts paths/methods, checks write origins and never returns the raw session token.
 
-Guest profiles and rooms have a 24-hour maximum lifetime, and all data is lost on restart. Rooms contain at most 5 members; accepted friendship and accepted invitations are necessary to join. Planning uses optimistic revisions: membership/preferences changes invalidate pending results. Chat and voluntary shared points do not change the planning revision. Messages are capped at 50, photos at 6 per room; JPEG uploads are bounded and reject EXIF/IPTC metadata. Location is a single explicit point with a 15-minute TTL, removed on stop/leave/logout. Privacy revocations are exempt from ordinary mutation throttling. Community events are public, attributed, time-bounded and always unverified. There is no automatic promotion of community text into trusted recommendation facts.
+Guest profiles and their HttpOnly session cookies have a fixed seven-day maximum lifetime from creation; ordinary reads/actions do not renew it. Rooms and their chat retain a separate 24-hour maximum lifetime. All profiles, tokens and room data remain in process memory and are lost on restart, including deployment: seven days is an expiry limit, not durable storage. Existing expired, deleted or signed-out identities are never restored. Rooms contain at most 5 members; accepted friendship and accepted invitations are necessary to join. Planning uses optimistic revisions: membership/preferences changes invalidate pending results. Chat and voluntary shared points do not change the planning revision. Messages are capped at 50, photos at 6 per room; JPEG uploads are bounded and reject EXIF/IPTC metadata. Location is a single explicit point with a 15-minute TTL, removed on stop/leave/logout. Privacy revocations are exempt from ordinary mutation throttling. Community events are public, attributed, time-bounded and always unverified. There is no automatic promotion of community text into trusted recommendation facts.

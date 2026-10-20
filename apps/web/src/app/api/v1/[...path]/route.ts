@@ -32,7 +32,16 @@ async function proxy(
   const postAllowed =
     request.method === "POST" &&
     path.length === 1 &&
-    ["recommendations", "itineraries", "feedback", "intent", "traffic"].includes(path[0]);
+    [
+      "recommendations",
+      "itineraries",
+      "feedback",
+      "intent",
+      "traffic",
+      "map-features",
+      "place-directory",
+      "place-photo",
+    ].includes(path[0]);
   if (!getAllowed && !postAllowed) return failure(404);
   try {
     const origin = new URL(
@@ -59,7 +68,8 @@ async function proxy(
     }
     const signal = AbortSignal.any([
       request.signal,
-      AbortSignal.timeout(32000),
+      // Render Free can need about a minute to wake. Never replay a POST.
+      AbortSignal.timeout(getAllowed ? 70000 : 32000),
     ]);
     let body: Uint8Array | undefined;
     if (postAllowed) {
@@ -102,8 +112,14 @@ async function proxy(
       body: body as BodyInit | undefined,
       cache: "no-store",
       signal,
-      redirect: "error",
+      // Workers supports manual/follow; reject redirects ourselves without
+      // forwarding a request body or credentials to another origin.
+      redirect: "manual",
     });
+    if (upstream.status >= 300 && upstream.status < 400) {
+      await upstream.body?.cancel();
+      return failure(503);
+    }
     const headers = new Headers({
       "Content-Type": "application/json",
       "Cache-Control": "no-store",

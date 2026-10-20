@@ -1,8 +1,10 @@
 """Select known fact references through bounded, validated hosted inference.
 
-No raw query, coordinates, source URLs, descriptions, or unrestricted fact values
-leave this boundary. The model selects opaque references; prose is rendered by
-the recommender. No model IDs or credentials are supplied by this package.
+The legacy generate() boundary selects opaque references without sending the raw
+query, coordinates, URLs or descriptions. The separate, explicitly requested
+generate_route_explanations() feature sends the applied wish and bounded public
+venue context for personalized visit advice; see narratives.py for its boundary.
+No model IDs or credentials are supplied by this package.
 """
 
 from __future__ import annotations
@@ -15,6 +17,9 @@ from typing import Any, Literal, cast
 
 import httpx
 from astana_recommender import GroundedExplanation, GroundedReason
+from astana_recommender.explanations import RouteExplanation
+from astana_recommender.preferences import query_interests, source_categories
+from .budgets import BudgetExhausted, RequestBudget
 
 Provider = Literal["openai", "nvidia"]
 Activity = Literal["observe", "explore", "take_break"]
@@ -25,7 +30,7 @@ _ENDPOINTS = {
 }
 _SAFE_LABELS = frozenset({
     "indoor", "wheelchair_accessible", "child_friendly", "free_entry",
-    "open_at_requested_time", "quiet", "has_wifi", "has_power_outlets",
+    "open_at_requested_time", "quiet", "has_wifi", "has_power_outlets", "toilets",
 })
 _ACTIVITIES = frozenset({"observe", "explore", "take_break"})
 _INSTRUCTIONS = (
@@ -35,6 +40,11 @@ _INSTRUCTIONS = (
     "objects with exactly fact_key and evidence_ids. Copy the opaque fact_key "
     "and ALL its evidence_ids exactly from the provided facts, without duplicates. "
     "You may return an empty why list. Prefer satisfied requested constraints. "
+    "source_categories are closed taxonomy labels; interests are locally derived user "
+    "preferences, never confirmed venue properties. Use this context to choose an "
+    "appropriate generic activity: explore for museums, galleries and architecture; "
+    "observe for views, history or photos; take_break for coffee or a tired walker. "
+    "An interest in river or nature does not establish water, views, or facilities. "
     "suggested_activity is one of observe, explore, take_break, a generic idea "
     "not a claim of an available amenity or event. No prose, markdown, tools, "
     "new facts, new references, or extra fields."
@@ -85,6 +95,7 @@ class HostedExplanationGenerator:
         timeout_seconds: float = 6.0, max_response_bytes: int = 65_536,
         max_output_tokens: int = 512,
         transport: httpx.AsyncBaseTransport | None = None,
+        budget: RequestBudget | None = None,
     ) -> None:
         if provider not in _ENDPOINTS:
             raise ValueError("provider must be openai or nvidia")
@@ -112,6 +123,7 @@ class HostedExplanationGenerator:
         self.timeout_seconds = float(timeout_seconds)
         self.max_response_bytes = max_response_bytes
         self.max_output_tokens = max_output_tokens
+        self._budget = budget if budget is not None else RequestBudget.from_env()
         self._closed = False
         self._client = httpx.AsyncClient(
             headers={
@@ -136,7 +148,7 @@ class HostedExplanationGenerator:
         await self.aclose()
 
     def _prepare(
-        self, locale: str, place: dict[str, Any], evaluations: list[dict[str, Any]],
+        self, locale: str, place: dict[str, Any], evaluations: list[dict[str, Any]], query: str = "",
     ) -> tuple[dict[str, Any], dict[str, _AllowedReason]]:
         if (
             not isinstance(locale, str) or locale not in {"ru", "kk", "en"}
@@ -177,15 +189,19 @@ class HostedExplanationGenerator:
                 or not set(citations).issubset(available)
             ):
                 raise ProviderError(self.provider, "invalid_input")
-            token = f"fact_{len(allowed)}"
             citation_count += len(citations)
             if citation_count > 256:
                 raise ProviderError(self.provider, "input_too_large")
+            # Source metadata remains in the place, but is not a useful reason
+            # to visit it. Only locally labelled amenities can be selected.
+            if key not in _SAFE_LABELS:
+                continue
+            token = f"fact_{len(allowed)}"
             citation_tokens = tuple(f"{token}_e{index}" for index in range(len(citations)))
             allowed[token] = _AllowedReason(key, tuple(citations), citation_tokens)
             safe_fact: dict[str, Any] = {
                 "fact_key": token,
-                "meaning": key if key in _SAFE_LABELS else "other_confirmed_fact",
+                "meaning": key,
                 "evidence_ids": list(citation_tokens),
             }
             if type(fact["value"]) is bool:
@@ -201,7 +217,11 @@ class HostedExplanationGenerator:
                 break
             safe_facts.append(safe_fact)
         # Arbitrary strings and values (including embedded coordinates) never leave.
-        return {"locale": locale, "facts": safe_facts}, allowed
+        return {
+            "locale": locale, "facts": safe_facts,
+            "source_categories": list(source_categories(place.get("categories"))),
+            "interests": list(query_interests(query)),
+        }, allowed
 
     @staticmethod
     def _schema(allowed: dict[str, _AllowedReason]) -> dict[str, Any]:
@@ -223,6 +243,14 @@ class HostedExplanationGenerator:
             }, "required": ["why", "suggested_activity"],
         }
 
+    def _openai_model_options(self) -> dict[str, Any]:
+        # Luna defaults to medium reasoning. These small, strictly validated
+        # extraction/selection tasks retain their short latency and output caps.
+        # https://developers.openai.com/api/docs/models/gpt-6-luna
+        if self.provider == "openai" and self.model == "gpt-6-luna":
+            return {"reasoning": {"effort": "none"}}
+        return {}
+
     def _payload(self, data: dict[str, Any], allowed: dict[str, _AllowedReason]) -> dict[str, Any]:
         content = json.dumps(data, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
         if self.provider == "openai":
@@ -234,6 +262,7 @@ class HostedExplanationGenerator:
                     "strict": True, "schema": self._schema(allowed),
                 }},
                 "max_output_tokens": self.max_output_tokens, "store": False,
+                **self._openai_model_options(),
             }
         # Hosted NVIDIA models differ in response_format support. Plain JSON is
         # requested in messages and always validated locally; no capability claim.
@@ -249,6 +278,12 @@ class HostedExplanationGenerator:
     async def _request(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             async with asyncio.timeout(self.timeout_seconds):
+                # Shared by intent and explanations in API composition. Reserve
+                # before the first await so concurrent calls cannot overspend.
+                try:
+                    self._budget.reserve()
+                except BudgetExhausted:
+                    raise ProviderError(self.provider, "local_budget_exhausted", retryable=True) from None
                 async with self._client.stream("POST", _ENDPOINTS[self.provider], json=payload) as response:
                     if response.status_code != 200:
                         status = response.status_code
@@ -381,20 +416,29 @@ class HostedExplanationGenerator:
         self, *, locale: str, query: str, place: dict[str, Any],
         constraint_evaluations: list[dict[str, Any]],
     ) -> GroundedExplanation:
-        """Select fact references; query is intentionally not sent to a provider."""
+        """Select fact references; only closed derived hints leave the boundary."""
         if self._closed:
             raise ProviderError(self.provider, "closed")
-        data, allowed = self._prepare(locale, place, constraint_evaluations)
+        data, allowed = self._prepare(locale, place, constraint_evaluations, query)
         if not allowed:
             return GroundedExplanation(())
         envelope = await self._request(self._payload(data, allowed))
         return self._validate(self._output_text(envelope), allowed)
+
+    async def generate_route_explanations(
+        self, *, locale: str, query: str, stops: list[dict[str, Any]],
+    ) -> dict[str, RouteExplanation]:
+        """Write personalized advice for up to six selected stops in one call."""
+        from .narratives import generate_route_explanations
+
+        return await generate_route_explanations(self, locale=locale, query=query, stops=stops)
 
 
 def create_generator(
     provider: Provider, model: str, api_key: str, *,
     timeout_seconds: float = 6.0, max_response_bytes: int = 65_536,
     max_output_tokens: int = 512, transport: httpx.AsyncBaseTransport | None = None,
+    budget: RequestBudget | None = None,
 ) -> HostedExplanationGenerator:
     """Build a server-owned generator; credentials must come from server env.
 
@@ -404,5 +448,5 @@ def create_generator(
     return HostedExplanationGenerator(
         provider, model, api_key, timeout_seconds=timeout_seconds,
         max_response_bytes=max_response_bytes, max_output_tokens=max_output_tokens,
-        transport=transport,
+        transport=transport, budget=budget,
     )

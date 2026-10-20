@@ -95,6 +95,37 @@ class ContractsTests(unittest.TestCase):
         self.valid["status"] = "partial"
         validate_payload("RecommendationResponse", self.valid)
 
+    def test_grounded_scenario_may_cover_more_goals_than_the_alternative_limit(self) -> None:
+        response = deepcopy(self.valid)
+        response["request"].update(query="кофе, музей, парк, книги", limit=1)
+        response["journey_plan"] = {
+            "provider": "openai", "order": "explicit", "warnings": [], "clarification_questions": [],
+            "stages": [{"source_quote": quote, "search_query": quote, "kind": "activity",
+                        "named_place": None, "cuisine": None}
+                       for quote in ("кофе", "музей", "парк", "книги")],
+        }
+        place, recommendation = response["places"][0], response["recommendations"][0]
+        response["places"], response["recommendations"] = [], []
+        for index in range(4):
+            copied_place, copied_recommendation = deepcopy(place), deepcopy(recommendation)
+            copied_place["id"] = f"synthetic:scenario:{index}"
+            copied_recommendation.update(place_id=copied_place["id"], rank=index + 1)
+            response["places"].append(copied_place)
+            response["recommendations"].append(copied_recommendation)
+        validate_payload("RecommendationResponse", response)
+        del response["journey_plan"]
+        with self.assertRaises(ContractValidationError):
+            validate_payload("RecommendationResponse", response)
+
+    def test_scenario_cannot_quote_invented_user_requests(self) -> None:
+        response = deepcopy(self.valid)
+        response["journey_plan"] = {"provider": "openai", "order": "suggested", "warnings": [],
+            "clarification_questions": [], "stages": [{"source_quote": "invented user wish",
+                "search_query": "museum", "kind": "activity", "named_place": None, "cuisine": None}]}
+        with self.assertRaises(ContractValidationError) as error:
+            validate_payload("RecommendationResponse", response)
+        self.assertEqual(error.exception.stage, "invariant")
+
     def test_network_access_not_needed_for_validation(self) -> None:
         with patch("socket.socket", side_effect=AssertionError("network access attempted")):
             validate_payload("RecommendationResponse", self.valid)

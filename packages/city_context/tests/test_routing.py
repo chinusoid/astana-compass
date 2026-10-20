@@ -290,7 +290,7 @@ def test_cache_bounded_and_no_key_change_does_not_reuse_fallback():
 
 
 @pytest.mark.parametrize("changes", [
-    {"destinations": []}, {"destinations": STOPS + [ORIGIN]},
+    {"destinations": []}, {"destinations": STOPS * 2 + [ORIGIN]},
     {"origin": {"lat": 500, "lon": 71}}, {"origin": {"lat": True, "lon": 71}},
     {"return_to_origin": 1}, {"start_at": "2026-10-19T11:00:00"},
 ])

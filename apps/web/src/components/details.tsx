@@ -15,6 +15,10 @@ import {
   type PlaceFact,
 } from "@/lib/place-presentation";
 import PlaceOverview from "./place-overview";
+import PlaceDirectory from "./place-directory";
+import PlaceVisitGuide from "./place-visit-guide";
+import { visitText } from "@/lib/place-visit-guide";
+import guideStyles from "./place-visit-guide.module.css";
 
 export function ErrorNotice({
   error,
@@ -128,35 +132,47 @@ export function RouteNotes({
   locale: Locale;
 }) {
   return (
-    <details className="route-notes">
-      <summary>{t(locale, "routeNotes")}</summary>
-      <p>
-        {route.provider} ·{" "}
-        {new Intl.NumberFormat(locale).format(route.distance_meters)} m
-      </p>
-      <ul>
-        {route.assumptions.map((a) => (
-          <li key={a}>{a}</li>
-        ))}
-      </ul>
-      <Sources evidence={route.evidence} locale={locale} />
-    </details>
+    <>
+      {route.method === "routed" && route.provider === "TomTom Maps" && (
+        <p className="notice" data-testid="route-access-note">
+          {t(locale, "routeAccessNote")}
+        </p>
+      )}
+      <details className="route-notes">
+        <summary>{t(locale, "routeNotes")}</summary>
+        <p>
+          {route.provider} ·{" "}
+          {new Intl.NumberFormat(locale).format(route.distance_meters)} m
+        </p>
+        <ul>
+          {route.assumptions.map((a) => (
+            <li key={a}>{a}</li>
+          ))}
+        </ul>
+        <Sources evidence={route.evidence} locale={locale} />
+      </details>
+    </>
   );
 }
 
 export function PlaceFacts({
   place,
   locale,
+  visitSeconds,
 }: {
   place: Place;
   locale: Locale;
+  visitSeconds?: number;
 }) {
   const mainFacts = place.facts
-    .filter(primaryFact)
+    .filter((fact) => primaryFact(fact) && fact.status !== "unknown")
     .sort(
       (a, b) => Number(b.status === "known") - Number(a.status === "known"),
     );
   const otherFacts = place.facts.filter((fact) => !primaryFact(fact));
+  const unknownFacts = place.facts.filter(
+    (fact) => primaryFact(fact) && fact.status === "unknown",
+  );
   const factRecord = (fact: PlaceFact) => {
     const value = factValue(locale, fact);
     const website =
@@ -206,21 +222,64 @@ export function PlaceFacts({
   };
   return (
     <>
-      <PlaceOverview place={place} locale={locale} detailed />
-      <h3>{placeText(locale, "amenities")}</h3>
+      <PlaceOverview
+        place={place}
+        locale={locale}
+        detailed
+        showSummary={false}
+      />
+      <PlaceVisitGuide
+        place={place}
+        locale={locale}
+        visitSeconds={visitSeconds}
+      />
       <p className="field-hint">{placeText(locale, "sourceClaim")}</p>
-      <div className="fact-list">{mainFacts.map(factRecord)}</div>
-      {otherFacts.length > 0 && (
-        <details className="other-source-facts">
+      {mainFacts.some((fact) => fact.status === "conflicting") && (
+        <section className={guideStyles.conflicts}>
+          <h3>{visitText(locale, "conflicts")}</h3>
+          {mainFacts
+            .filter((fact) => fact.status === "conflicting")
+            .map(factRecord)}
+        </section>
+      )}
+      <PlaceDirectory placeId={place.id} locale={locale} />
+      {unknownFacts.length > 0 && (
+        <details
+          className="other-source-facts"
+          data-testid="unknown-place-facts"
+        >
           <summary>
-            {placeText(locale, "otherFacts")} · {otherFacts.length}
+            {placeText(locale, "unknownConditions")} · {unknownFacts.length}
           </summary>
-          {otherFacts.map(factRecord)}
+          <p className="small muted">
+            {unknownFacts
+              .map((fact) => factLabel(locale, fact.key))
+              .join(" · ")}
+          </p>
+          {unknownFacts.map(factRecord)}
         </details>
       )}
-      <h3>{t(locale, "sources")}</h3>
-      <p className="small muted">{t(locale, "freshness")}</p>
-      <Sources evidence={place.evidence} locale={locale} />
+      <details
+        className={guideStyles.recordsDisclosure}
+        data-testid="place-source-records"
+      >
+        <summary>{visitText(locale, "records")}</summary>
+        <h3>{placeText(locale, "amenities")}</h3>
+        <div className="fact-list">
+          {mainFacts.filter((fact) => fact.status === "known").map(factRecord)}
+        </div>
+        {otherFacts.length > 0 && (
+          <details className="other-source-facts">
+            <summary>
+              {placeText(locale, "otherFacts")} · {otherFacts.length}
+            </summary>
+            {otherFacts.map(factRecord)}
+          </details>
+        )}
+        <h3>{t(locale, "sources")}</h3>
+        <p className="small muted">{t(locale, "freshness")}</p>
+        <Sources evidence={place.evidence} locale={locale} />
+      </details>
     </>
   );
 }
@@ -230,11 +289,13 @@ export function Dialog({
   locale,
   close,
   children,
+  placement = "center",
 }: {
   title: string;
   locale: Locale;
   close: () => void;
   children: React.ReactNode;
+  placement?: "center" | "side";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -249,7 +310,7 @@ export function Dialog({
   return (
     <dialog
       ref={ref}
-      className="dialog"
+      className={`dialog${placement === "side" ? " place-drawer" : ""}`}
       aria-labelledby="dialog-title"
       onCancel={close}
       onClick={(event) => {

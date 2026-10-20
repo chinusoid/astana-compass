@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it } from "vitest";
 import type { Place } from "@astana/api-client";
 import { locales, t } from "@/lib/i18n";
@@ -59,6 +59,65 @@ it("keeps raw values and notes available while making source field names readabl
     .closest("details");
   expect(metadata).not.toHaveAttribute("open");
 });
+
+it.each(locales)(
+  "labels source building/shop metadata without inferring indoor access in %s",
+  (locale) => {
+    const place = structuredClone(actual);
+    place.categories = ["mall"];
+    const source = place.evidence[0];
+    const sourceFacts = [
+      { key: "osm:building", value: "yes" },
+      { key: "osm:shop", value: "mall" },
+      { key: "osm:takeaway", value: "yes" },
+    ].map((fact) => ({
+      ...fact,
+      status: "known" as const,
+      evidence_ids: [source.id],
+    }));
+    place.facts = [
+      { key: "indoor", value: null, status: "unknown", evidence_ids: [] },
+      ...sourceFacts,
+    ];
+    render(<PlaceFacts place={place} locale={locale} />);
+    expect(screen.getByTestId("place-cover")).toHaveTextContent(
+      t(locale, "mall"),
+    );
+    expect(screen.getByTestId("unknown-place-facts")).toHaveTextContent(
+      t(locale, "indoor"),
+    );
+    const records = screen.getByTestId("place-source-records");
+    fireEvent.click(records.querySelector(":scope > summary")!);
+    const metadata = within(records)
+      .getByText(placeText(locale, "otherFacts"), { exact: false })
+      .closest("details")!;
+    fireEvent.click(metadata.querySelector(":scope > summary")!);
+    for (const entry of sourceFacts) {
+      const heading = within(metadata).getByText(factLabel(locale, entry.key), {
+        selector: "strong",
+      });
+      expect(heading).toBeVisible();
+      expect(heading).not.toHaveTextContent(/^osm:/);
+      const fact = heading.closest(".fact")! as HTMLElement;
+      if (entry.key === "osm:shop")
+        expect(fact.querySelector(":scope > p")).toHaveTextContent(
+          t(locale, "mall"),
+        );
+      fireEvent.click(
+        within(fact).getByText(placeText(locale, "sourceDetails")),
+      );
+      expect(
+        within(fact).getByText(entry.key, { selector: "code" }),
+      ).toBeVisible();
+      expect(fact.querySelector(".fact-original > p")).toHaveTextContent(
+        `${entry.key}: ${entry.value}`,
+      );
+      expect(
+        within(fact).getByRole("link", { name: source.source_name }),
+      ).toHaveAttribute("href", source.source_url);
+    }
+  },
+);
 
 it("does not invent a description or promote unverified Wi-Fi and indoor seating into amenities", () => {
   const place = structuredClone(actual);
@@ -150,4 +209,32 @@ it("preserves the original description when no translation exists", () => {
   render(<PlaceOverview place={place} locale="ru" detailed />);
   expect(screen.getByText(place.description)).toBeVisible();
   expect(screen.getByText(placeText("ru", "sourceText"))).toBeVisible();
+});
+
+it("shows an official description with only its supporting source", () => {
+  const place = structuredClone(actual);
+  const source = {
+    ...place.evidence[0],
+    id: "test:official",
+    source_type: "official" as const,
+    source_name: "Официальный сайт сада",
+    source_url: "https://www.astanabotsad.kz/ru/o-nas",
+  };
+  place.evidence.push(source);
+  place.facts.push({
+    key: "official:description:ru",
+    status: "known",
+    value: "Описание сада по официальному источнику",
+    evidence_ids: [source.id],
+  });
+  render(<PlaceOverview place={place} locale="ru" detailed />);
+  expect(
+    screen.getByText("Описание сада по официальному источнику"),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("link", { name: source.source_name }),
+  ).toHaveAttribute("href", source.source_url);
+  expect(sourceDescription(place, "ru")?.evidence.map((e) => e.id)).toEqual([
+    source.id,
+  ]);
 });

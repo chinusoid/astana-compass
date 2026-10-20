@@ -7,11 +7,13 @@ CATEGORIES = {
     "amenity": ("cafe", "restaurant", "library", "theatre", "cinema", "arts_centre"),
     "tourism": ("museum", "gallery", "attraction", "viewpoint", "artwork"),
     "leisure": ("park", "garden", "playground"),
+    "shop": ("mall",),
 }
 UNKNOWN = "Not explicitly established by the imported OSM tags; no field verification."
-NORMALIZATION = "osm-tags-v2"
+NORMALIZATION = "osm-tags-v3"
 LANGUAGES = ("ru", "kk", "en")
 RAW_TAGS = (
+    "shop", "building",
     "wheelchair", "indoor", "fee", "access", "opening_hours:signed", "check_date", "check_date:opening_hours",
     "addr:street", "addr:housenumber", "addr:city", "addr:place", "addr:postcode", "addr:country", "addr:floor",
     "website", "contact:website", "website:menu", "wikipedia", "wikidata", "cuisine", "description",

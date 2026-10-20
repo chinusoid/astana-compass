@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import AsyncExitStack
+from dataclasses import replace
 from importlib.resources import files
 import json
 from types import ModuleType
@@ -51,6 +52,50 @@ def test_none_context_factory_fails_startup_and_recommendations_closed(monkeypat
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "provider_unavailable"
         validate_payload("ErrorResponse", response.json())
+
+
+@pytest.mark.parametrize("stage", ["repository", "retriever", "context", "generator", "intent"])
+def test_startup_diagnostics_do_not_log_exception_secrets(monkeypatch, caplog, stage):
+    secret = "private-startup-api-key-and-provider-payload"
+
+    class SecretStartupError(RuntimeError):
+        def __str__(self):
+            raise AssertionError("Startup diagnostics must not stringify provider exceptions")
+
+    def fail(**kwargs):
+        raise SecretStartupError(secret)
+
+    if stage in {"repository", "retriever", "context"}:
+        settings = factories(monkeypatch, **{stage: fail})
+    else:
+        settings = factories(monkeypatch)
+        if stage == "generator":
+            settings = replace(settings, llm_provider="openai", llm_model="test-model", llm_api_key=secret)
+            monkeypatch.setattr("astana_ai_providers.create_generator", fail)
+        else:
+            monkeypatch.setattr("astana_ai_providers.intents.create_intent_analyzer", fail)
+
+    with caplog.at_level("ERROR", logger="astana_api.app"):
+        with TestClient(create_app(settings)) as client:
+            assert client.app.state.services is None
+            live = client.get("/v1/health/live")
+            ready = client.get("/v1/health/ready")
+            assert live.status_code == 200
+            assert ready.status_code == 503
+            validate_payload("HealthResponse", live.json())
+            validate_payload("HealthResponse", ready.json())
+            response = client.get("/v1/places")
+            assert response.status_code == 503
+            validate_payload("ErrorResponse", response.json())
+            assert secret not in live.text + ready.text + response.text
+
+    records = [record for record in caplog.records if record.name == "astana_api.app"]
+    assert len(records) == 1
+    record = records[0]
+    assert record.getMessage() == f"Service initialization failed: stage={stage} exception=SecretStartupError"
+    assert record.args == (stage, "SecretStartupError")
+    assert not record.exc_info and record.exc_text is None and record.stack_info is None
+    assert secret not in caplog.text
 
 
 @pytest.mark.parametrize("role", ["repository", "retriever", "context"])
@@ -254,4 +299,15 @@ def test_valid_fixture_composition_is_unchanged():
             assert result["recommendations"]
             assert all(place["is_synthetic"] for place in result["places"])
 
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("outer,budget", [(1, 0.1), (4, 2), (30, 26), (120, 26)])
+def test_recommendation_work_leaves_headroom_inside_http_deadline(outer, budget):
+    async def check():
+        async with AsyncExitStack() as stack:
+            services = await build_services(Settings(request_timeout_seconds=outer), stack)
+            assert services.recommender.request_budget_seconds == budget
+            assert services.recommender.planner_timeout_seconds == 11
+            assert budget < outer
     asyncio.run(check())
