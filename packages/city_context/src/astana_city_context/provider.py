@@ -159,7 +159,7 @@ async def create_context(*, config: dict) -> ContextProvider:
                 pace_mps=pace, allow_approximate=approximate,
             )
         elif routing_provider == "osrm_public":
-            router = OSRMWalkingRouter(http, pace_mps=pace, allow_approximate=approximate)
+            router = OSRMWalkingRouter(http, timeout_seconds=timeout, pace_mps=pace, allow_approximate=approximate)
         else:
             router = ORSWalkingRouter(
                 http, api_key=os.environ.get("ROUTING_API_KEY") or os.environ.get("ORS_API_KEY"),

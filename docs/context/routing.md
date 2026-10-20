@@ -18,6 +18,16 @@ Without a key, or on provider errors/timeout/quota/malformed response, the defau
 
 Set `allow_approximate=False` to fail instead. Missing key gives `provider_unavailable`; safe provider codes and retryability propagate for transport failures. Malformed provider responses become `provider_unavailable`. `available` indicates credential configuration only and `unavailable_reason` explains absent configuration. Context enrichment can therefore expose a missing routing key in `degraded_services`. The canonical RouteEstimate has no `degraded_services` field: errors occurring later during route estimation are visible through the estimate's method, provider and assumptions.
 
+OSRM applies a total deadline of at most six seconds to queue acquisition, paced
+dispatch and HTTP together. Its request-start lock is released before network
+I/O while starts remain at least 1.05 seconds apart. A timeout therefore reaches
+the existing approximate/strict policy before the caller's eight-second port
+deadline cancels the operation. No HTTP request starts after the router's own
+deadline, and requests that expire while queued or pacing do not reserve an
+upstream attempt. External cancellation is not converted into a route. Offline
+tests exercise queued and active expiry, cancellation followed by a healthy
+request, concurrent paced starts, and cooldown arriving during a pacing wait.
+
 ## Cache, requests and secrets
 
 Each router instance uses a bounded 128-entry LRU cache: successful routes live for 300 seconds, degraded calculations for 30 seconds. Copies on insertion and return prevent caller mutations from poisoning future responses. The key includes the exact origin and ordered destinations/return, normalized start instant, transport, explicit walking profile, endpoint, snapping tolerance, custom pace, fallback policy and a SHA-256 credential fingerprint. No credentials or exact coordinates appear in public evidence IDs or URLs. Expired entries are never served; failures in strict mode are not cached. `JsonHTTP` supplies bounded timeouts/retries/concurrency and does not retry 429. Before each logical upstream call, a bounded rolling deque enforces at most 10 logical requests per minute and 600 per day, including failed calls. Cache hits do not consume budget. The transport allows at most three attempts per logical request, conservatively budgeting 30 attempts/minute and 1,800/day against the Standard allowance. A local budget refusal yields `rate_limited` in fallback assumptions or a retryable `ProviderError("rate_limited")` under strict policy. Reservations occur before awaiting I/O, so concurrent tasks cannot overbook the local budget. The rolling history stores at most 600 timestamps and never stores coordinates. Independent concurrent identical calls can still produce more than one upstream request. Quotas are shared across all deployment instances and any other applications using the same key; deployment-wide shared-key accounting is still required when scaling. The per-instance limiter does not claim to enforce a shared account quota.

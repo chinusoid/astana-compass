@@ -120,6 +120,17 @@ respecting the documented no-cache response policy. OSRM retains its separate
 bounded memory cache and request pacing. If both fail, the existing explicit
 approximation has null geometry; strict mode raises a safe error instead.
 
+OSRM also bounds its complete operation by
+`min(ASTANA_CONTEXT_TIMEOUT_SECONDS, 6)` seconds, including its local queue,
+1.05-second request-start pacing and HTTP. The pacing lock is released before
+provider I/O, so a slow response does not serialize every other route. Cache
+and cooldown are rechecked after pacing; a queued request does not start HTTP
+or consume quota after its deadline. The router's own timeout returns the
+existing explicit approximation with null geometry only when allowed; strict
+mode raises a retryable `provider_unavailable` error with reason `timeout`.
+External cancellation propagates and releases the queue/active HTTP operation.
+TomTom's remaining shared deadline still caps its OSRM fallback.
+
 [Kazakhstan is covered](https://docs.tomtom.com/routing-api/documentation/tomtom-maps/v1/product-information/market-coverage);
 this does not verify every footpath, entrance or current closure. As checked on
 2026-10-19, [Orbis v3](https://docs.tomtom.com/routing-api/documentation/tomtom-orbis-maps/v3/calculate-route)

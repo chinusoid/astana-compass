@@ -71,7 +71,8 @@ class TomTomWalkingRouter(ORSWalkingRouter):
         self.timeout_seconds = min(timeout_seconds, _TOTAL_SECONDS)
         self._cooldown = 0.0
         self.fallback = OSRMWalkingRouter(
-            http, clock=self.clock, pace_mps=self.pace_mps, allow_approximate=False,
+            http, timeout_seconds=self.timeout_seconds, clock=self.clock,
+            pace_mps=self.pace_mps, allow_approximate=False,
         )
         if not self.api_key:
             log_tomtom_failure("routing", ProviderError("provider_unavailable"), reason="key_not_configured")
