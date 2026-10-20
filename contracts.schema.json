@@ -765,6 +765,40 @@
         "warnings"
       ]
     },
+    "PlaceSuggestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "place_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]*$"
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1200
+        },
+        "suggested_activity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "constraint_evaluations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConstraintEvaluation"
+          },
+          "maxItems": 20
+        }
+      },
+      "required": [
+        "place_id",
+        "why",
+        "suggested_activity",
+        "constraint_evaluations"
+      ]
+    },
     "RecommendationResponse": {
       "type": "object",
       "additionalProperties": false,
@@ -819,6 +853,13 @@
         },
         "journey_plan": {
           "$ref": "#/$defs/JourneyPlan"
+        },
+        "suggestions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlaceSuggestion"
+          },
+          "maxItems": 3
         }
       },
       "required": [
@@ -849,6 +890,9 @@
                 "maxItems": 0
               },
               "places": {
+                "maxItems": 0
+              },
+              "suggestions": {
                 "maxItems": 0
               }
             }

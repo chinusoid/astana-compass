@@ -109,6 +109,8 @@ export function recommendationIntegrity(
     return false;
   const places = new Map(response.places.map((p) => [p.id, p]));
   const ids = response.recommendations.map((r) => r.place_id);
+  const suggestions = response.suggestions ?? [];
+  const allIds = [...ids, ...suggestions.map((suggestion) => suggestion.place_id)];
   const stages = response.journey_plan?.stages;
   if (
     stages?.some(
@@ -126,12 +128,16 @@ export function recommendationIntegrity(
     : request.limit;
   if (
     places.size !== response.places.length ||
-    new Set(ids).size !== ids.length ||
-    ids.length !== places.size ||
-    ids.length > resultLimit
+    new Set(allIds).size !== allIds.length ||
+    allIds.length !== places.size ||
+    ids.length > resultLimit ||
+    (suggestions.length > 0 && (ids.length === 0 || allIds.length > 6))
   )
     return false;
-  return response.recommendations.every((r, index) => {
+  return suggestions.every((suggestion) => {
+    const place = places.get(suggestion.place_id);
+    return place && evaluationsSafe(place, suggestion.constraint_evaluations, request);
+  }) && response.recommendations.every((r, index) => {
     const place = places.get(r.place_id);
     return (
       place &&

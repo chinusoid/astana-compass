@@ -22,6 +22,13 @@ const itinerary = () =>
   ) as ItineraryResponse;
 
 describe("canonical boundaries", () => {
+  it.each(examples.cases.filter((entry) => entry.name === "recommendations_with_optional_idea_valid" || entry.name.startsWith("optional_idea_")))(
+    "checks optional place references and required facts: $name",
+    (entry) => {
+      const response = structuredClone(entry.instance) as RecommendationResponse;
+      expect(recommendationIntegrity(response, response.request)).toBe(entry.valid);
+    },
+  );
   for (const example of examples.cases.filter((c) => c.valid)) {
     it(`accepts canonical fixture ${example.name}`, () =>
       expect(valid(example.definition as Definition, example.instance)).toBe(
