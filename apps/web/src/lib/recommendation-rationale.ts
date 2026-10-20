@@ -1,5 +1,5 @@
 import type { JourneyPlan, Place, Recommendation } from "@astana/api-client";
-import { label, type Locale } from "./i18n";
+import type { Locale } from "./i18n";
 import { factLabel, sourcedFact } from "./place-presentation";
 import { placeVisitGuide } from "./place-visit-guide";
 
@@ -54,29 +54,40 @@ export function recommendationRationale(
     ? stage.source_quote : query;
   const shortPurpose = purpose.replace(/\s+/gu, " ").trim();
   const wish = shortPurpose.length > 160 ? `${shortPurpose.slice(0, 157)}…` : shortPurpose;
-  const categories = place.categories.map((key) => label(locale, key)).join(", ");
+  const has = (...categories: string[]) => categories.some((category) => place.categories.includes(category));
+  const basis = has("park", "garden")
+    ? { ru: "это возможность замедлиться и добавить в маршрут прогулочную паузу", kk: "бұл асықпай серуендеп, сапар ырғағын баяулатуға мүмкіндік", en: "it adds an unhurried walking break to your route" }
+    : has("viewpoint")
+      ? { ru: "эту остановку можно посвятить видам и поиску интересных ракурсов", kk: "бұл аялдаманы көріністер мен қызықты ракурстарға арнауға болады", en: "you can devote this stop to views and finding interesting angles" }
+      : has("museum", "gallery", "arts_centre", "artwork", "theatre")
+        ? { ru: "это возможность добавить в прогулку искусство и внимательнее рассмотреть работы и детали", kk: "бұл серуенге өнер қосып, туындылар мен бөлшектерге назар аударуға мүмкіндік", en: "it brings art into the walk and invites a closer look at works and details" }
+        : has("architecture", "attraction", "historic", "memorial")
+          ? { ru: "эту остановку предлагаю посвятить городским деталям и новым впечатлениям", kk: "бұл аялдаманы қала бөлшектері мен жаңа әсерлерге арнауды ұсынамын", en: "I suggest using this stop for city details and fresh impressions" }
+          : has("cafe", "restaurant", "fast_food", "food_court", "coffee_shop")
+            ? { ru: "здесь предлагаю сделать паузу на еду или напиток по вашему сценарию", kk: "мұнда тілегіңізге сай тамақ не сусын үшін үзіліс жасауды ұсынамын", en: "I suggest a food or drink break here as part of your plan" }
+            : { ru: "предлагаю эту остановку как часть описанного вами сценария", kk: "бұл аялдаманы сіз сипаттаған жоспардың бір бөлігі ретінде ұсынамын", en: "I suggest this stop as part of the outing you described" };
   const amenities = item.constraint_evaluations.flatMap((evaluation) => {
     const fact = sourcedFact(place, evaluation.key);
     return evaluation.outcome === "satisfied" && fact?.value === true
       ? [factLabel(locale, evaluation.key)] : [];
   }).slice(0, 2).join(", ");
   const activity = item.suggested_activity.trim() || placeVisitGuide(place, locale).idea;
-  const night = /ноч[\p{L}]*|вечер[\p{L}]*|\b(?:night|evening)\b|түн[\p{L}]*|кешкі/iu.test(query);
+  const night = /ноч[\p{L}]*|вечер[\p{L}]*|\b(?:night|evening)\b|түн[\p{L}]*|кешкі/iu.test(purpose);
   const reasons = {
     ru: [
-      `Для пожелания «${wish}» предлагаю остановку «${place.name}»: категория в источнике — ${categories}.`,
+      `Для пожелания «${wish}» я бы включил «${place.name}» в маршрут: ${basis.ru}.`,
       activity,
       amenities ? `По данным источника: ${amenities}.` : "",
       night ? "Освещение и доступ ночью не подтверждены; проверьте их перед выходом." : "",
     ],
     kk: [
-      `«${wish}» тілегіңізге «${place.name}» аялдамасын ұсынамын: дереккөздегі санаты — ${categories}.`,
+      `«${wish}» тілегіңіз үшін «${place.name}» орнын маршрутқа қосар едім: ${basis.kk}.`,
       activity,
       amenities ? `Дереккөз мәліметтері: ${amenities}.` : "",
       night ? "Жарықтандыру мен түнгі кіру расталмаған; шығар алдында тексеріңіз." : "",
     ],
     en: [
-      `For your wish “${wish}”, I suggest “${place.name}” as a stop: its source category is ${categories}.`,
+      `For your wish “${wish}”, I would include “${place.name}”: ${basis.en}.`,
       activity,
       amenities ? `Source-listed conditions: ${amenities}.` : "",
       night ? "Lighting and nighttime access are unverified; check before setting out." : "",
