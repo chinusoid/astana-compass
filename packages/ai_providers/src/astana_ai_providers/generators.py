@@ -15,6 +15,7 @@ from typing import Any, Literal, cast
 
 import httpx
 from astana_recommender import GroundedExplanation, GroundedReason
+from astana_recommender.preferences import query_interests, source_categories
 from .budgets import BudgetExhausted, RequestBudget
 
 Provider = Literal["openai", "nvidia"]
@@ -36,6 +37,11 @@ _INSTRUCTIONS = (
     "objects with exactly fact_key and evidence_ids. Copy the opaque fact_key "
     "and ALL its evidence_ids exactly from the provided facts, without duplicates. "
     "You may return an empty why list. Prefer satisfied requested constraints. "
+    "source_categories are closed taxonomy labels; interests are locally derived user "
+    "preferences, never confirmed venue properties. Use this context to choose an "
+    "appropriate generic activity: explore for museums, galleries and architecture; "
+    "observe for views, history or photos; take_break for coffee or a tired walker. "
+    "An interest in river or nature does not establish water, views, or facilities. "
     "suggested_activity is one of observe, explore, take_break, a generic idea "
     "not a claim of an available amenity or event. No prose, markdown, tools, "
     "new facts, new references, or extra fields."
@@ -139,7 +145,7 @@ class HostedExplanationGenerator:
         await self.aclose()
 
     def _prepare(
-        self, locale: str, place: dict[str, Any], evaluations: list[dict[str, Any]],
+        self, locale: str, place: dict[str, Any], evaluations: list[dict[str, Any]], query: str = "",
     ) -> tuple[dict[str, Any], dict[str, _AllowedReason]]:
         if (
             not isinstance(locale, str) or locale not in {"ru", "kk", "en"}
@@ -208,7 +214,11 @@ class HostedExplanationGenerator:
                 break
             safe_facts.append(safe_fact)
         # Arbitrary strings and values (including embedded coordinates) never leave.
-        return {"locale": locale, "facts": safe_facts}, allowed
+        return {
+            "locale": locale, "facts": safe_facts,
+            "source_categories": list(source_categories(place.get("categories"))),
+            "interests": list(query_interests(query)),
+        }, allowed
 
     @staticmethod
     def _schema(allowed: dict[str, _AllowedReason]) -> dict[str, Any]:
@@ -403,10 +413,10 @@ class HostedExplanationGenerator:
         self, *, locale: str, query: str, place: dict[str, Any],
         constraint_evaluations: list[dict[str, Any]],
     ) -> GroundedExplanation:
-        """Select fact references; query is intentionally not sent to a provider."""
+        """Select fact references; only closed derived hints leave the boundary."""
         if self._closed:
             raise ProviderError(self.provider, "closed")
-        data, allowed = self._prepare(locale, place, constraint_evaluations)
+        data, allowed = self._prepare(locale, place, constraint_evaluations, query)
         if not allowed:
             return GroundedExplanation(())
         envelope = await self._request(self._payload(data, allowed))

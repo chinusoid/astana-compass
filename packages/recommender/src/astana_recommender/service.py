@@ -21,6 +21,7 @@ from astana_contracts import (
 
 from .explanations import ExplanationGenerator, GroundedExplanation, GroundedReason
 from .journey import journey_stages
+from .preferences import walking_preference
 from .text import TEXT, label
 
 
@@ -390,6 +391,9 @@ class DefaultRecommendationService:
         categories = set(place["categories"])
         purpose = next((key for key, values in (
             ("cafe", {"cafe", "coffee_shop"}), ("park", {"park"}), ("garden", {"garden"}),
+            ("museum", {"museum"}), ("art", {"art", "gallery", "arts_centre", "artwork"}),
+            ("architecture", {"architecture"}), ("history", {"historic", "monument", "memorial"}),
+            ("viewpoint", {"viewpoint"}),
         ) if categories.intersection(values)), None)
         activity = text[result.suggested_activity]
         if purpose:
@@ -460,6 +464,22 @@ class DefaultRecommendationService:
         offset = 0
         selected = []
         selected_stage_orders: list[int] = []
+        pace = walking_preference(request["query"]) if not stages else None
+        if pace:
+            # Use a geographic heuristic only to choose the small shortlist;
+            # it is never presented as a route. Keep normal provider call
+            # counts, then rank the returned options by measured route length.
+            origin = request["origin"]
+            longitude_scale = math.cos(math.radians(origin["lat"]))
+
+            def proximity(item: tuple[JSON, list[JSON]]) -> float:
+                location = item[0]["location"]
+                return math.hypot(
+                    location["lat"] - origin["lat"],
+                    (location["lon"] - origin["lon"]) * longitude_scale,
+                )
+
+            eligible = sorted(eligible[:9], key=proximity, reverse=pace == "long_walk")
         if stages:
             by_id = {place["id"]: (place, evaluations) for place, evaluations in eligible}
             groups = [[by_id[place_id] for place_id in ids if place_id in by_id] for ids in stage_ids]
@@ -512,6 +532,8 @@ class DefaultRecommendationService:
                 visit = self._visit_seconds(place)
                 total = route["duration_seconds"] + visit
                 selected.append((place, evaluations, route, visit, total))
+        if pace:
+            selected.sort(key=lambda item: item[2]["distance_meters"], reverse=pace == "long_walk")
         # Only the final (at most three) alternatives get generated text. Run
         # their bounded calls together so three slow providers use one timeout
         # window, not three, and keep gather's stable input/result ordering.
@@ -523,6 +545,9 @@ class DefaultRecommendationService:
             selected, explanations, strict=True
         ):
             why, activity, generator_warnings = explanation
+            if pace:
+                why += " " + text[f"{pace}_reason"].format(meters=round(route["distance_meters"]))
+                activity += " " + text[f"{pace}_activity"]
             if stages:
                 why = text["stage_found"].format(order=selected_stage_orders[len(response["recommendations"])]) + " " + why
             item_warnings = self._route_warnings([place], route, request["locale"])

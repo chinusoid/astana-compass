@@ -14,6 +14,9 @@ from astana_recommender.journey import journey_stages
     ("Әуелі мұражай, сосын саябақ", ("мұражай", "саябақ")),
     ("First coffee then", ("coffee", "")),
     ("First coffee then then park", ("coffee", "", "park")),
+    ("Сначала музей, далее кофе, в конце парк", ("музей", "кофе", "парк")),
+    ("First museum, next coffee, finally park", ("museum", "coffee", "park")),
+    ("Алдымен мұражай, одан соң кофе, соңында саябақ", ("мұражай", "кофе", "саябақ")),
 ])
 def test_explicit_sequence_preserves_destination_clauses_and_empty_stages(query, expected):
     assert journey_stages(query) == expected
@@ -22,6 +25,7 @@ def test_explicit_sequence_preserves_destination_clauses_and_empty_stages(query,
 @pytest.mark.parametrize("query", [
     "Парки, кофе и архитектура", "Coffee and parks", "Парки и набережная",
     "Coffee next to the park", "Then Coffee", "сначала кофе", "Саябақ және кафе",
+    "Museum next year", "Coffee next door", "A park next time",
 ])
 def test_no_sequence_is_invented_for_mixed_queries_or_spatial_anchors(query):
     assert journey_stages(query) == ()

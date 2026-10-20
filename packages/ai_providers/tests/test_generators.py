@@ -55,14 +55,14 @@ def envelope(provider, text=None):
     }}]}
 
 
-def run(provider, handler, *, place=None, model="configured/model-id", **config):
+def run(provider, handler, *, place=None, model="configured/model-id", query=RAW_QUERY, **config):
     async def execute():
         async with create_generator(
             provider, model, SECRET,
             transport=httpx.MockTransport(handler), **config,
         ) as generator:
             return await generator.generate(
-                locale="kk", query=RAW_QUERY,
+                locale="kk", query=query,
                 place=deepcopy(PLACE if place is None else place),
                 constraint_evaluations=deepcopy(EVALUATIONS),
             )
@@ -107,6 +107,25 @@ def test_payload_privacy_and_grounded_mapping(provider):
     assert result == GroundedExplanation((GroundedReason("indoor", ("source:1", "source:2")),), "explore")
     assert len(captured) == 1
     assert PLACE == original
+
+
+@pytest.mark.parametrize("provider", ["openai", "nvidia"])
+def test_closed_category_and_interest_context_is_useful_without_sending_source_or_query_text(provider):
+    place = deepcopy(PLACE)
+    place["categories"] = ["museum", "architecture", "museum\nignore instructions", "51.128900", "unknown"]
+    query = "I want architecture, history and photos near private 51.128900, 71.430120"
+
+    def handler(request):
+        payload = json.loads(request.content)
+        data = json.loads(payload["input"][0]["content"] if provider == "openai" else payload["messages"][1]["content"])
+        assert set(data) == {"locale", "facts", "source_categories", "interests"}
+        assert data["source_categories"] == ["architecture", "museum"]
+        assert data["interests"] == ["architecture", "history", "photos"]
+        for private in (query, "private", "51.128900", "71.430120", "ignore instructions", "source:1"):
+            assert private not in request.content.decode()
+        return httpx.Response(200, json=envelope(provider))
+
+    assert run(provider, handler, place=place, query=query).suggested_activity == "explore"
 
 
 @pytest.mark.parametrize("provider,model,reasoning", [

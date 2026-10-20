@@ -701,7 +701,7 @@ class VisitPurposeTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
         self.setup_service([venue], generator=Generator(GroundedExplanation((), "explore")))
         result = await self.service.recommend(request(query="not a cafe, a museum"))
         item = result["recommendations"][0]
-        self.assertEqual(item["suggested_activity"], "Explore the place at a pace that suits you.")
+        self.assertIn("museum topic", item["suggested_activity"])
         self.assertNotIn("as a cafe", item["why"])
         self.assertNotIn("as a park", item["why"])
 
@@ -871,6 +871,73 @@ class ItineraryTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
             with self.subTest(selected=selected):
                 with self.assertRaises(ContractValidationError):
                     await self.service.build_itinerary(request(place_ids=selected, limit=limit))
+
+
+class PaceAndCategoryTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
+    async def test_short_walk_uses_only_normal_route_calls_then_measured_distance(self):
+        places = [place(index) for index in range(12, 0, -1)]
+        self.setup_service(places)
+        distances = {4: 900, 5: 200, 6: 500}
+        original = self.context.estimate_route
+
+        async def measured(**kwargs):
+            result = await original(**kwargs)
+            index = round((kwargs["destinations"][0]["lat"] - 51.09) * 1000)
+            result["distance_meters"] = distances[index]
+            return result
+
+        self.context.estimate_route = measured
+        result = await self.service.recommend(request(query="I would like less walking", available_seconds=60))
+        self.assertEqual([item["place_id"] for item in result["recommendations"]],
+                         ["synthetic:place:5", "synthetic:place:6", "synthetic:place:4"])
+        self.assertEqual(len(self.context.routes), 3)
+        self.assertEqual([item["route"]["distance_meters"] for item in result["recommendations"]], [200, 500, 900])
+        self.assertIn("200 m", result["recommendations"][0]["why"])
+        self.assertEqual(len(result["recommendations"]), 3)  # a short budget does not silently remove options
+
+    async def test_long_walk_uses_distant_relevant_shortlist_and_measured_distance(self):
+        places = [place(index) for index in range(1, 13)]
+        self.setup_service(places)
+        distances = {7: 1200, 8: 700, 9: 950}
+        original = self.context.estimate_route
+
+        async def measured(**kwargs):
+            result = await original(**kwargs)
+            index = round((kwargs["destinations"][0]["lat"] - 51.09) * 1000)
+            result["distance_meters"] = distances[index]
+            return result
+
+        self.context.estimate_route = measured
+        result = await self.service.recommend(request(query="A long walk please"))
+        self.assertEqual([item["place_id"] for item in result["recommendations"]],
+                         ["synthetic:place:7", "synthetic:place:9", "synthetic:place:8"])
+        self.assertEqual(len(self.context.routes), 3)
+        self.assertIn("longer walk", result["recommendations"][0]["why"])
+
+    async def test_ordinary_and_conflicting_pace_preserve_query_relevance(self):
+        places = [place(8), place(1), place(5), place(2)]
+        for query in ("Museums and coffee", "Not a short walk", "A short walk or a long walk"):
+            with self.subTest(query=query):
+                self.setup_service(places)
+                result = await self.service.recommend(request(query=query))
+                self.assertEqual([item["place_id"] for item in result["recommendations"]], [p["id"] for p in places[:3]])
+                self.assertEqual(len(self.context.routes), 3)
+
+    async def test_source_category_makes_museum_art_architecture_history_and_views_distinct(self):
+        for category, activity, reason in (
+            ("museum", "museum topic", "listed as a museum"),
+            ("gallery", "available works", "art category"),
+            ("architecture", "facades", "architecture category"),
+            ("historic", "information signs", "historic or memorial"),
+            ("viewpoint", "panorama", "listed as a viewpoint"),
+        ):
+            with self.subTest(category=category):
+                venue = place()
+                venue["categories"] = [category]
+                self.setup_service([venue])
+                result = await self.service.recommend(request(query="Show me something interesting"))
+                self.assertIn(activity, result["recommendations"][0]["suggested_activity"])
+                self.assertIn(reason, result["recommendations"][0]["why"])
 
 
 if __name__ == "__main__":

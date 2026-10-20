@@ -36,6 +36,15 @@ Importing the package creates no clients, makes no requests and reads no secrets
 - Marks synthetic data, approximate routing, visit estimates, generator failure
   and an unconfigured language model. Error text never echoes provider exceptions.
 - Returns Russian, Kazakh or English template explanations without credentials.
+- Museum, art, architecture, historic/memorial and viewpoint categories receive
+  distinct activities and grounded category explanations. Source names and
+  descriptions cannot assign these categories or imply amenities or access.
+- Explicit requests for less walking or a longer walk use an internal geographic
+  heuristic within the top nine retrieved candidates, then rank returned options
+  by their actual route distance. Only the usual returned alternatives are routed;
+  no extra LLM calls are added. The heuristic is never displayed as a route.
+  Conflicting or negated pace requests and explicit stage order preserve normal
+  relevance/order behavior. Durations remain a soft preference.
 
 The default visit estimate is 1,200 seconds. A positive integer source fact named
 visit_duration_seconds can override it. Durations are not shortened simply to fit

@@ -3,7 +3,8 @@
 Optional async adapters implementing the recommender's `ExplanationGenerator`.
 They select known fact references and a generic activity; the recommender renders
 the actual explanation in `ru`, `kk`, or `en` and applies its own validation.
-These are inference adapters, not a trained Astana model or an intent parser.
+`IntentAnalyzer` also extracts reviewable preferences through local rules and
+optional hosted extraction. Neither adapter is a trained Astana model.
 
 ```python
 import os
@@ -73,16 +74,18 @@ Configured model availability and account access still need a live check.
 
 ## Grounding and privacy boundary
 
-`query` is deliberately **not sent or directly interpreted**. A future intent
-parser is a separate coordinated component; this adapter uses normalized
-constraint evaluations. It does not send the place name, description, location,
+The explanation adapter never sends the raw `query`. It derives only eight closed
+interest hints locally (nature, architecture, history, coffee, river, photos,
+short_walk, long_walk) and filters source categories to a closed taxonomy.
+These hints are preferences and categories, never evidence for a venue amenity.
+It also uses normalized constraint evaluations. It does not send the place name, description, location,
 source URLs, arbitrary fact strings/numbers, actual fact IDs, or evidence IDs.
 This prevents coordinates embedded even in those fields from reaching the model.
 
 The provider receives opaque `fact_N`/evidence tokens, fixed safe semantic labels,
-boolean values where available, locale, and normalized constraint outcomes.
-Unknown semantic labels become `other_confirmed_fact`. This conservative policy
-limits semantic richness intentionally. Known input facts must have non-null
+boolean values where available, locale, normalized constraint outcomes, and the
+closed category/interest hints. Unknown semantic labels are omitted.
+Known input facts must have non-null
 values and references to evidence actually present in the place. Unknown and
 conflicting facts never enter the selection whitelist.
 

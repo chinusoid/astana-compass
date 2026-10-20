@@ -6,9 +6,10 @@ import re
 
 
 _NEXT = re.compile(
-    r"(?<!\w)(?:(?:а|и)\s+)?(?:потом|затем|после\s+этого)(?!\w)|"
-    r"(?<!\w)(?:and\s+)?(?:then|after\s+that)(?!\w)|"
-    r"(?<!\w)(?:(?:содан|одан)\s+кейін|сосын)(?!\w)",
+    r"(?<!\w)(?:(?:а|и)\s+)?(?:потом|затем|далее|после\s+этого|в\s+конце|под\s+конец)(?!\w)|"
+    r"(?<!\w)(?:and\s+)?(?:then|after\s+that|finally|lastly|"
+    r"next(?!\s+(?:to|door|week|month|year|summer|winter|spring|autumn|fall|time)\b))(?!\w)|"
+    r"(?<!\w)(?:(?:содан|одан)\s+кейін|одан\s+соң|сосын|соңында)(?!\w)",
     re.IGNORECASE,
 )
 _FIRST = re.compile(r"(?<!\w)(?:сначала|сперва|first|алдымен|әуелі)(?!\w)\s*", re.IGNORECASE)
