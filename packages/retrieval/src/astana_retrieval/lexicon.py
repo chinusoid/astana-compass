@@ -9,7 +9,7 @@ import unicodedata
 LEXICON_VERSION = "ru-kk-en-5"
 CATEGORIES = {
     "cafe": r"кафе(?:ге|де|ден|ні|нің|лер(?:ге|де|ден|і|ін)?)?|кофе\w{0,12}|coffee|caf[eé]s?|cappuccino|капучино|латте",
-    "restaurant": r"рестора\w{0,12}|поесть|покушать|обед\w{0,12}|ужин\w{0,12}|еда|restaurants?|dining|lunch|dinner|eat|тамақ\w{0,12}|мейрамхана\w{0,12}",
+    "restaurant": r"рестора\w{0,12}|поесть|покушать|перекусить|пообедать|поужинать|обед\w{0,12}|ужин\w{0,12}|еда|restaurants?|dining|lunch|dinner|eat|тамақ\w{0,12}|мейрамхана\w{0,12}",
     "museum": r"музе\w{0,12}|museums?|мұражай\w{0,12}",
     "park": r"парк\w{0,12}|сквер\w{0,12}|parks?|саябақ\w{0,12}",
     "garden": r"сад|сада|саду|ботаническ\w{0,12}|gardens?|botanical|бақ|баққа|ботаникалық",
@@ -49,7 +49,7 @@ FEATURES = {
 FOOD_CATEGORIES = frozenset({"cafe", "restaurant"})
 CUISINES = {
     # Bounded forms include the common missing-ц typo and Kazakh case suffixes.
-    "pizza": r"pizzas?|pizzerias?|пицц?(?:[ауые]|ей|ами|ах|аны|аның|аға|ада|адан|алар(?:ды|дың|ға|да|дан)?)|пиццерия\w{0,6}",
+    "pizza": r"pizzas?|pizzerias?|пицц?(?:[ауые]|ей|ами|ах|аны|аның|аға|ада|адан|алар(?:ды|дың|ға|да|дан)?)|пиццери(?:я|ю|и|е|й|ей|ям|ями|ях|яға|яда|ядан|яны|яның)",
 }
 CUISINE_PATTERNS = {
     key: re.compile(r"(?<!\w)(?:" + pattern + r")(?!\w)", re.I) for key, pattern in CUISINES.items()

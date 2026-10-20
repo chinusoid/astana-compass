@@ -66,6 +66,7 @@ def test_actual_snapshot_botanical_alias_is_one_named_destination(query, locale)
 @pytest.mark.parametrize("query,locale", [
     ("пицца", "ru"), ("хочу пицу покушать", "ru"), ("пицы", "ru"), ("пиццу", "ru"),
     ("пиццаны жегім келеді", "kk"), ("pizza", "en"), ("eat pizza", "en"),
+    ("пиццерию", "ru"), ("пиццерии", "ru"), ("пиццерией", "ru"), ("pizzeria", "en"),
 ])
 def test_actual_snapshot_pizza_requires_explicit_source_cuisine(query, locale):
     result = search(SnapshotRepository(SNAPSHOT), query, locale)
@@ -87,6 +88,29 @@ def test_original_compound_preserves_named_botanical_destination_and_only_confir
     assert all(place["id"] == GARDEN or set(place["categories"]).intersection({"cafe", "restaurant"})
                for place in result["places"])
     assert all("osm:cuisine" in hit["matched_fact_keys"] for hit in result["hits"][1:])
+
+
+@pytest.mark.parametrize("query,locale", [
+    ("хочу в ботанический сад и в пиццерию", "ru"),
+    ("сначала пиццерия, затем ботанический сад", "ru"),
+    ("Botanical Garden and a pizzeria", "en"),
+])
+def test_actual_snapshot_named_garden_and_pizzeria_keep_confirmed_food(query, locale):
+    result = search(SnapshotRepository(SNAPSHOT), query, locale)
+    assert ids(result)[0] == GARDEN
+    assert len(result["places"]) == 13
+    assert all("osm:cuisine" in hit["matched_fact_keys"] for hit in result["hits"][1:])
+
+
+@pytest.mark.parametrize("verb", ["перекусить", "пообедать", "поужинать"])
+def test_actual_snapshot_meal_verbs_select_food_and_keep_named_garden(verb):
+    result = search(SnapshotRepository(SNAPSHOT), verb)
+    assert result["places"]
+    assert all("restaurant" in place["categories"] for place in result["places"])
+    compound = search(SnapshotRepository(SNAPSHOT), "ботанический сад и " + verb)
+    assert ids(compound)[0] == GARDEN
+    assert len(compound["places"]) > 1
+    assert all(place["id"] == GARDEN or "restaurant" in place["categories"] for place in compound["places"])
 
 
 def test_generic_green_destination_and_dish_keep_both_intents_without_arbitrary_cafes():
