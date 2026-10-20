@@ -30,13 +30,22 @@
   }
   .shell :global(.app-rail) {
     position: absolute;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(min-content, 1fr));
+    gap: 0;
     z-index: 25;
     inset: auto 0 0;
     height: var(--mobile-nav);
     background: #17221c;
     border-color: #34473b;
     color: #dce8df;
-    padding-bottom: calc(5px + env(safe-area-inset-bottom));
+    padding: 3px 4px calc(3px + env(safe-area-inset-bottom));
+  }
+  .shell :global(.rail-link) {
+    padding-inline: 2px;
+    font-size: 10px;
+    overflow-wrap: normal;
+    white-space: nowrap;
   }
   .shell :global(.rail-link),
   .shell :global(.rail-language select) {
@@ -53,6 +62,22 @@
   .shell :global(.rail-language select) {
     background: #17221c;
     border-color: #496351;
+    min-height: 42px;
+    padding-inline: 2px;
+    font-size: 11px;
+  }
+  .shell :global(.rail-language) {
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 8px);
+    right: 8px;
+    z-index: 26;
+    width: 60px;
+    height: 44px;
+    margin: 0;
+    padding-inline: 3px;
+    border: 1px solid #496351;
+    border-radius: 11px;
+    background: #17221c;
   }
   .shell :global(.app-sidebar) {
     position: absolute;
@@ -202,6 +227,8 @@
     --soft-green: #233e2d;
     --green: #98e8b3;
     --green-dark: #98e8b3;
+    --voice-status: #f0bcd0;
+    --voice-error: #ffd0a8;
     display: block;
     flex: 1;
     min-height: 0;
@@ -317,6 +344,7 @@
   }
   .shell :global(.map-heading) {
     padding-top: max(8px, env(safe-area-inset-top));
+    padding-right: 84px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

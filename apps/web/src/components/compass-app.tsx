@@ -1061,7 +1061,9 @@ export default function CompassApp({
             wish={form.query}
             summary={selected.length ? routeSummary : ""}
             ideasCount={
-              view === "walk" ? (result?.suggestions?.length ?? 0) : 0
+              view === "walk" && !scenarioDirty && !searching
+                ? (result?.suggestions?.length ?? 0)
+                : 0
             }
             onOpenIdeas={() => {
               resizeMobileSheet("expanded");
@@ -1746,14 +1748,16 @@ export default function CompassApp({
                             return place && card(place, recommendation);
                           })}
                         </div>
-                        <RouteIdeas
-                          suggestions={result.suggestions ?? []}
-                          places={result.places}
-                          selectedIds={selected.map((place) => place.id)}
-                          locale={locale}
-                          onAdd={selectStop}
-                          onDetails={(id) => void showDetails(id)}
-                        />
+                        {!scenarioDirty && !searching && (
+                          <RouteIdeas
+                            suggestions={result.suggestions ?? []}
+                            places={result.places}
+                            selectedIds={selected.map((place) => place.id)}
+                            locale={locale}
+                            onAdd={selectStop}
+                            onDetails={(id) => void showDetails(id)}
+                          />
+                        )}
                         <Warnings
                           warnings={result.warnings}
                           locale={locale}

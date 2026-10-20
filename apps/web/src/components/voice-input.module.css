@@ -17,17 +17,17 @@
   gap: 0.4rem;
   min-height: 2.6rem;
   padding: 0.5rem 0.8rem;
-  border: 1px solid #c7d9d0;
+  border: 1px solid var(--line, #c7d9d0);
   border-radius: 0.8rem;
-  background: #fff;
-  color: #23533e;
+  background: var(--white, #fff);
+  color: var(--green-dark, #23533e);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
 }
 .record:hover:not(:disabled),
 .cancel:hover {
-  background: #edf6f0;
+  background: var(--soft-green, #edf6f0);
 }
 .record:disabled {
   opacity: 0.6;
@@ -52,29 +52,30 @@
 }
 .hint {
   max-width: 46rem;
-  color: #537364;
+  color: var(--muted, #537364);
   font-size: 0.72rem;
   line-height: 1.45;
 }
 .status {
-  color: #74334b;
+  color: var(--voice-status, #74334b);
   font-size: 0.82rem;
 }
 .error {
-  color: #8b451c;
+  color: var(--voice-error, #8b451c);
   font-size: 0.8rem;
   line-height: 1.5;
 }
 .draft {
   padding: 0.65rem 0.8rem;
-  border: 1px solid #bad6c8;
+  border: 1px solid var(--line, #bad6c8);
   border-radius: 0.8rem;
-  background: #f0f8f3;
+  background: var(--white, #f0f8f3);
+  color: var(--ink, #192c22);
   font-size: 0.85rem;
   line-height: 1.5;
 }
 .draft small {
-  color: #537364;
+  color: var(--muted, #537364);
 }
 .indicator {
   display: inline-flex;
@@ -86,7 +87,7 @@
   display: block;
   width: 4px;
   height: 0.55rem;
-  background: #a52b43;
+  background: var(--voice-status, #a52b43);
   border-radius: 3px;
   animation: listening 0.75s ease-in-out infinite alternate;
 }

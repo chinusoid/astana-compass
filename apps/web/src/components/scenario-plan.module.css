@@ -4,9 +4,10 @@
   min-width: 0;
   padding: 14px;
   margin: 12px 0;
-  border: 1px solid #d7e6d9;
+  border: 1px solid var(--line, #d7e6d9);
   border-radius: 12px;
-  background: #f5f9f4;
+  background: var(--soft-green, #f5f9f4);
+  color: var(--ink, #192c22);
   font-size: 12px;
   line-height: 1.55;
   overflow-wrap: anywhere;

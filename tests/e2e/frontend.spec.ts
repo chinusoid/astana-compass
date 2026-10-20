@@ -1060,6 +1060,22 @@ for (const [locale, name] of [
         );
         await page.getByTestId("mobile-sheet-controls").locator("a").click();
         await expect(page.locator('textarea[name="query"]')).toBeVisible();
+        const destinations = page.locator(".app-rail .rail-link");
+        await expect(destinations).toHaveCount(6);
+        for (const destination of await destinations.all()) {
+          await expect(destination).toBeVisible();
+          const size = await destination.evaluate((element) => {
+            const text = element.querySelector("span:not(.count)")!;
+            return {
+              fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
+              labelWidth: text.getBoundingClientRect().width,
+              cellWidth: element.getBoundingClientRect().width,
+            };
+          });
+          expect(size.fontSize).toBeGreaterThanOrEqual(10);
+          expect(size.labelWidth).toBeLessThanOrEqual(size.cellWidth);
+        }
+        await expect(page.locator(".rail-language select")).toBeVisible();
       }
       await expect(page.locator("html")).toHaveAttribute("lang", locale);
       expect(
@@ -1073,7 +1089,10 @@ for (const [locale, name] of [
       expect(
         audit.violations.map((v) => ({
           id: v.id,
-          nodes: v.nodes.map((n) => n.target),
+          nodes: v.nodes.map((n) => ({
+            target: n.target,
+            failureSummary: n.failureSummary,
+          })),
         })),
       ).toEqual([]);
       await screenshot(page, `${locale}-${width}`);

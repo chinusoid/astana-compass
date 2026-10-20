@@ -618,13 +618,11 @@ it.each([false, true])(
           return Response.json({
             ...seed,
             places,
-            recommendations: places
-              .slice(0, 2)
-              .map((place, index) => ({
-                ...seed.recommendations[0],
-                place_id: place.id,
-                rank: index + 1,
-              })),
+            recommendations: places.slice(0, 2).map((place, index) => ({
+              ...seed.recommendations[0],
+              place_id: place.id,
+              rank: index + 1,
+            })),
             suggestions: [
               {
                 place_id: places[2].id,
@@ -712,6 +710,20 @@ it.each([false, true])(
         name: `Добавить в маршрут: ${places[2].name}`,
       }),
     ).toBeEnabled();
+    await user.type(
+      screen.getByRole("textbox", { name: t("ru", "query") }),
+      " и реку",
+    );
+    expect(screen.queryByTestId("route-ideas")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Идеи по пути: 1" }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
+    );
+    await waitFor(() => expect(submitted).toHaveLength(4));
+    await openIdeas();
+    expect(screen.getByTestId("route-ideas")).toBeVisible();
   },
 );
 
