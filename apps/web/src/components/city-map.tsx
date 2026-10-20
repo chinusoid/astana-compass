@@ -24,6 +24,7 @@ import type { Map as LibreMap, Marker } from "maplibre-gl";
 import { t, type Locale } from "@/lib/i18n";
 import { mapText } from "@/lib/map-copy";
 import { buildingLookupPoint } from "@/lib/map-building";
+import { LOCATION_TIMEOUT_MS } from "@/lib/geolocation";
 import { keepPopupInMap } from "@/lib/map-popup-bounds";
 import {
   ASTANA_VIEW,
@@ -69,6 +70,7 @@ type Props = {
   selectedIds: string[];
   routeStopIds?: string[];
   overviewRequest?: number;
+  locationFoundRequest?: number;
   route: RouteEstimate | null;
   locale: Locale;
   picking: boolean;
@@ -80,6 +82,7 @@ type Props = {
   onPick: (point: Location) => void;
   onSelect: (id: string) => void;
   onDetails?: (id: string) => void;
+  onLocationFound?: () => void;
 };
 
 type Camera = { center: [number, number]; zoom: number; bearing: number };
@@ -124,9 +127,10 @@ export default function CityMap(props: Props) {
   const [attempt, setAttempt] = useState(0);
   const [picked, setPicked] = useState(false);
   const [followState, setFollowState] = useState<
-    "idle" | "following" | "paused" | "denied" | "unavailable"
+    "idle" | "loading" | "following" | "paused" | "denied" | "unavailable"
   >("idle");
   const followMode = useRef<"idle" | "following" | "paused">("idle");
+  const clearFollowError = useRef<(() => void) | null>(null);
   const [motionEnabled, setMotionEnabled] = useState(true);
   const [motionStatus, setMotionStatus] = useState<MotionStatus>("empty");
   const [revealingRoute, setRevealingRoute] = useState(false);
@@ -173,11 +177,43 @@ export default function CityMap(props: Props) {
   });
 
   useEffect(() => {
+    if (props.locationFoundRequest) clearFollowError.current?.();
+  }, [props.locationFoundRequest]);
+
+  useEffect(() => {
     if (!props.enabled || !container.current) return;
     let disposed = false;
     let localMap: LibreMap | null = null;
     let loadingTimer: ReturnType<typeof setTimeout> | undefined;
     let observer: ResizeObserver | undefined;
+    let followTimer: ReturnType<typeof setTimeout> | undefined;
+    let hasFollowFix = false;
+    let followFailed = false;
+    const clearFollowTimer = () => {
+      clearTimeout(followTimer);
+      followTimer = undefined;
+    };
+    const waitForFollowFix = () => {
+      if (followFailed) return;
+      setFollowState("loading");
+      // A native watch continues after temporary errors. Give it the same
+      // bounded recovery window as the planner rather than announcing failure.
+      if (followTimer === undefined)
+        followTimer = setTimeout(() => {
+          followTimer = undefined;
+          followFailed = true;
+          if (!disposed) setFollowState("unavailable");
+        }, LOCATION_TIMEOUT_MS);
+    };
+    clearFollowError.current = () => {
+      followFailed = false;
+      clearFollowTimer();
+      setFollowState((state) =>
+        state === "denied" || state === "unavailable" || state === "loading"
+          ? "idle"
+          : state,
+      );
+    };
     const host = container.current;
     const clearLoadingTimer = () => {
       if (loadingTimer) clearTimeout(loadingTimer);
@@ -258,26 +294,36 @@ export default function CityMap(props: Props) {
           geolocate.on("trackuserlocationstart", () => {
             if (!disposed) {
               followMode.current = "following";
-              setFollowState("following");
+              followFailed = false;
+              clearFollowTimer();
+              if (hasFollowFix) {
+                setFollowState("following");
+              } else waitForFollowFix();
             }
           });
           geolocate.on("trackuserlocationend", () => {
             if (!disposed) {
               followMode.current = "paused";
+              clearFollowTimer();
               setFollowState("paused");
             }
           });
           geolocate.on("geolocate", () => {
-            if (!disposed)
-              setFollowState((state) =>
-                state === "denied" || state === "unavailable"
-                  ? followMode.current
-                  : state,
-              );
+            if (disposed) return;
+            hasFollowFix = true;
+            followFailed = false;
+            clearFollowTimer();
+            setFollowState(followMode.current);
+            current.current.onLocationFound?.();
           });
           geolocate.on("error", (event) => {
-            if (!disposed)
-              setFollowState(event.code === 1 ? "denied" : "unavailable");
+            if (disposed) return;
+            hasFollowFix = false;
+            if (event.code === 1) {
+              followFailed = true;
+              clearFollowTimer();
+              setFollowState("denied");
+            } else waitForFollowFix();
           });
           map.addControl(geolocate, "top-right");
           map.addControl(
@@ -374,6 +420,8 @@ export default function CityMap(props: Props) {
     return () => {
       disposed = true;
       clearLoadingTimer();
+      clearFollowTimer();
+      clearFollowError.current = null;
       observer?.disconnect();
       retryJourneyFit.current = null;
       stopMotion.current?.();
@@ -1330,13 +1378,15 @@ export default function CityMap(props: Props) {
         {followState !== "idle" && (
           <span className="map-footer-notice" role="status" aria-live="polite">
             {text(
-              followState === "following"
-                ? "following"
-                : followState === "paused"
-                  ? "followPaused"
-                  : followState === "denied"
-                    ? "followDenied"
-                    : "followUnavailable",
+              followState === "loading"
+                ? "followLoading"
+                : followState === "following"
+                  ? "following"
+                  : followState === "paused"
+                    ? "followPaused"
+                    : followState === "denied"
+                      ? "followDenied"
+                      : "followUnavailable",
             )}
           </span>
         )}

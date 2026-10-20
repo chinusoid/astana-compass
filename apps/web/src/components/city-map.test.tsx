@@ -12,6 +12,7 @@ import type { Place, RouteEstimate } from "@astana/api-client";
 import examples from "../../../../contracts.examples.json";
 import { BUILDING_LAYER } from "@/lib/map-style";
 import { mapText } from "@/lib/map-copy";
+import { LOCATION_TIMEOUT_MS } from "@/lib/geolocation";
 import CityMap from "./city-map";
 
 const fake = vi.hoisted(() => ({
@@ -219,6 +220,7 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -235,6 +237,7 @@ const props = (): ComponentProps<typeof CityMap> => ({
   onEnable: vi.fn(),
   onPick: vi.fn(),
   onSelect: vi.fn(),
+  onLocationFound: vi.fn(),
 });
 async function loadMap() {
   await waitFor(() => expect(fake.maps.length).toBeGreaterThan(0));
@@ -270,11 +273,19 @@ it("adds user-controlled camera following without changing the route or starting
   ).toBe(mapText("ru", "followLocation"));
   expect(watch).not.toHaveBeenCalled();
   act(() => control.emit("trackuserlocationstart"));
+  expect(screen.getByText(mapText("ru", "followLoading"))).toBeVisible();
+  expect(
+    screen.queryByText(mapText("ru", "following")),
+  ).not.toBeInTheDocument();
+  act(() => control.emit("geolocate"));
   expect(screen.getByText(mapText("ru", "following"))).toBeVisible();
   act(() => control.emit("trackuserlocationend"));
   expect(screen.getByText(mapText("ru", "followPaused"))).toBeVisible();
   act(() => control.emit("error", { code: 2 }));
-  expect(screen.getByText(mapText("ru", "followUnavailable"))).toBeVisible();
+  expect(screen.getByText(mapText("ru", "followLoading"))).toBeVisible();
+  expect(
+    screen.queryByText(mapText("ru", "followUnavailable")),
+  ).not.toBeInTheDocument();
   act(() => control.emit("geolocate"));
   expect(screen.getByText(mapText("ru", "followPaused"))).toBeVisible();
   expect(
@@ -287,13 +298,62 @@ it("adds user-controlled camera following without changing the route or starting
   act(() => control.emit("error", { code: 1 }));
   expect(screen.getByText(mapText("ru", "followDenied"))).toBeVisible();
   act(() => control.emit("error", { code: 2 }));
-  expect(screen.getByText(mapText("ru", "followUnavailable"))).toBeVisible();
+  expect(screen.getByText(mapText("ru", "followDenied"))).toBeVisible();
+  act(() => control.emit("geolocate"));
+  expect(
+    screen.queryByText(mapText("ru", "followDenied")),
+  ).not.toBeInTheDocument();
+  expect(config.onLocationFound).toHaveBeenCalledTimes(4);
   expect(config.onPick).not.toHaveBeenCalled();
   expect(config.onSelect).not.toHaveBeenCalled();
   view.unmount();
   // MapLibre's map.remove calls each native control's onRemove, which clears
   // its geolocation watch. The integration must always remove that map.
   expect(map.remove).toHaveBeenCalledOnce();
+});
+
+it("shows a terminal map error only after recovery expires and clears it on a late fix", async () => {
+  const config = props();
+  const view = render(<CityMap {...config} />);
+  await loadMap();
+  vi.useFakeTimers();
+  const control = fake.geolocates[0];
+  act(() => control.emit("trackuserlocationstart"));
+  act(() => control.emit("error", { code: 2 }));
+  act(() => vi.advanceTimersByTime(LOCATION_TIMEOUT_MS - 1));
+  expect(screen.getByText(mapText("ru", "followLoading"))).toBeVisible();
+  act(() => vi.advanceTimersByTime(1));
+  expect(screen.getByText(mapText("ru", "followUnavailable"))).toBeVisible();
+  act(() => control.emit("error", { code: 3 }));
+  expect(screen.getByText(mapText("ru", "followUnavailable"))).toBeVisible();
+  act(() => control.emit("geolocate"));
+  expect(
+    screen.queryByText(mapText("ru", "followUnavailable")),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText(mapText("ru", "following"))).toBeVisible();
+  act(() => vi.runOnlyPendingTimers());
+  expect(screen.getByText(mapText("ru", "following"))).toBeVisible();
+  act(() => control.emit("error", { code: 2 }));
+  view.unmount();
+  act(() => vi.runOnlyPendingTimers());
+  act(() => control.emit("geolocate"));
+  expect(config.onLocationFound).toHaveBeenCalledTimes(1);
+});
+
+it("clears map failure feedback after the planner finds a location without moving the camera", async () => {
+  const config = props();
+  const view = render(<CityMap {...config} locationFoundRequest={0} />);
+  const map = await loadMap();
+  const control = fake.geolocates[0];
+  act(() => control.emit("error", { code: 1 }));
+  expect(screen.getByText(mapText("ru", "followDenied"))).toBeVisible();
+  map.easeTo.mockClear();
+  view.rerender(<CityMap {...config} locationFoundRequest={1} />);
+  expect(
+    screen.queryByText(mapText("ru", "followDenied")),
+  ).not.toBeInTheDocument();
+  expect(map.easeTo).not.toHaveBeenCalled();
+  expect(config.onPick).not.toHaveBeenCalled();
 });
 
 it("fits all three stops and origin without inventing a line for approximate routes", async () => {

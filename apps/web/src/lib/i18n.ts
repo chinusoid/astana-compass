@@ -190,6 +190,16 @@ const messages = {
     "Орналасқан жеріңіз қолжетімсіз. Нүктені қолмен көрсетсеңіз жеткілікті.",
     "Location is unavailable. You can still enter a starting point manually.",
   ],
+  geoPermissionDenied: [
+    "Доступ к местоположению запрещён. Разрешите его в настройках браузера или укажите старт вручную.",
+    "Геолокацияға рұқсат жоқ. Браузер баптауларында рұқсат беріңіз немесе бастау нүктесін қолмен көрсетіңіз.",
+    "Location access is denied. Allow it in your browser settings or enter a starting point manually.",
+  ],
+  geoTimeout: [
+    "Не удалось определить местоположение за отведённое время. Повторите запрос или укажите старт вручную.",
+    "Берілген уақытта орналасқан жеріңіз анықталмады. Қайталап көріңіз немесе бастау нүктесін қолмен көрсетіңіз.",
+    "Finding your location timed out. Try again or enter a starting point manually.",
+  ],
   pickMap: ["Выбрать на карте", "Картадан таңдау", "Pick on the map"],
   picking: [
     "Нажмите на карту, чтобы выбрать старт",

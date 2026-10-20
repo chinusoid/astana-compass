@@ -191,9 +191,10 @@ export default function CompassApp({
   const [overviewRequest, setOverviewRequest] = useState(0);
   const [mapEnabled, setMapEnabled] = useState(true);
   const [picking, setPicking] = useState(true);
-  const [geoState, setGeoState] = useState<"idle" | "loading" | "error">(
-    "idle",
-  );
+  const [geoState, setGeoState] = useState<
+    "idle" | "loading" | "unavailable" | "denied" | "timeout"
+  >("idle");
+  const [locationFoundRequest, setLocationFoundRequest] = useState(0);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [detail, setDetail] = useState<Place | null>(null);
   const [detailError, setDetailError] = useState<ApiError | null>(null);
@@ -608,12 +609,12 @@ export default function CompassApp({
   }
   function locate() {
     const version = ++geoVersion.current;
+    geoCancel.current?.();
     setGeoState("loading");
     if (!navigator.geolocation) {
-      setGeoState("error");
+      setGeoState("unavailable");
       return;
     }
-    geoCancel.current?.();
     geoCancel.current = requestLocation(
       navigator.geolocation,
       (position) => {
@@ -626,10 +627,18 @@ export default function CompassApp({
           true,
         );
         setGeoState("idle");
+        setLocationFoundRequest((request) => request + 1);
         setPicking(false);
       },
-      () => {
-        if (version === geoVersion.current) setGeoState("error");
+      (error) => {
+        if (version === geoVersion.current)
+          setGeoState(
+            error.code === 1
+              ? "denied"
+              : error.code === 3
+                ? "timeout"
+                : "unavailable",
+          );
       },
     );
   }
@@ -834,9 +843,16 @@ export default function CompassApp({
           {t(locale, "picking")}
         </p>
       )}
-      {geoState === "error" && (
+      {geoState !== "idle" && geoState !== "loading" && (
         <p className="small warning-text" role="status">
-          {t(locale, "geoDenied")}
+          {t(
+            locale,
+            geoState === "denied"
+              ? "geoPermissionDenied"
+              : geoState === "timeout"
+                ? "geoTimeout"
+                : "geoDenied",
+          )}
         </p>
       )}
       <details className="advanced-origin">
@@ -2117,6 +2133,7 @@ export default function CompassApp({
             route={displayedRoute}
             routeStopIds={routeStopIds}
             overviewRequest={overviewRequest}
+            locationFoundRequest={locationFoundRequest}
             locale={locale}
             picking={
               picking &&
@@ -2124,6 +2141,9 @@ export default function CompassApp({
             }
             enabled={mapEnabled}
             provider={mapProvider}
+            onLocationFound={() =>
+              setGeoState((state) => (state === "loading" ? state : "idle"))
+            }
             onEnable={() => setMapEnabled(true)}
             onPick={(point) => {
               updateForm(

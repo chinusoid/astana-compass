@@ -47,11 +47,13 @@ vi.mock("next/dynamic", () => ({
       selectedIds: string[];
       routeStopIds: string[];
       overviewRequest: number;
+      locationFoundRequest: number;
       places: Place[];
       origin: { lat: number; lon: number } | null;
       route: unknown;
       onPick: (point: { lat: number; lon: number }) => void;
       onSelect: (id: string) => void;
+      onLocationFound: () => void;
     }) {
       return (
         <div
@@ -64,7 +66,11 @@ vi.mock("next/dynamic", () => ({
           data-route={JSON.stringify(props.route)}
           data-stops={props.routeStopIds.join(",")}
           data-overview={props.overviewRequest}
+          data-location-found={props.locationFoundRequest}
         >
+          <button type="button" onClick={props.onLocationFound}>
+            Map location found
+          </button>
           <button
             type="button"
             onClick={() => props.onPick({ lat: 51.09, lon: 71.42 })}
@@ -127,6 +133,109 @@ function scenarioResponse(
     })),
   };
 }
+
+it.each(locales)(
+  "geolocation denial in %s clears when the map finds a fix and preserves manual start",
+  async (locale) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ places: [], next_cursor: null })),
+    );
+    const getCurrentPosition = vi.fn(
+      (_ok: PositionCallback, fail: PositionErrorCallback) =>
+        fail({ code: 1 } as GeolocationPositionError),
+    );
+    vi.stubGlobal("navigator", { geolocation: { getCurrentPosition } });
+    const user = userEvent.setup();
+    const { container } = render(
+      <CompassApp
+        initialStart="2026-10-19T12:00"
+        allowFixtures
+        mapProvider="none"
+      />,
+    );
+    await user.click(screen.getByText(t("ru", "manualOrigin")));
+    await user.type(
+      screen.getByRole("spinbutton", { name: t("ru", "latitude") }),
+      "51.09",
+    );
+    await user.type(
+      screen.getByRole("spinbutton", { name: t("ru", "longitude") }),
+      "71.42",
+    );
+    if (locale !== "ru")
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: t("ru", "language") }),
+        locale,
+      );
+    await user.click(screen.getByRole("button", { name: t(locale, "locate") }));
+    expect(screen.getByText(t(locale, "geoPermissionDenied"))).toBeVisible();
+    expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+    await user.click(
+      screen.getByRole("button", { name: "Map location found" }),
+    );
+    expect(container.querySelector(".start-card .warning-text")).toBeNull();
+    expect(
+      screen.getByRole("spinbutton", { name: t(locale, "latitude") }),
+    ).toHaveValue(51.09);
+    expect(
+      screen.getByRole("spinbutton", { name: t(locale, "longitude") }),
+    ).toHaveValue(71.42);
+  },
+);
+
+it("geolocation success clears an earlier denial and ignores callbacks after a manual edit", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json({ places: [], next_cursor: null })),
+  );
+  const attempts: Array<{ ok: PositionCallback; fail: PositionErrorCallback }> =
+    [];
+  vi.stubGlobal("navigator", {
+    geolocation: {
+      getCurrentPosition: vi.fn((ok, fail) => attempts.push({ ok, fail })),
+    },
+  });
+  const user = userEvent.setup();
+  const { container } = render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: t("ru", "locate") }));
+  act(() => attempts[0].fail({ code: 1 } as GeolocationPositionError));
+  expect(screen.getByText(t("ru", "geoPermissionDenied"))).toBeVisible();
+  await user.click(screen.getByRole("button", { name: t("ru", "locate") }));
+  expect(container.querySelector(".start-card .warning-text")).toBeNull();
+  act(() =>
+    attempts[1].ok({
+      coords: { latitude: 51.123456, longitude: 71.456789 },
+    } as GeolocationPosition),
+  );
+  expect(screen.getByTestId("map")).toHaveAttribute("data-location-found", "1");
+  expect(screen.getByTestId("map")).toHaveAttribute(
+    "data-origin",
+    JSON.stringify({ lat: 51.123456, lon: 71.456789 }),
+  );
+  await user.click(screen.getByRole("button", { name: t("ru", "locate") }));
+  await user.click(screen.getByText(t("ru", "manualOrigin")));
+  fireEvent.change(
+    screen.getByRole("spinbutton", { name: t("ru", "latitude") }),
+    { target: { value: "51.095" } },
+  );
+  act(() =>
+    attempts[2].ok({
+      coords: { latitude: 52, longitude: 72 },
+    } as GeolocationPosition),
+  );
+  act(() => attempts[2].fail({ code: 1 } as GeolocationPositionError));
+  expect(
+    screen.getByRole("spinbutton", { name: t("ru", "latitude") }),
+  ).toHaveValue(51.095);
+  expect(container.querySelector(".start-card .warning-text")).toBeNull();
+});
 
 it("automatically connects all three recommendations and keeps the whole path while browsing", async () => {
   const seed = structuredClone(

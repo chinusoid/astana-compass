@@ -592,7 +592,7 @@ for (const code of ["provider_unavailable", "rate_limited"] as const) {
   });
 }
 
-test("a temporary location error keeps the loading state until the retry finds the start", async ({
+test("repeated temporary location errors keep loading until a later retry finds the start", async ({
   page,
 }) => {
   await page.evaluate(() => {
@@ -606,7 +606,7 @@ test("a temporary location error keeps the loading state until the retry finds t
           }) => void,
           failure: (error: { code: number }) => void,
         ) => {
-          if (attempts++ === 0) failure({ code: 2 });
+          if (attempts++ < 2) failure({ code: 2 });
           else
             success({ coords: { latitude: 51.123456, longitude: 71.456789 } });
         },
@@ -630,6 +630,102 @@ test("a temporary location error keeps the loading state until the retry finds t
   ).toBeEnabled();
 });
 
+test("location recovery expires with a retryable timeout and a new fix clears the error", async ({
+  page,
+}) => {
+  const now = new Date("2026-10-20T12:00:00Z");
+  await page.clock.install({ time: now });
+  await page.clock.pauseAt(new Date(now.getTime() + 1_000));
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: {
+        getCurrentPosition: (
+          _success: unknown,
+          failure: (error: { code: number }) => void,
+        ) => failure({ code: 3 }),
+      },
+    });
+  });
+  await page
+    .getByRole("button", { name: t("ru", "locate"), exact: true })
+    .click();
+  await page.clock.fastForward(19_999);
+  await expect(
+    page.getByRole("button", { name: t("ru", "locating"), exact: true }),
+  ).toBeDisabled();
+  await expect(page.locator(".start-card .warning-text")).toHaveCount(0);
+  await page.clock.fastForward(1);
+  await expect(page.getByText(t("ru", "geoTimeout"))).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: {
+        getCurrentPosition: (
+          success: (position: {
+            coords: { latitude: number; longitude: number };
+          }) => void,
+        ) => success({ coords: { latitude: 51.123456, longitude: 71.456789 } }),
+      },
+    });
+  });
+  await page
+    .getByRole("button", { name: t("ru", "locate"), exact: true })
+    .click();
+  await expect(page.locator('input[name="latitude"]')).toHaveValue("51.123456");
+  await expect(page.locator(".start-card .warning-text")).toHaveCount(0);
+});
+
+test("a map camera fix clears an earlier planner denial while preserving the chosen start", async ({
+  page,
+}) => {
+  await manualStart(page);
+  await expect(page.locator(".maplibregl-ctrl-geolocate")).toBeEnabled();
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: {
+        getCurrentPosition: (
+          _success: unknown,
+          failure: (error: { code: number }) => void,
+        ) => failure({ code: 1 }),
+        watchPosition: (success: PositionCallback) => {
+          (
+            window as unknown as { finishMapLocation: () => void }
+          ).finishMapLocation = () =>
+            success({
+              coords: {
+                latitude: 51.123456,
+                longitude: 71.456789,
+                accuracy: 20,
+                altitude: null,
+                altitudeAccuracy: null,
+                heading: null,
+                speed: null,
+              },
+              timestamp: Date.now(),
+            } as GeolocationPosition);
+          return 7;
+        },
+        clearWatch: () => {},
+      },
+    });
+  });
+  await page
+    .getByRole("button", { name: t("ru", "locate"), exact: true })
+    .click();
+  await expect(page.getByText(t("ru", "geoPermissionDenied"))).toBeVisible();
+  await page.locator(".maplibregl-ctrl-geolocate").click();
+  await page.evaluate(() =>
+    (
+      window as unknown as { finishMapLocation: () => void }
+    ).finishMapLocation(),
+  );
+  await expect(page.locator(".start-card .warning-text")).toHaveCount(0);
+  await expect(page.locator('input[name="latitude"]')).toHaveValue("51.090");
+  await expect(page.locator('input[name="longitude"]')).toHaveValue("71.420");
+});
+
 test("geolocation denial preserves manual entry; late callbacks cannot overwrite a manual edit", async ({
   page,
 }) => {
@@ -647,7 +743,7 @@ test("geolocation denial preserves manual entry; late callbacks cannot overwrite
   await page
     .getByRole("button", { name: "Моё местоположение", exact: true })
     .click();
-  await expect(page.getByText(/Местоположение недоступно/)).toBeVisible();
+  await expect(page.getByText(t("ru", "geoPermissionDenied"))).toBeVisible();
   await fill(page);
   await search(page);
   await page.evaluate(() => {
