@@ -1142,7 +1142,7 @@ class PlannedJourneyTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(value["request"]["limit"], 3)
         self.assertEqual(len(self.context.routes), 6)
         self.assertLessEqual(self.context.max_routes, 4)
-        self.assertEqual(len(self.service.generator.calls), 6)
+        self.assertEqual(len(self.service.generator.calls), 0)
         self.assertEqual([payload["query"] for payload in self.retriever.requests], list(mapping))
         self.assertEqual(self.retriever.requests[0]["named_place"], "The Sphere")
         self.assertEqual(self.retriever.requests[1]["cuisine"], "sushi")

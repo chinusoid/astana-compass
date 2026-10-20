@@ -418,7 +418,10 @@ class DefaultRecommendationService:
         )
         result = GroundedExplanation(reasons[:8])
         warnings = []
-        if self.generator:
+        # The planner interprets the complete scenario once. Per-stop reasons
+        # stay source-grounded without spending another model call for every
+        # recommendation and every subsequent itinerary recalculation.
+        if self.generator and self.planner is None:
             try:
                 generated = await asyncio.wait_for(
                     self.generator.generate(

@@ -28,6 +28,10 @@ Importing the package creates no clients, makes no requests and reads no secrets
   canonical `JourneyPlan` preserves source quotes, explicit or suggested order,
   named destinations, food goals and unresolved wishes. Invalid extraction or
   planner failure retains an unresolved goal and asks for clarification.
+- Planner-backed requests interpret the whole scenario once. Per-stop reasons
+  use source facts and localized templates rather than additional model calls,
+  including when a user removes a stop and rebuilds the itinerary. The legacy
+  no-planner path still supports an optional grounded explanation generator.
 - Each concrete goal retrieves independently with grounded `named_place`,
   `cuisine` and optional source `categories` filters. The retrieval port must verify names against source aliases
   and food against known, cited cuisine facts. A name or description cannot

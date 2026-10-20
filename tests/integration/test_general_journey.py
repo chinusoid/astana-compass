@@ -67,7 +67,16 @@ def test_full_semantic_scenario_covers_real_stops_and_reports_missing_goal(monke
         "start_at": datetime.now(timezone.utc).isoformat(), "timezone": "Asia/Almaty",
         "available_seconds": 60, "transport": "walking", "return_to_origin": False,
         "constraints": [], "limit": 3}
+    class UnexpectedExplanationGenerator:
+        calls = 0
+
+        async def generate(self, **kwargs):
+            self.calls += 1
+            raise AssertionError("A semantic plan must not generate every stop again")
+
+    generator = UnexpectedExplanationGenerator()
     with TestClient(create_app(Settings(mode="live", llm_provider="none"))) as client:
+        client.app.state.services.recommender.generator = generator
         response = client.post("/v1/recommendations", json=payload)
         assert response.status_code == 200, response.text
         result = response.json()
@@ -91,4 +100,5 @@ def test_full_semantic_scenario_covers_real_stops_and_reports_missing_goal(monke
         assert [stop["place_id"] for stop in built["stops"]] == ids
         assert built["total_duration_seconds"] > payload["available_seconds"]
     assert len(requests) == 1
+    assert generator.calls == 0
     assert not unexpected
