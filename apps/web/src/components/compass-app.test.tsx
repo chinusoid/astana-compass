@@ -24,6 +24,7 @@ import { intentText } from "@/lib/intent-copy";
 import { mapText } from "@/lib/map-copy";
 import { useSharedPlanner } from "@/lib/shared-planner";
 import { walkText } from "@/lib/walk-copy";
+import { LOCATION_TIMEOUT_MS } from "@/lib/geolocation";
 
 const navigation = vi.hoisted(() => ({ pathname: "/walk" }));
 const intentMock = vi.hoisted(() => vi.fn());
@@ -235,6 +236,77 @@ it("geolocation success clears an earlier denial and ignores callbacks after a m
     screen.getByRole("spinbutton", { name: t("ru", "latitude") }),
   ).toHaveValue(51.095);
   expect(container.querySelector(".start-card .warning-text")).toBeNull();
+});
+
+it("a map fix cancels pending planner geolocation so stale errors cannot return or replace a manual start", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json({ places: [], next_cursor: null })),
+  );
+  const attempts: Array<{ ok: PositionCallback; fail: PositionErrorCallback }> =
+    [];
+  vi.stubGlobal("navigator", {
+    geolocation: {
+      getCurrentPosition: vi.fn((ok, fail) => attempts.push({ ok, fail })),
+    },
+  });
+  const user = userEvent.setup();
+  const { container } = render(
+    <CompassApp
+      initialStart="2026-10-19T12:00"
+      allowFixtures
+      mapProvider="none"
+    />,
+  );
+  await user.click(screen.getByText(t("ru", "manualOrigin")));
+  fireEvent.change(
+    screen.getByRole("spinbutton", { name: t("ru", "latitude") }),
+    { target: { value: "51.095" } },
+  );
+  fireEvent.change(
+    screen.getByRole("spinbutton", { name: t("ru", "longitude") }),
+    { target: { value: "71.42" } },
+  );
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(screen.getByRole("button", { name: t("ru", "locate") }));
+    act(() => attempts[0].fail({ code: 2 } as GeolocationPositionError));
+    act(() => vi.advanceTimersByTime(800));
+    expect(attempts).toHaveLength(2);
+    expect(
+      screen.getByRole("button", { name: t("ru", "locating") }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Map location found" }));
+    expect(
+      screen.getByRole("button", { name: t("ru", "locate") }),
+    ).toBeEnabled();
+    act(() => {
+      attempts[1].fail({ code: 2 } as GeolocationPositionError);
+      vi.advanceTimersByTime(LOCATION_TIMEOUT_MS);
+      attempts[1].ok({
+        coords: { latitude: 52, longitude: 72 },
+      } as GeolocationPosition);
+      attempts[1].fail({ code: 1 } as GeolocationPositionError);
+    });
+    expect(attempts).toHaveLength(2);
+    expect(container.querySelector(".start-card .warning-text")).toBeNull();
+    expect(
+      screen.getByRole("spinbutton", { name: t("ru", "latitude") }),
+    ).toHaveValue(51.095);
+    expect(
+      screen.getByRole("spinbutton", { name: t("ru", "longitude") }),
+    ).toHaveValue(71.42);
+    expect(screen.getByTestId("map")).toHaveAttribute(
+      "data-origin",
+      JSON.stringify({ lat: 51.095, lon: 71.42 }),
+    );
+    // A later user request still reports its own real permission denial.
+    fireEvent.click(screen.getByRole("button", { name: t("ru", "locate") }));
+    act(() => attempts[2].fail({ code: 1 } as GeolocationPositionError));
+    expect(screen.getByText(t("ru", "geoPermissionDenied"))).toBeVisible();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("automatically connects all three recommendations and keeps the whole path while browsing", async () => {

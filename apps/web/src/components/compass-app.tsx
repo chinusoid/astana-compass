@@ -2162,9 +2162,11 @@ export default function CompassApp({
             }
             enabled={mapEnabled}
             provider={mapProvider}
-            onLocationFound={() =>
-              setGeoState((state) => (state === "loading" ? state : "idle"))
-            }
+            onLocationFound={() => {
+              geoVersion.current++;
+              geoCancel.current?.();
+              setGeoState("idle");
+            }}
             onEnable={() => setMapEnabled(true)}
             onPick={(point) => {
               updateForm(
