@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import math
-from typing import Any
+import time
+from typing import Any, TypeVar
 from uuid import uuid4
 
 from astana_contracts import (
@@ -27,6 +30,22 @@ from .text import TEXT, label
 
 
 DYNAMIC_FACT_KEYS = frozenset({"open_at_requested_time", "weather_suitable"})
+_Result = TypeVar("_Result")
+
+
+@dataclass
+class _WorkBudget:
+    deadline: float
+    clock: Callable[[], float]
+    exhausted: bool = False
+
+    def remaining(self) -> float:
+        return 0.0 if self.exhausted else max(0.0, self.deadline - self.clock())
+
+
+# Each request task and its children inherit their own deadline and expiry flag. A
+# shared service can handle overlapping requests without overwriting budgets.
+_WORK_BUDGET: ContextVar[_WorkBudget | None] = ContextVar("recommender_work_budget", default=None)
 
 
 class RecommenderError(ValueError):
@@ -112,9 +131,11 @@ class DefaultRecommendationService:
         candidate_limit: int = 24,
         radius_meters: float = 10_000,
         timeout_seconds: float = 8,
+        request_budget_seconds: float = 26,
         default_visit_seconds: int = 1_200,
         route_concurrency: int = 4,
         clock: Callable[[], datetime] | None = None,
+        budget_clock: Callable[[], float] | None = None,
     ) -> None:
         if type(candidate_limit) is not int or not 1 <= candidate_limit <= 100:
             raise ValueError("candidate_limit must be an integer from 1 to 100")
@@ -129,8 +150,11 @@ class DefaultRecommendationService:
             or isinstance(timeout_seconds, bool)
             or not math.isfinite(timeout_seconds)
             or timeout_seconds <= 0
+            or isinstance(request_budget_seconds, bool)
+            or not math.isfinite(request_budget_seconds)
+            or request_budget_seconds <= 0
         ):
-            raise ValueError("radius and timeout must be positive finite numbers")
+            raise ValueError("radius, timeout and work budget must be positive finite numbers")
         self.repository = repository
         self.retriever = retriever
         self.context = context
@@ -139,9 +163,48 @@ class DefaultRecommendationService:
         self.candidate_limit = candidate_limit
         self.radius_meters = radius_meters
         self.timeout_seconds = timeout_seconds
+        self.request_budget_seconds = request_budget_seconds
         self.default_visit_seconds = default_visit_seconds
         self.route_concurrency = route_concurrency
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.budget_clock = budget_clock or time.monotonic
+
+    async def _with_budget(self, operation: Callable[[], Awaitable[JSON]]) -> JSON:
+        budget = _WorkBudget(self.budget_clock() + self.request_budget_seconds, self.budget_clock)
+        token = _WORK_BUDGET.set(budget)
+        try:
+            return await operation()
+        finally:
+            _WORK_BUDGET.reset(token)
+
+    @staticmethod
+    def _has_budget() -> bool:
+        budget = _WORK_BUDGET.get()
+        return budget is None or budget.remaining() > 0
+
+    async def _await(self, operation: Callable[[], Awaitable[_Result]]) -> _Result:
+        timeout = self.timeout_seconds
+        budget = _WORK_BUDGET.get()
+        request_limited = False
+        if budget is not None:
+            remaining = budget.remaining()
+            request_limited = remaining <= timeout
+            timeout = min(timeout, remaining)
+        if timeout <= 0:
+            # Do not construct a coroutine or enter a provider after expiry.
+            raise TimeoutError
+        scope = asyncio.timeout(timeout)
+        try:
+            async with scope:
+                return await operation()
+        except TimeoutError:
+            # Event-loop clocks may fire a timer slightly before the injected
+            # monotonic clock reaches its deadline. Remember an actual request
+            # timer expiry, but do not mistake a provider's own TimeoutError for
+            # exhaustion of the request budget.
+            if request_limited and scope.expired() and budget is not None:
+                budget.exhausted = True
+            raise
 
     def _request(self, definition: str, request: JSON) -> JSON:
         validate_payload(definition, request)
@@ -171,6 +234,11 @@ class DefaultRecommendationService:
 
     @staticmethod
     def _finish(response: JSON, *, itinerary: bool = False) -> JSON:
+        budget = _WORK_BUDGET.get()
+        if budget is not None and budget.remaining() <= 0:
+            response["warnings"].append(TEXT[response["request"]["locale"]]["work_deadline"])
+            if response["status"] == "matched":
+                response["status"] = "partial"
         response["warnings"] = _dedupe(response["warnings"])
         return validate_payload(
             "ItineraryResponse" if itinerary else "RecommendationResponse", response
@@ -197,9 +265,7 @@ class DefaultRecommendationService:
                            categories=deepcopy(stage.get("categories", [])))
         validate_payload("RetrievalRequest", payload)
         try:
-            result = await asyncio.wait_for(
-                self.retriever.retrieve(payload), timeout=self.timeout_seconds
-            )
+            result = await self._await(lambda: self.retriever.retrieve(payload))
             validate_payload("RetrievalResponse", result)
             places = {p["id"]: p for p in result["places"]}
             requested_categories = set(stage.get("categories", [])) if stage is not None else set()
@@ -216,13 +282,12 @@ class DefaultRecommendationService:
                 return [], [TEXT[locale]["stage_search_failed"]], True
             warnings = [TEXT[locale]["retrieval_failed"]]
         try:
-            nearby = await asyncio.wait_for(
-                self.repository.nearby(
+            nearby = await self._await(
+                lambda: self.repository.nearby(
                     origin=deepcopy(request["origin"]),
                     radius_meters=self.radius_meters,
                     limit=limit,
                 ),
-                timeout=self.timeout_seconds,
             )
             if type(nearby) is not list:
                 raise ValueError("invalid repository result")
@@ -248,11 +313,10 @@ class DefaultRecommendationService:
         validate_payload("RecommendationRequest", context_request)
         originals = {p["id"]: p for p in candidates}
         try:
-            result = await asyncio.wait_for(
-                self.context.enrich_places(
+            result = await self._await(
+                lambda: self.context.enrich_places(
                     places=deepcopy(candidates), request=context_request
                 ),
-                timeout=self.timeout_seconds,
             )
             validate_payload("ContextResult", result)
             enriched = {p["id"]: p for p in result["places"]}
@@ -344,15 +408,14 @@ class DefaultRecommendationService:
 
     async def _route(self, places: list[JSON], request: JSON) -> JSON | None:
         try:
-            route = await asyncio.wait_for(
-                self.context.estimate_route(
+            route = await self._await(
+                lambda: self.context.estimate_route(
                     origin=deepcopy(request["origin"]),
                     destinations=[deepcopy(p["location"]) for p in places],
                     transport=request["transport"],
                     return_to_origin=request["return_to_origin"],
                     start_at=request["start_at"],
                 ),
-                timeout=self.timeout_seconds,
             )
             validate_payload("RouteEstimate", route)
             if route["transport"] != request["transport"]:
@@ -423,14 +486,13 @@ class DefaultRecommendationService:
         # recommendation and every subsequent itinerary recalculation.
         if self.generator and self.planner is None:
             try:
-                generated = await asyncio.wait_for(
-                    self.generator.generate(
+                generated = await self._await(
+                    lambda: self.generator.generate(
                         locale=locale,
                         query=stage["search_query"] if stage is not None else request["query"],
                         place=deepcopy(place),
                         constraint_evaluations=deepcopy(evaluations),
                     ),
-                    timeout=self.timeout_seconds,
                 )
                 self._validate_explanation(generated, place)
                 result = generated
@@ -484,6 +546,9 @@ class DefaultRecommendationService:
         return warnings
 
     async def recommend(self, request: JSON) -> JSON:
+        return await self._with_budget(lambda: self._recommend(request))
+
+    async def _recommend(self, request: JSON) -> JSON:
         request = self._request("RecommendationRequest", request)
         response = self._base(request)
         text = TEXT[request["locale"]]
@@ -491,10 +556,7 @@ class DefaultRecommendationService:
         planned_degraded = False
         if self.planner is not None:
             try:
-                plan = await asyncio.wait_for(
-                    self.planner.plan(request["query"], request["locale"]),
-                    timeout=self.timeout_seconds,
-                )
+                plan = await self._await(lambda: self.planner.plan(request["query"], request["locale"]))
                 validate_payload("JourneyPlan", plan)
                 if any(stage["source_quote"] not in request["query"] or (
                     stage["named_place"] is not None and stage["named_place"] not in stage["source_quote"]
@@ -628,7 +690,7 @@ class DefaultRecommendationService:
             completed = {}
             used: set[str] = set()
             attempted_stages: set[int] = set()
-            while True:
+            while self._has_budget():
                 batch = []
                 reserved = set(used)
                 anchor = request["origin"]
@@ -690,7 +752,7 @@ class DefaultRecommendationService:
                 degraded = True
                 response["warnings"].extend(text["stage_missing"].format(order=index) for index in missing_stages)
         while (not stages and offset < len(eligible) and len(selected) < request["limit"]
-               and (plan is None or route_attempts < 6)):
+               and (plan is None or route_attempts < 6) and self._has_budget()):
             # Route only as many candidates as can still be returned. A longer
             # outing is a visible alternative, not a reason to scan the pool.
             needed = request["limit"] - len(selected)
@@ -772,15 +834,16 @@ class DefaultRecommendationService:
         return self._finish(response)
 
     async def build_itinerary(self, request: JSON) -> JSON:
+        return await self._with_budget(lambda: self._build_itinerary(request))
+
+    async def _build_itinerary(self, request: JSON) -> JSON:
         request = self._request("ItineraryRequest", request)
         response = self._base(request, itinerary=True)
         text = TEXT[request["locale"]]
 
         async def fetch(place_id: str) -> JSON | None:
             try:
-                place = await asyncio.wait_for(
-                    self.repository.get(place_id), timeout=self.timeout_seconds
-                )
+                place = await self._await(lambda: self.repository.get(place_id))
                 if place is None:
                     return None
                 validate_payload("Place", place)

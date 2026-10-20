@@ -6,6 +6,8 @@ import asyncio
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
+import math
+import time
 import unittest
 from unittest.mock import patch
 
@@ -1316,6 +1318,249 @@ class PlannedJourneyTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.context.routes), 1)
         self.assertEqual(self.context.routes[0]["destinations"], [venue["location"] for venue in venues])
         self.assertEqual(value["total_duration_seconds"], 6 * 1200 + 600)
+
+
+class BudgetClock:
+    def __init__(self):
+        self.value = 0.0
+
+    def __call__(self):
+        return self.value
+
+    def advance(self, seconds):
+        self.value += seconds
+
+
+class RequestBudgetTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
+    async def test_fast_clock_bounds_retry_waves_and_keeps_completed_stage(self):
+        clock = BudgetClock()
+        stages = [planned_stage("coffee"), planned_stage("museum")]
+        self.setup_service([place(index) for index in range(1, 9)], planner=Planner(stages),
+                           request_budget_seconds=1, budget_clock=clock, route_concurrency=1)
+        self.service.retriever = PlannedRetriever({"coffee": [place(1)], "museum": [place(i) for i in range(2, 9)]})
+        original = self.context.estimate_route
+        attempts = []
+
+        async def route(**kwargs):
+            attempts.append(kwargs["destinations"][0])
+            if kwargs["destinations"][0] != place(1)["location"]:
+                clock.advance(0.5)
+                raise RuntimeError("unroutable")
+            return await original(**kwargs)
+
+        self.context.estimate_route = route
+        body = request(query="coffee then museum")
+        value = await self.service.recommend(body)
+        self.assertEqual(value["request"], body)
+        self.assertEqual([item["place_id"] for item in value["recommendations"]], [place(1)["id"]])
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(clock.value, 1)
+        self.assertEqual(value["status"], "partial")
+        self.assertIn("stage 2", " ".join(value["warnings"]))
+        self.assertIn("processing time budget", " ".join(value["warnings"]))
+
+    async def test_planner_retrieval_and_enrichment_share_one_budget(self):
+        clock = BudgetClock()
+        planner = Planner([planned_stage("museum")])
+        self.setup_service([place(1)], planner=planner, request_budget_seconds=1, budget_clock=clock)
+        original_plan, original_retrieve, original_enrich = planner.plan, self.retriever.retrieve, self.context.enrich_places
+
+        async def plan(*args):
+            clock.advance(0.25)
+            return await original_plan(*args)
+
+        async def retrieve(payload):
+            clock.advance(0.25)
+            return await original_retrieve(payload)
+
+        async def enrich(**kwargs):
+            clock.advance(0.5)
+            return await original_enrich(**kwargs)
+
+        planner.plan, self.retriever.retrieve, self.context.enrich_places = plan, retrieve, enrich
+        value = await self.service.recommend(request(query="museum"))
+        self.assertEqual(value["status"], "no_match")
+        self.assertFalse(self.context.routes)
+        self.assertIn("processing time budget", " ".join(value["warnings"]))
+
+    async def test_provider_timeout_does_not_prematurely_expire_remaining_request_budget(self):
+        self.setup_service([place(1), place(2)], planner=Planner([planned_stage("museum")]),
+                           request_budget_seconds=1, budget_clock=BudgetClock())
+        original = self.context.estimate_route
+
+        async def route(**kwargs):
+            if kwargs["destinations"][0] == place(1)["location"]:
+                raise TimeoutError("provider timeout")
+            return await original(**kwargs)
+
+        self.context.estimate_route = route
+        value = await self.service.recommend(request(query="museum"))
+        self.assertEqual([item["place_id"] for item in value["recommendations"]], [place(2)["id"]])
+        self.assertNotIn("processing time budget", " ".join(value["warnings"]))
+
+    async def test_short_real_deadline_salvages_fast_route_from_slow_batch(self):
+        stages = [planned_stage("coffee"), planned_stage("museum")]
+        self.setup_service([place(1), place(2)], planner=Planner(stages), request_budget_seconds=0.08,
+                           timeout_seconds=1)
+        self.service.retriever = PlannedRetriever({"coffee": [place(1)], "museum": [place(2)]})
+        original = self.context.estimate_route
+        started, cancelled = [], []
+
+        async def route(**kwargs):
+            location = kwargs["destinations"][0]
+            started.append(location)
+            if location == place(2)["location"]:
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.append(True)
+            return await original(**kwargs)
+
+        self.context.estimate_route = route
+        start = time.monotonic()
+        value = await asyncio.wait_for(self.service.recommend(request(query="coffee then museum")), timeout=0.5)
+        self.assertLess(time.monotonic() - start, 0.3)
+        self.assertEqual(len(started), 2)
+        self.assertEqual(cancelled, [True])
+        self.assertEqual([item["place_id"] for item in value["recommendations"]], [place(1)["id"]])
+        self.assertEqual(value["status"], "partial")
+        self.assertIn("processing time budget", " ".join(value["warnings"]))
+
+    async def test_expired_enrichment_keeps_required_dynamic_fact_fail_closed(self):
+        self.setup_service([place(1, facts=[fact("open_at_requested_time")])], planner=Planner([]),
+                           request_budget_seconds=0.05)
+
+        async def enrich(**kwargs):
+            await asyncio.Event().wait()
+
+        self.context.enrich_places = enrich
+        value = await asyncio.wait_for(self.service.recommend(request(
+            constraints=[constraint("open_at_requested_time")],
+        )), timeout=0.5)
+        self.assertEqual(value["status"], "no_match")
+        self.assertEqual(value["places"], [])
+        self.assertFalse(self.context.routes)
+        self.assertIn("processing time budget", " ".join(value["warnings"]))
+
+    async def test_itinerary_fetch_deadline_never_drops_selected_stop_and_next_request_gets_fresh_budget(self):
+        self.setup_service([place(1), place(2)], request_budget_seconds=0.05)
+        original = self.repo.get
+        cancelled = []
+
+        async def fetch(place_id):
+            if place_id == place(2)["id"]:
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.append(True)
+            return await original(place_id)
+
+        self.repo.get = fetch
+        body = request(place_ids=[place(1)["id"], place(2)["id"]])
+        value = await asyncio.wait_for(self.service.build_itinerary(body), timeout=0.5)
+        self.assertEqual(value["request"], body)
+        self.assertEqual(value["status"], "no_match")
+        self.assertEqual(value["stops"], [])
+        self.assertIsNone(value["route"])
+        self.assertEqual(cancelled, [True])
+        self.assertFalse(self.context.routes)
+        self.repo.get = original
+        fresh = await self.service.build_itinerary(body)
+        self.assertEqual(fresh["status"], "matched")
+        self.assertEqual(len(fresh["stops"]), 2)
+        self.assertNotIn("processing time budget", " ".join(fresh["warnings"]))
+
+    async def test_legacy_explanations_fall_back_with_verified_stops_before_shared_deadline(self):
+        generator = Generator()
+        self.setup_service([place(1), place(2), place(3)], generator=generator, request_budget_seconds=0.06)
+        cancelled = []
+
+        async def generate(**kwargs):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.append(True)
+
+        generator.generate = generate
+        value = await asyncio.wait_for(self.service.recommend(request()), timeout=0.5)
+        self.assertEqual(len(value["recommendations"]), 3)
+        self.assertEqual(len(cancelled), 3)
+        self.assertEqual(value["status"], "partial")
+        self.assertIn("processing time budget", " ".join(value["warnings"]))
+
+    async def test_itinerary_route_deadline_returns_no_match_without_inventing_complete_route(self):
+        self.setup_service([place(1), place(2)], request_budget_seconds=0.05)
+        cancelled = []
+
+        async def route(**kwargs):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.append(True)
+
+        self.context.estimate_route = route
+        body = request(place_ids=[place(1)["id"], place(2)["id"]])
+        value = await asyncio.wait_for(self.service.build_itinerary(body), timeout=0.5)
+        self.assertEqual(value["request"], body)
+        self.assertEqual(value["status"], "no_match")
+        self.assertEqual(value["stops"], [])
+        self.assertIsNone(value["route"])
+        self.assertEqual(value["total_duration_seconds"], 0)
+        self.assertEqual(cancelled, [True])
+        self.assertIn("processing time budget", " ".join(value["warnings"]))
+
+    async def test_concurrent_requests_have_independent_deadlines(self):
+        self.setup_service([place(1)], planner=Planner([]), request_budget_seconds=0.3)
+        original = self.context.estimate_route
+        first_started, second_started, release_second = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def route(**kwargs):
+            if kwargs["origin"]["lat"] == 51.09:
+                first_started.set()
+                await asyncio.Event().wait()
+            else:
+                second_started.set()
+                await release_second.wait()
+            return await original(**kwargs)
+
+        self.context.estimate_route = route
+        first = asyncio.create_task(self.service.recommend(request()))
+        await asyncio.wait_for(first_started.wait(), timeout=0.5)
+        await asyncio.sleep(0.1)
+        second = asyncio.create_task(self.service.recommend(request(origin={"lat": 51.091, "lon": 71.42})))
+        await asyncio.wait_for(second_started.wait(), timeout=0.5)
+        expired = await asyncio.wait_for(first, timeout=0.5)
+        release_second.set()
+        fresh = await asyncio.wait_for(second, timeout=0.5)
+        self.assertEqual(expired["status"], "no_match")
+        self.assertIn("processing time budget", " ".join(expired["warnings"]))
+        self.assertEqual(fresh["status"], "matched")
+        self.assertEqual(len(fresh["recommendations"]), 1)
+        self.assertNotIn("processing time budget", " ".join(fresh["warnings"]))
+
+    async def test_external_cancellation_propagates_and_cancels_provider(self):
+        self.setup_service([place(1)], planner=Planner([]))
+        started, cancelled = asyncio.Event(), asyncio.Event()
+
+        async def route(**kwargs):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        self.context.estimate_route = route
+        task = asyncio.create_task(self.service.recommend(request()))
+        await asyncio.wait_for(started.wait(), timeout=0.5)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertTrue(cancelled.is_set())
+
+    async def test_request_budget_rejects_nonpositive_or_nonfinite_values(self):
+        for value in (0, -1, True, math.inf, math.nan):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.setup_service(request_budget_seconds=value)
 
 
 if __name__ == "__main__":

@@ -102,16 +102,24 @@ are separate from this package.
 ## Configuration and errors
 
 Keyword-only settings: planner=None, candidate_limit=24, radius_meters=10000,
-timeout_seconds=8, default_visit_seconds=1200, route_concurrency=4, clock=None.
+timeout_seconds=8, request_budget_seconds=26, default_visit_seconds=1200,
+route_concurrency=4, clock=None, budget_clock=None.
 The injected clock must return a timezone-aware datetime.
+The optional budget clock returns monotonic seconds and is useful for deterministic tests.
 
-Each external call has its own timeout; planned requests make at most six route
-attempts and six explanation calls. Route calls run in bounded batches no
+All provider work in one recommendation or itinerary shares a request deadline.
+Each external call is capped by the smaller of its own timeout and the remaining
+request budget. Routing stops starting new waves after expiry. Verified completed
+recommendations remain visible with missing-stage and time-budget warnings;
+selected itineraries still require every stop and a complete provider route.
+Deadlines belong to individual request tasks, including when the service handles
+overlapping requests. Cancellation from the caller propagates normally.
+Planned requests make at most six route attempts. Route calls run in bounded batches no
 larger than the number of remaining result slots and stop once enough valid
 recommendations are found. Explanations are generated only for returned places.
-The package does not promise
-an overall HTTP latency SLA. The API layer should impose its own total deadline.
-Cancellation propagates normally.
+The API layer should leave a reserve between this provider-work deadline and its
+HTTP deadline for local validation and response serialization. The work budget
+does not preempt synchronous Python work.
 
 Invalid input raises astana_contracts.ContractValidationError. An unsupported
 transport raises RecommenderError with code unsupported_transport and a safe
