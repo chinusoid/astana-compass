@@ -1,8 +1,12 @@
 # astana-ai-providers
 
 Optional async adapters implementing the recommender's `ExplanationGenerator`.
-They select known fact references and a generic activity; the recommender renders
-the actual explanation in `ru`, `kk`, or `en` and applies its own validation.
+The legacy `generate()` method selects known fact references and a generic
+activity; the recommender renders those references in `ru`, `kk`, or `en`.
+The separate `generate_route_explanations()` method writes personalized prose
+for already selected places in one bounded hosted call, using the applied wish
+and public place information. These methods have different privacy boundaries,
+described below; neither model output replaces retrieval or constraint checks.
 `IntentAnalyzer` also extracts reviewable preferences through local rules and
 optional hosted extraction. Neither adapter is a trained Astana model.
 
@@ -172,9 +176,11 @@ Official references checked before implementation:
 and [NVIDIA hosted LLM APIs](https://docs.api.nvidia.com/nim/reference/llm-apis).
 Configured model availability and account access still need a live check.
 
-## Grounding and privacy boundary
+## Grounding and privacy boundaries
 
-The explanation adapter never sends the raw `query`. It derives only eight closed
+### Legacy fact selection: `generate()`
+
+The legacy fact selector never sends the raw `query`. It derives only eight closed
 interest hints locally (nature, architecture, history, coffee, river, photos,
 short_walk, long_walk) and filters source categories to a closed taxonomy.
 These hints are preferences and categories, never evidence for a venue amenity.
@@ -197,6 +203,39 @@ unrestricted prose are rejected. Activities are only `observe`, `explore` and
 `take_break`. If there are no known facts, the adapter returns an empty explanation
 without calling the provider. This is not a claim that every source fact is true:
 data provenance and freshness remain the upstream responsibility.
+
+### Personalized route prose: `generate_route_explanations()`
+
+After retrieval, source checks and route selection, the live recommender may make
+one additional batch call for at most six selected public places. This call sends
+the applied wish and locale, public place names and categories, bounded source
+descriptions, and selected known fact values with references. The configured
+provider and model are reused, including `gpt-6-luna` when that is the server
+configuration. It uses the same server-owned client and shared request quota;
+there is no separate key, automatic retry or call for each stop. The call gets at
+most six seconds and must fit within the request's remaining work budget.
+
+No dedicated origin/GPS, source URL, profile, group chat, history or photo fields
+are included. The wish is user text sent as written, so information a user puts
+inside that text also reaches the configured provider. Public source text is
+treated as untrusted data rather than instructions. These boundaries do not
+promise that arbitrary text contains no coordinates or personal information.
+
+The model is asked for a short, natural explanation connecting each actual stop
+to the wish and for a concrete suggested activity. It must use only supplied
+place information for factual claims. In particular, a sculpture cannot become
+a painting collection, a night wish does not establish lighting or nighttime
+access, and unknown opening hours, amenities and quality cannot be invented.
+If source detail is sparse, the explanation should make a modest recommendation
+based on the known type of place rather than fabricate attractions.
+
+Structured output and local checks bind returned explanations to the supplied
+place IDs and source references and bound their size. Such checks establish
+reference provenance and format, not a mathematical proof that every sentence
+is true or that the model understood every nuance. Generated advice remains
+distinct from the underlying source facts and route measurements. A failed or
+unavailable prose call leaves the useful route available and adds an explicit
+warning that the displayed short description comes from the catalog fallback.
 
 HTTP requests require identity encoding; nonidentity encoded responses are
 rejected before reading. Network bodies are read as raw bytes with a cap and an
