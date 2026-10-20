@@ -55,6 +55,43 @@ def _dedupe(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def _category_family(place: JSON) -> str:
+    """Use stable source categories, not richer prose, for broad variety."""
+    categories = set(place["categories"])
+    for family, values in (
+        ("green", {"park", "garden"}), ("cafe", {"cafe", "coffee_shop"}),
+        ("art", {"art", "gallery", "arts_centre", "artwork"}),
+    ):
+        if categories.intersection(values):
+            return family
+    return min(categories)
+
+
+def _diverse_lexical_hits(hits: list[JSON], places: dict[str, JSON]) -> list[JSON]:
+    """Preserve broad variety within comparable lexical relevance.
+
+    A park described as architecture and another described as waterfront are
+    still green spaces. Source enrichment must not crowd other equally relevant
+    kinds of places out of the small set of returned alternatives.
+    """
+    if not hits or any(hit["score_kind"] != "lexical" for hit in hits):
+        return hits
+    selected: list[JSON] = []
+    used: set[str] = set()
+    remaining = list(hits)
+    while remaining:
+        index = 0
+        if selected:
+            best_score = max(hit["score"] for hit in remaining)
+            index = next((index for index, hit in enumerate(remaining)
+                          if hit["score"] >= 0.75 * best_score
+                          and _category_family(places[hit["place_id"]]) not in used), 0)
+        hit = remaining.pop(index)
+        selected.append(hit)
+        used.add(_category_family(places[hit["place_id"]]))
+    return selected
+
+
 class DefaultRecommendationService:
     """Implement the canonical async RecommendationService port.
 
@@ -158,7 +195,7 @@ class DefaultRecommendationService:
             places = {p["id"]: p for p in result["places"]}
             candidates = [
                 deepcopy(places[h["place_id"]])
-                for h in result["hits"][:limit]
+                for h in _diverse_lexical_hits(result["hits"][:limit], places)
             ]
             return candidates, list(result["warnings"]), False
         except Exception:

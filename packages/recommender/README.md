@@ -10,8 +10,11 @@ Importing the package creates no clients, makes no requests and reads no secrets
 - Validates requests, dependency boundaries and final responses against the
   canonical schema and invariants.
 - Bounds retrieval candidates, context enrichment, provider timeouts and route
-  concurrency. Preserves the retriever's query relevance and diversity ordering
-  after required-condition checks. Preferences stay visible and do not override
+  concurrency. Preserves query relevance after required-condition checks, with
+  broad source-category variety inside comparable lexical scores. Richer park
+  descriptions cannot fill all discovery slots as separate waterfront and
+  architecture themes while an equally relevant landmark is available.
+  Strong literal matches retain priority. Preferences stay visible and do not override
   the user's destination intent. It never treats a retrieval score as a confidence probability.
 - Checks every required condition after context enrichment using JSON equality:
   true is not the number 1. Unknown, absent and conflicting required facts exclude

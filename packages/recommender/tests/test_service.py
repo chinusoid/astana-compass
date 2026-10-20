@@ -874,6 +874,48 @@ class ItineraryTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
 
 
 class PaceAndCategoryTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
+    async def test_enriched_green_themes_do_not_crowd_out_comparable_discovery_categories(self):
+        parks = [place(index) for index in (1, 2, 3)]
+        for park, description in zip(parks, (
+            "A green space.", "A park along the waterfront.", "A park with architectural details.",
+        ), strict=True):
+            park.update(categories=["park"], description=description)
+        theatre = place(4)
+        theatre.update(categories=["theatre"], description="An architectural landmark.")
+        for query, locale in (("серуен", "kk"), ("хочу погулять", "ru"), ("a walk", "en")):
+            with self.subTest(locale=locale):
+                self.setup_service([*parks, theatre])
+
+                def comparable(result):
+                    for hit in result["hits"]:
+                        hit.update(score=1.0, score_kind="lexical")
+                    return result
+
+                self.retriever.transform = comparable
+                result = await self.service.recommend(request(query=query, locale=locale))
+                self.assertEqual(result["places"][0]["id"], parks[0]["id"])
+                self.assertIn(theatre["id"], [p["id"] for p in result["places"]])
+                self.assertTrue(any("park" in p["categories"] for p in result["places"]))
+                self.assertEqual(len(self.context.routes), 3)
+
+    async def test_category_variety_does_not_promote_weak_literal_matches(self):
+        parks = [place(index) for index in (1, 2, 3)]
+        for park in parks:
+            park.update(categories=["park"], description="Historic fortress grounds.")
+        theatre = place(4)
+        theatre.update(categories=["theatre"], description="An architectural landmark.")
+        self.setup_service([*parks, theatre])
+
+        def unequal(result):
+            for hit in result["hits"]:
+                hit.update(score=10.0 if hit["place_id"] != theatre["id"] else 1.0, score_kind="lexical")
+            return result
+
+        self.retriever.transform = unequal
+        result = await self.service.recommend(request(query="historic scenic walk"))
+        self.assertEqual([p["id"] for p in result["places"]], [p["id"] for p in parks])
+        self.assertEqual(len(self.context.routes), 3)
+
     async def test_short_walk_uses_only_normal_route_calls_then_measured_distance(self):
         places = [place(index) for index in range(12, 0, -1)]
         self.setup_service(places)
