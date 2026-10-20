@@ -31,7 +31,11 @@ class MockMap {
   center = { lng: 71.4305, lat: 51.1283 };
   zoom = 15.5;
   bearing = -18;
-  addControl = vi.fn();
+  addControl = vi.fn((control: unknown) => {
+    if (control instanceof MockGeolocate)
+      (this.options.container as HTMLElement).append(control.onAdd());
+  });
+  removeControl = vi.fn((control: MockGeolocate) => control.onRemove());
   addImage = vi.fn();
   setLayoutProperty = vi.fn();
   remove = vi.fn();
@@ -128,14 +132,24 @@ class MockPopup {
 }
 class MockGeolocate {
   events = new Map<string, Listener>();
-  onRemove = vi.fn();
+  button = document.createElement("button");
+  onAdd = vi.fn(() => this.button);
+  onRemove = vi.fn(() => this.button.remove());
+  trigger = vi.fn(() => {
+    if (this.button.disabled) return false;
+    this.emit("trackuserlocationstart");
+    return true;
+  });
   constructor(readonly options: Record<string, unknown>) {
+    this.button.addEventListener("click", () => this.trigger());
     fake.geolocates.push(this);
   }
   on(name: string, listener: Listener) {
     this.events.set(name, listener);
   }
   emit(name: string, event?: unknown) {
+    if (name === "error" && (event as { code: number }).code === 1)
+      this.button.disabled = true;
     this.events.get(name)?.(event);
   }
 }
@@ -340,18 +354,34 @@ it("shows a terminal map error only after recovery expires and clears it on a la
   expect(config.onLocationFound).toHaveBeenCalledTimes(1);
 });
 
-it("clears map failure feedback after the planner finds a location without moving the camera", async () => {
+it("replaces a denied map control after a planner fix so its button works again", async () => {
   const config = props();
   const view = render(<CityMap {...config} locationFoundRequest={0} />);
   const map = await loadMap();
   const control = fake.geolocates[0];
   act(() => control.emit("error", { code: 1 }));
   expect(screen.getByText(mapText("ru", "followDenied"))).toBeVisible();
+  expect(control.button).toBeDisabled();
   map.easeTo.mockClear();
   view.rerender(<CityMap {...config} locationFoundRequest={1} />);
   expect(
     screen.queryByText(mapText("ru", "followDenied")),
   ).not.toBeInTheDocument();
+  expect(map.removeControl).toHaveBeenCalledExactlyOnceWith(control);
+  expect(control.onRemove).toHaveBeenCalledOnce();
+  const replacement = fake.geolocates[1];
+  expect(map.addControl).toHaveBeenLastCalledWith(replacement, "top-right");
+  expect(replacement.button).toBeEnabled();
+  act(() => control.emit("error", { code: 1 }));
+  expect(
+    screen.queryByText(mapText("ru", "followDenied")),
+  ).not.toBeInTheDocument();
+  fireEvent.click(replacement.button);
+  expect(replacement.trigger).toHaveBeenCalledOnce();
+  expect(screen.getByText(mapText("ru", "followLoading"))).toBeVisible();
+  act(() => replacement.emit("geolocate"));
+  expect(screen.getByText(mapText("ru", "following"))).toBeVisible();
+  expect(config.onLocationFound).toHaveBeenCalledOnce();
   expect(map.easeTo).not.toHaveBeenCalled();
   expect(config.onPick).not.toHaveBeenCalled();
 });

@@ -189,6 +189,8 @@ export default function CityMap(props: Props) {
     let followTimer: ReturnType<typeof setTimeout> | undefined;
     let hasFollowFix = false;
     let followFailed = false;
+    let followDenied = false;
+    let replaceGeolocate: (() => void) | undefined;
     const clearFollowTimer = () => {
       clearTimeout(followTimer);
       followTimer = undefined;
@@ -206,6 +208,11 @@ export default function CityMap(props: Props) {
         }, LOCATION_TIMEOUT_MS);
     };
     clearFollowError.current = () => {
+      // A browser-confirmed planner fix proves that location access recovered.
+      // MapLibre disables a denied control's native button, so replace it via
+      // its public lifecycle rather than only clearing our feedback text.
+      if (followDenied) replaceGeolocate?.();
+      followDenied = false;
       followFailed = false;
       clearFollowTimer();
       setFollowState((state) =>
@@ -280,52 +287,66 @@ export default function CityMap(props: Props) {
           // Native control requests location only on its own button press. It
           // follows the camera without touching the planner's origin/route,
           // pauses following on pan, and clears its watch when map.remove runs.
-          const geolocate = new lib.GeolocateControl({
-            positionOptions: {
-              enableHighAccuracy: false,
-              timeout: 10000,
-              maximumAge: 30000,
-            },
-            trackUserLocation: true,
-            showUserLocation: true,
-            showAccuracyCircle: true,
-            fitBoundsOptions: { maxZoom: 16 },
-          });
-          geolocate.on("trackuserlocationstart", () => {
-            if (!disposed) {
+          let geolocate: import("maplibre-gl").GeolocateControl;
+          const createGeolocate = () => {
+            const control = new lib.GeolocateControl({
+              positionOptions: {
+                enableHighAccuracy: false,
+                timeout: 10000,
+                maximumAge: 30000,
+              },
+              trackUserLocation: true,
+              showUserLocation: true,
+              showAccuracyCircle: true,
+              fitBoundsOptions: { maxZoom: 16 },
+            });
+            const stale = () => disposed || control !== geolocate;
+            control.on("trackuserlocationstart", () => {
+              if (stale()) return;
               followMode.current = "following";
+              followDenied = false;
               followFailed = false;
               clearFollowTimer();
               if (hasFollowFix) {
                 setFollowState("following");
               } else waitForFollowFix();
-            }
-          });
-          geolocate.on("trackuserlocationend", () => {
-            if (!disposed) {
+            });
+            control.on("trackuserlocationend", () => {
+              if (stale()) return;
               followMode.current = "paused";
               clearFollowTimer();
               setFollowState("paused");
-            }
-          });
-          geolocate.on("geolocate", () => {
-            if (disposed) return;
-            hasFollowFix = true;
-            followFailed = false;
-            clearFollowTimer();
-            setFollowState(followMode.current);
-            current.current.onLocationFound?.();
-          });
-          geolocate.on("error", (event) => {
-            if (disposed) return;
-            hasFollowFix = false;
-            if (event.code === 1) {
-              followFailed = true;
+            });
+            control.on("geolocate", () => {
+              if (stale()) return;
+              hasFollowFix = true;
+              followDenied = false;
+              followFailed = false;
               clearFollowTimer();
-              setFollowState("denied");
-            } else waitForFollowFix();
-          });
+              setFollowState(followMode.current);
+              current.current.onLocationFound?.();
+            });
+            control.on("error", (event) => {
+              if (stale()) return;
+              hasFollowFix = false;
+              if (event.code === 1) {
+                followDenied = true;
+                followFailed = true;
+                clearFollowTimer();
+                setFollowState("denied");
+              } else waitForFollowFix();
+            });
+            return control;
+          };
+          geolocate = createGeolocate();
           map.addControl(geolocate, "top-right");
+          replaceGeolocate = () => {
+            map.removeControl(geolocate);
+            geolocate = createGeolocate();
+            hasFollowFix = false;
+            followMode.current = "idle";
+            map.addControl(geolocate, "top-right");
+          };
           map.addControl(
             new lib.ScaleControl({ maxWidth: 100, unit: "metric" }),
             "bottom-left",
