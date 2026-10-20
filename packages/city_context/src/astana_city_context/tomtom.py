@@ -12,7 +12,7 @@ from astana_contracts import validate_payload
 
 from .common import ProviderError, log_tomtom_failure, parse_instant
 from .osrm import OSRMWalkingRouter
-from .routing import ORSWalkingRouter, _distance, _number, _stamp
+from .routing import ORSWalkingRouter, _MAX_DESTINATIONS, _distance, _number, _stamp
 
 ENDPOINT = "https://api.tomtom.com/routing/1/calculateRoute/"
 SOURCE_URL = "https://docs.tomtom.com/routing-api/documentation/tomtom-maps/v1/calculate-route"
@@ -36,7 +36,7 @@ class _RouteRejected(ValueError):
         self.counts = tuple(value if type(value) is int and 0 <= value <= _MAX_POINTS else None
                             for value in (legs, points, sections, covered_points))
         self.max_snap_meters = max_snap_meters if type(max_snap_meters) is int and 0 <= max_snap_meters <= 1_000_000 else None
-        self.leg_index = leg_index if type(leg_index) is int and 0 <= leg_index <= 3 else None
+        self.leg_index = leg_index if type(leg_index) is int and 0 <= leg_index <= _MAX_DESTINATIONS else None
         super().__init__(self.check)
 
     def log(self):
@@ -91,8 +91,8 @@ class TomTomWalkingRouter(ORSWalkingRouter):
         try:
             self._validate_pace()
             validate_payload("Location", origin)
-            if type(destinations) is not list or not 1 <= len(destinations) <= 3:
-                raise ValueError("One to three destinations required")
+            if type(destinations) is not list or not 1 <= len(destinations) <= _MAX_DESTINATIONS:
+                raise ValueError("One to six destinations required")
             for destination in destinations:
                 validate_payload("Location", destination)
             if type(return_to_origin) is not bool:

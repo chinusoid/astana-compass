@@ -21,6 +21,7 @@ _CACHE_SECONDS = 300
 _FALLBACK_CACHE_SECONDS = 30
 _CACHE_ENTRIES = 128
 _DEFAULT_PACE_MPS = 1.25
+_MAX_DESTINATIONS = 6
 _ATTRIBUTION = "© openrouteservice by HeiGIT | Data from OpenStreetMap"
 _REQUESTS_PER_MINUTE = 10
 _REQUESTS_PER_DAY = 600
@@ -100,8 +101,8 @@ class ORSWalkingRouter:
         try:
             self._validate_pace()
             validate_payload("Location", origin)
-            if type(destinations) is not list or not 1 <= len(destinations) <= 3:
-                raise ValueError("One to three destinations required")
+            if type(destinations) is not list or not 1 <= len(destinations) <= _MAX_DESTINATIONS:
+                raise ValueError("One to six destinations required")
             for destination in destinations:
                 validate_payload("Location", destination)
             if type(return_to_origin) is not bool or type(start_at) is not str:

@@ -1,6 +1,6 @@
 # Ordered walking routing
 
-`astana_city_context.routing.ORSWalkingRouter` implements the canonical asynchronous `estimate_route` port. It receives an origin, one to three **ordered Location objects**, a walking transport, return flag and timezone-aware `start_at`. It never chooses or reorders places. Cycling/driving fail with `ProviderError("unsupported_transport")`, including when degraded estimates are enabled.
+`astana_city_context.routing.ORSWalkingRouter` implements the canonical asynchronous `estimate_route` port. It receives an origin, one to six **ordered Location objects**, a walking transport, return flag and timezone-aware `start_at`. ORS, OSRM and TomTom adapters share this destination limit. It never chooses or reorders places. Cycling/driving fail with `ProviderError("unsupported_transport")`, including when degraded estimates are enabled.
 
 ## Real provider
 
@@ -28,7 +28,7 @@ Sources checked 2026-10-19:
 
 - [Official Directions request/return documentation](https://giscience.github.io/openrouteservice/api-reference/endpoints/directions/requests-and-return-types): GeoJSON endpoint, summary, segments, geometry indices and metadata.
 - [Official GIScience client profile documentation](https://giscience.github.io/openrouteservice-r/articles/openrouteservice.html): explicit `foot-walking` profile, separately from driving and cycling profiles.
-- [Official API restrictions](https://openrouteservice.org/restrictions/): currently 50 waypoints and maximum 6,000 km for foot profiles. This module requests at most five waypoints (origin, three destinations and optional origin).
+- [Official API restrictions](https://openrouteservice.org/restrictions/): currently 50 waypoints and maximum 6,000 km for foot profiles. This module requests at most eight waypoints (origin, six destinations and optional origin).
 - [Current HeiGIT plans](https://account.heigit.org/info/plans), verified from the rendered authoritative page: Standard Directions V2 allows 2,000 requests/day and 40/minute; Collaborative allows 10,000/day and 60/minute. Actual account allowance and other shared-key use must be checked before deployment.
 - [Current service terms](https://account.heigit.org/info/tos), verified from the rendered authoritative page: API results are licensed CC-BY-SA 4.0; the required attribution is `© openrouteservice by HeiGIT | Data from OpenStreetMap`. The terms disallow transmission of personal data. Provider instructions, attribution and licensing must remain with displayed/reused route data. Older staging terms are not the source for these claims.
 
@@ -36,6 +36,6 @@ Every routed result retains `© openrouteservice by HeiGIT | Data from OpenStree
 
 ## Validation and live smoke status
 
-Tests mock the HTTP boundary explicitly and cover one/two/three stops with/without return, exact profile/request ordering, unsupported transport, malformed/partial geometry and totals, provider failure/quota, missing key, strict policy, pace, stale/future provider timestamps, post-response retrieval time, cache expiration/bounds/copies, request changes and minute/day rolling quotas. Clock-driven quota tests perform no real network calls and do not sleep. They are not a claim of a live network check.
+Tests mock the HTTP boundary explicitly and cover one/two/three/six stops with/without return, rejection of seven stops, exact profile/request ordering, unsupported transport, malformed/partial geometry and totals, provider failure/quota, missing key, strict policy, pace, stale/future provider timestamps, post-response retrieval time, cache expiration/bounds/copies, request changes and minute/day rolling quotas. Clock-driven quota tests perform no real network calls and do not sleep. They are not a claim of a live network check.
 
 Live ORS smoke is blocked in this environment because neither `ROUTING_API_KEY` nor `ORS_API_KEY` is configured. No real walking route response has been observed or fabricated. With a privately configured backend key, the smoke command documented by the module's README can verify an actual short Astana trip; record its provider/geometry/method and safe timestamps without printing credentials or precise user coordinates.

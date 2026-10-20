@@ -11,7 +11,7 @@ import time
 from astana_contracts import validate_payload
 
 from .common import ProviderError, parse_instant
-from .routing import ORSWalkingRouter, _distance, _number, _stamp
+from .routing import ORSWalkingRouter, _MAX_DESTINATIONS, _distance, _number, _stamp
 
 ENDPOINT = "https://routing.openstreetmap.de/routed-foot/route/v1/foot/"
 ATTRIBUTION = "Routing: OSRM / FOSSGIS · © OpenStreetMap contributors (ODbL)"
@@ -38,7 +38,7 @@ class OSRMWalkingRouter(ORSWalkingRouter):
         if transport != "walking":
             raise ProviderError("unsupported_transport")
         validate_payload("Location", origin)
-        if not isinstance(destinations, list) or not 1 <= len(destinations) <= 3:
+        if not isinstance(destinations, list) or not 1 <= len(destinations) <= _MAX_DESTINATIONS:
             raise ProviderError("invalid_request")
         for destination in destinations:
             validate_payload("Location", destination)
