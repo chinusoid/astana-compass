@@ -184,6 +184,10 @@ export default function MobileSheet({
     const capture =
       panel.closest<HTMLElement>(".app-shell") ?? panel.parentElement;
     if (!capture) return;
+    // This is a custom drag control: retain focus without allowing the browser's
+    // native mouse drag/selection behavior to take over the pointer stream.
+    event.currentTarget.focus({ preventScroll: true });
+    event.preventDefault();
     // Cache geometry once. Pointer moves below only write a compositor transform.
     const viewport = window.visualViewport?.height || window.innerHeight;
     const nav = panel.parentElement
@@ -285,6 +289,8 @@ export default function MobileSheet({
         type="button"
         className={styles.handle}
         data-sheet-handle
+        draggable={false}
+        onDragStart={(event) => event.preventDefault()}
         aria-label={`${text.handle}: ${text[snap]}`}
         aria-expanded={snap !== "collapsed"}
         aria-controls="mobile-sheet-content"

@@ -42,10 +42,51 @@ function Harness({
   );
 }
 function pointer(target: Element | Document, type: string, y: number, id = 7) {
-  const event = new MouseEvent(type, { bubbles: true, clientY: y, button: 0 });
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientY: y,
+    button: 0,
+  });
   Object.defineProperty(event, "pointerId", { value: id });
   fireEvent(target, event);
+  return event;
 }
+it("owns accepted primary input without native dragging and preserves focus and unrelated input", () => {
+  vi.stubGlobal("innerHeight", 844);
+  render(<Harness />);
+  const handle = screen.getByRole("button", { name: "Panel size: Collapsed" });
+  const focus = vi.spyOn(handle, "focus");
+  const right = new MouseEvent("pointerdown", {
+    bubbles: true,
+    cancelable: true,
+    button: 2,
+  });
+  fireEvent(handle, right);
+  expect(right.defaultPrevented).toBe(false);
+  expect(focus).not.toHaveBeenCalled();
+  const secondary = new MouseEvent("pointerdown", {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+  });
+  Object.defineProperty(secondary, "isPrimary", { value: false });
+  fireEvent(handle, secondary);
+  expect(secondary.defaultPrevented).toBe(false);
+  expect(focus).not.toHaveBeenCalled();
+  const accepted = pointer(handle, "pointerdown", 660);
+  expect(accepted.defaultPrevented).toBe(true);
+  expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+  expect(handle).toHaveFocus();
+  expect(handle).toHaveAttribute("draggable", "false");
+  const nativeDrag = new Event("dragstart", {
+    bubbles: true,
+    cancelable: true,
+  });
+  fireEvent(handle, nativeDrag);
+  expect(nativeDrag.defaultPrevented).toBe(true);
+  pointer(document, "pointercancel", 660);
+});
 it("offers keyboard snap controls and opens the existing planning wish", () => {
   render(<Harness />);
   const handle = screen.getByRole("button", { name: "Panel size: Collapsed" });
