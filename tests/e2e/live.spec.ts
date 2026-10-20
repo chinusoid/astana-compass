@@ -281,6 +281,9 @@ test("real Wi-Fi requirement is honored and unknown outlets produce an explained
       res.url().endsWith("/recommendations") &&
       res.request().method() === "POST",
   );
+  const firstItinerary = page.waitForResponse(
+    (res) => res.url().endsWith("/itineraries") && res.request().method() === "POST",
+  );
   await page.locator(".find-button").click();
   const result = (await (await firstResponse).json()) as RecommendationResponse;
   expect(["matched", "partial"]).toContain(result.status);
@@ -297,6 +300,10 @@ test("real Wi-Fi requirement is honored and unknown outlets produce an explained
         }),
       ]),
     );
+  await firstItinerary;
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-sheet-snap", "collapsed");
+  await page.getByTestId("mobile-sheet-controls").getByRole("link").click();
+  await expect(page.locator('textarea[name="query"]')).toBeVisible();
   await expect(
     page.locator(".result-cards").getByTestId("place-card").first(),
   ).toBeVisible();
