@@ -20,6 +20,14 @@ const fake = vi.hoisted(() => ({
   markers: [] as MockMarker[],
   geolocates: [] as MockGeolocate[],
   resizeObservers: [] as (() => void)[],
+  failMapConstructor: false,
+}));
+vi.mock("./raster-map-fallback", () => ({
+  default: ({ onRetry3D }: { onRetry3D: () => void }) => (
+    <div data-testid="raster-map-fallback">
+      <button onClick={onRetry3D}>Retry 3D</button>
+    </div>
+  ),
 }));
 type Listener = (event?: unknown) => void;
 class MockMap {
@@ -188,6 +196,7 @@ class MockMarker {
 vi.mock("maplibre-gl", () => ({
   Map: class {
     constructor(options: Record<string, unknown>) {
+      if (fake.failMapConstructor) throw new Error("WebGL unavailable");
       return new MockMap(options);
     }
   },
@@ -216,6 +225,7 @@ beforeEach(() => {
   fake.markers.length = 0;
   fake.geolocates.length = 0;
   fake.resizeObservers.length = 0;
+  fake.failMapConstructor = false;
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(900);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(650);
   vi.stubGlobal(
@@ -859,7 +869,7 @@ for (const locale of ["ru", "kk", "en"] as const) {
     });
   });
 }
-it("keeps a usable map after a transient tile error but provides retry for a fatal style failure", async () => {
+it("keeps transient tiles usable and switches failed styles through OSM to the simple renderer", async () => {
   render(<CityMap {...props()} />);
   const map = await loadMap();
   act(() => map.emit("error"));
@@ -868,10 +878,77 @@ it("keeps a usable map after a transient tile error but provides retry for a fat
   expect(screen.getByTestId("map-confirm-origin")).toBeEnabled();
   map.getStyle.mockReturnValue(undefined);
   act(() => map.emit("error"));
-  expect(screen.getByText(mapText("ru", "failed"))).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: mapText("ru", "retry") }));
   await waitFor(() => expect(fake.maps).toHaveLength(2));
   expect(map.remove).toHaveBeenCalledOnce();
+  const osm = fake.maps[1];
+  expect(osm.options.style).toMatchObject({
+    sources: { osm: { type: "raster" } },
+  });
+  osm.getStyle.mockReturnValue(undefined);
+  act(() => osm.emit("error"));
+  expect(screen.getByTestId("raster-map-fallback")).toBeVisible();
+  expect(osm.remove).toHaveBeenCalledOnce();
+  expect(
+    screen.queryByRole("group", { name: mapText("ru", "controls") }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Retry 3D" }));
+  await waitFor(() => expect(fake.maps).toHaveLength(3));
+  expect(fake.maps[2].options.style).toContain("openfreemap");
+  expect(screen.queryByTestId("raster-map-fallback")).not.toBeInTheDocument();
+});
+it("keeps the basemap usable when optional 3D or journey layers fail", async () => {
+  render(<CityMap {...props()} />);
+  await waitFor(() => expect(fake.maps).toHaveLength(1));
+  const map = fake.maps[0];
+  vi.spyOn(map, "addLayer").mockImplementation(() => {
+    throw new Error("Optional layer unavailable");
+  });
+  act(() => map.emit("load"));
+  expect(screen.getByTestId("map-panel")).toHaveAttribute(
+    "data-map-status",
+    "ready",
+  );
+  expect(screen.getByTestId("map-mode-3d")).toBeDisabled();
+  expect(screen.queryByTestId("raster-map-fallback")).not.toBeInTheDocument();
+});
+it("uses a simple map immediately when WebGL cannot start", async () => {
+  fake.failMapConstructor = true;
+  render(<CityMap {...props()} />);
+  await waitFor(() =>
+    expect(screen.getByTestId("raster-map-fallback")).toBeVisible(),
+  );
+  expect(fake.maps).toHaveLength(0);
+  expect(screen.getByTestId("map-panel")).toHaveAttribute(
+    "data-map-mode",
+    "2d",
+  );
+});
+it("removes a lost WebGL map instead of leaving it running below the fallback", async () => {
+  render(<CityMap {...props()} />);
+  const map = await loadMap();
+  act(() => map.emit("webglcontextlost"));
+  expect(screen.getByTestId("raster-map-fallback")).toBeVisible();
+  expect(map.remove).toHaveBeenCalledOnce();
+});
+it("lets the user open a simple map without waiting for a failed GPU", async () => {
+  render(<CityMap {...props()} />);
+  const map = await loadMap();
+  fireEvent.click(screen.getByRole("button", { name: "Простая карта" }));
+  expect(screen.getByTestId("raster-map-fallback")).toBeVisible();
+  expect(map.remove).toHaveBeenCalledOnce();
+});
+it("bounds vector and raster style loading before using the simple renderer", async () => {
+  vi.useFakeTimers();
+  await act(async () => {
+    render(<CityMap {...props()} />);
+  });
+  expect(fake.maps).toHaveLength(1);
+  await act(async () => vi.advanceTimersByTimeAsync(8_000));
+  expect(fake.maps).toHaveLength(2);
+  expect(fake.maps[0].remove).toHaveBeenCalledOnce();
+  await act(async () => vi.advanceTimersByTimeAsync(8_000));
+  expect(screen.getByTestId("raster-map-fallback")).toBeVisible();
+  expect(fake.maps[1].remove).toHaveBeenCalledOnce();
 });
 it("retains the offline provider without external tiles or an available 3D button", async () => {
   render(<CityMap {...props()} provider="none" />);

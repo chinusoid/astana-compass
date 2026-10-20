@@ -47,6 +47,7 @@ import {
   stopTitle,
 } from "@/lib/map-route";
 import { journeyColor } from "@/lib/map-route-segments";
+import RasterMapFallback from "./raster-map-fallback";
 import {
   fetchMapFeatures,
   MapFeatureError,
@@ -132,6 +133,13 @@ export default function CityMap(props: Props) {
   const [buildings, setBuildings] = useState(false);
   const [threeD, setThreeD] = useState(true);
   const [attempt, setAttempt] = useState(0);
+  const [recovery, setRecovery] = useState<"original" | "osm" | "raster">(
+    "original",
+  );
+  const effectiveProvider =
+    recovery !== "original" && props.provider !== "none"
+      ? "osm"
+      : props.provider;
   const [picked, setPicked] = useState(false);
   const [followState, setFollowState] = useState<
     "idle" | "loading" | "following" | "paused" | "denied" | "unavailable"
@@ -174,10 +182,26 @@ export default function CityMap(props: Props) {
   const hasJourney =
     props.route !== null && (geometry !== null || stopIds.length > 0);
   const ready = status === "ready";
-  const has3D = props.provider === "openfreemap" && buildings;
+  const has3D = effectiveProvider === "openfreemap" && buildings;
   const is3D = has3D && threeD;
   const text = (key: Parameters<typeof mapText>[1]) =>
     mapText(props.locale, key);
+  const simpleMapLabel =
+    props.locale === "kk"
+      ? "Қарапайым карта"
+      : props.locale === "en"
+        ? "Simple map"
+        : "Простая карта";
+  const openRasterMap = () => {
+    setBuildings(false);
+    setStatus("failed");
+    setRecovery("raster");
+  };
+  const retryMap = () => {
+    setStatus("loading");
+    setRecovery("original");
+    setAttempt((value) => value + 1);
+  };
 
   useEffect(() => {
     current.current = props;
@@ -188,8 +212,9 @@ export default function CityMap(props: Props) {
   }, [props.locationFoundRequest]);
 
   useEffect(() => {
-    if (!props.enabled || !container.current) return;
+    if (!props.enabled || !container.current || recovery === "raster") return;
     let disposed = false;
+    let recovering = false;
     let localMap: LibreMap | null = null;
     let loadingTimer: ReturnType<typeof setTimeout> | undefined;
     let observer: ResizeObserver | undefined;
@@ -232,9 +257,29 @@ export default function CityMap(props: Props) {
     const clearLoadingTimer = () => {
       if (loadingTimer) clearTimeout(loadingTimer);
     };
+    const recover = (webglFailure = false) => {
+      if (disposed || recovering) return;
+      recovering = true;
+      clearLoadingTimer();
+      setBuildings(false);
+      if (props.provider === "none") {
+        setStatus("failed");
+        setRecovery("raster");
+        return;
+      }
+      if (!webglFailure && effectiveProvider === "openfreemap") {
+        setStatus("loading");
+        setRecovery("osm");
+      } else {
+        setStatus("failed");
+        setRecovery("raster");
+      }
+    };
+    loadingTimer = setTimeout(() => recover(true), 8_000);
     import("maplibre-gl")
       .then((lib) => {
-        if (disposed) return;
+        if (disposed || recovering) return;
+        clearLoadingTimer();
         mapLibrary.current = lib;
         try {
           setStatus("loading");
@@ -247,7 +292,7 @@ export default function CityMap(props: Props) {
             container: host,
             ...(camera.current ?? ASTANA_VIEW),
             pitch:
-              props.provider === "openfreemap" && mode.current
+              effectiveProvider === "openfreemap" && mode.current
                 ? ASTANA_VIEW.pitch
                 : 0,
             minZoom: 3,
@@ -256,7 +301,7 @@ export default function CityMap(props: Props) {
             renderWorldCopies: false,
             canvasContextAttributes: { antialias: true },
             attributionControl: false,
-            style: basemapStyle(props.provider),
+            style: basemapStyle(effectiveProvider),
             locale: {
               "NavigationControl.ZoomIn": mapText(props.locale, "zoomIn"),
               "NavigationControl.ZoomOut": mapText(props.locale, "zoomOut"),
@@ -363,35 +408,41 @@ export default function CityMap(props: Props) {
             "bottom-right",
           );
           loadingTimer = setTimeout(() => {
-            if (!disposed) setStatus("failed");
-          }, 18_000);
+            recover();
+          }, 8_000);
           map.on("load", () => {
-            if (disposed) return;
+            if (disposed || recovering) return;
             clearLoadingTimer();
             try {
               setBuildings(
-                props.provider === "openfreemap" && installBuildings(map),
+                effectiveProvider === "openfreemap" && installBuildings(map),
               );
-              installJourney(map);
-              setStatus("ready");
             } catch {
-              setStatus("failed");
+              // Optional 3D layers must never hide a working basemap.
+              setBuildings(false);
+              setTransient(true);
             }
+            try {
+              installJourney(map);
+            } catch {
+              setTransient(true);
+            }
+            setStatus("ready");
           });
           map.on("error", () => {
-            if (disposed) return;
+            if (disposed || recovering) return;
             // A missing tile/glyph must not replace an otherwise usable map with
             // a full-screen failure. A missing root style cannot be rendered.
             if (!map.getStyle()) {
-              clearLoadingTimer();
-              setStatus("failed");
+              recover();
             } else setTransient(true);
           });
           map.on("webglcontextlost", () => {
-            if (!disposed) setStatus("failed");
+            recover(true);
           });
           map.on("webglcontextrestored", () => {
-            if (!disposed && map.isStyleLoaded()) setStatus("ready");
+            if (!disposed && !recovering && map.isStyleLoaded())
+              setStatus("ready");
           });
           map.on("moveend", () => {
             const center = map.getCenter();
@@ -438,12 +489,11 @@ export default function CityMap(props: Props) {
           });
           observer.observe(host);
         } catch {
-          clearLoadingTimer();
-          if (!disposed) setStatus("failed");
+          recover(true);
         }
       })
       .catch(() => {
-        if (!disposed) setStatus("failed");
+        recover(true);
       });
     return () => {
       disposed = true;
@@ -460,6 +510,8 @@ export default function CityMap(props: Props) {
       featureRequest.current?.abort();
       stopTraffic.current?.();
       stopTraffic.current = null;
+      setTraffic(null);
+      setTrafficBusy(false);
       markers.current.forEach((marker) => marker.remove());
       markers.current = [];
       inspectionMarker.current?.remove();
@@ -468,7 +520,14 @@ export default function CityMap(props: Props) {
       if (mapRef.current === localMap) mapRef.current = null;
     };
     // Rebuilding translated native controls retains the user's camera.
-  }, [props.enabled, props.provider, props.locale, attempt]);
+  }, [
+    props.enabled,
+    props.provider,
+    effectiveProvider,
+    props.locale,
+    attempt,
+    recovery,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -688,7 +747,7 @@ export default function CityMap(props: Props) {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!ready || !map || !motionEnabled || props.provider !== "openfreemap")
+    if (!ready || !map || !motionEnabled || effectiveProvider !== "openfreemap")
       return;
     const stop = startMapMotion(map, setMotionStatus);
     stopMotion.current = stop;
@@ -696,7 +755,7 @@ export default function CityMap(props: Props) {
       stop();
       if (stopMotion.current === stop) stopMotion.current = null;
     };
-  }, [ready, motionEnabled, props.provider]);
+  }, [ready, motionEnabled, effectiveProvider]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -925,6 +984,7 @@ export default function CityMap(props: Props) {
       data-route-revealing={revealingRoute}
       data-map-mode={is3D ? "3d" : "2d"}
       data-map-status={status}
+      data-map-renderer={recovery === "raster" ? "raster" : "webgl"}
     >
       <div className="map-heading">
         <div>
@@ -981,7 +1041,7 @@ export default function CityMap(props: Props) {
             )}
           </div>
         )}
-        {props.enabled && (
+        {props.enabled && status !== "failed" && (
           <div
             className="map-toolbar"
             role="group"
@@ -998,6 +1058,15 @@ export default function CityMap(props: Props) {
             >
               2D
             </button>
+            {props.provider !== "none" && (
+              <button
+                type="button"
+                className="map-tool"
+                onClick={openRasterMap}
+              >
+                {simpleMapLabel}
+              </button>
+            )}
             <button
               type="button"
               className="map-tool"
@@ -1070,7 +1139,7 @@ export default function CityMap(props: Props) {
                 {text("inspectCentre")}
               </button>
             )}
-            {props.provider === "openfreemap" && (
+            {effectiveProvider === "openfreemap" && (
               <button
                 type="button"
                 className="map-tool map-motion-toggle"
@@ -1082,7 +1151,7 @@ export default function CityMap(props: Props) {
                 {text("motion")}
               </button>
             )}
-            {props.provider === "openfreemap" && (
+            {effectiveProvider === "openfreemap" && (
               <>
                 <button
                   type="button"
@@ -1147,17 +1216,41 @@ export default function CityMap(props: Props) {
           <div className="map-cover map-loading" role="status">
             <MapIcon size={28} aria-hidden="true" />
             <p>{text("loading")}</p>
+            {props.provider !== "none" && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={openRasterMap}
+              >
+                {simpleMapLabel}
+              </button>
+            )}
           </div>
         )}
-        {props.enabled && status === "failed" && (
+        {props.enabled && status === "failed" && props.provider !== "none" && (
+          <RasterMapFallback
+            places={props.places}
+            origin={props.origin}
+            activeId={props.activeId}
+            stopIds={stopIds}
+            geometry={geometry}
+            locale={props.locale}
+            picking={props.picking}
+            bottomInset={props.bottomInset}
+            overviewRequest={props.overviewRequest}
+            includesReturn={props.route?.includes_return}
+            onPick={props.onPick}
+            onSelect={props.onSelect}
+            onDetails={props.onDetails}
+            onInspect={(point) => void inspectPoint(point)}
+            onRetry3D={retryMap}
+          />
+        )}
+        {props.enabled && status === "failed" && props.provider === "none" && (
           <div className="map-cover map-failure" role="status">
             <MapIcon size={28} aria-hidden="true" />
             <p>{text("failed")}</p>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setAttempt((value) => value + 1)}
-            >
+            <button type="button" className="secondary" onClick={retryMap}>
               <RotateCcw size={18} aria-hidden="true" />
               {text("retry")}
             </button>
@@ -1166,11 +1259,7 @@ export default function CityMap(props: Props) {
         {props.enabled && ready && transient && (
           <div className="map-status" role="status">
             <p>{text("transient")}</p>
-            <button
-              type="button"
-              className="text-button"
-              onClick={() => setAttempt((value) => value + 1)}
-            >
+            <button type="button" className="text-button" onClick={retryMap}>
               {text("retry")}
             </button>
           </div>
@@ -1194,112 +1283,117 @@ export default function CityMap(props: Props) {
             </div>
           </>
         )}
-        {props.enabled && ready && !props.picking && inspection && (
-          <aside
-            className="map-inspection"
-            aria-labelledby="map-inspection-heading"
-            data-testid="map-inspection"
-            onKeyDown={(event) => {
-              if (event.key === "Escape") closeInspection();
-            }}
-          >
-            <div className="map-inspection-heading">
-              <h3 id="map-inspection-heading">{text("inspect")}</h3>
-              <button
-                type="button"
-                className="map-tool"
-                aria-label={text("closePopup")}
-                onClick={closeInspection}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <p className="map-inspection-coordinate">
-              {inspection.point.lat.toFixed(5)},{" "}
-              {inspection.point.lon.toFixed(5)}
-            </p>
-            {inspection.state === "loading" && (
-              <p role="status">{text("inspectLoading")}</p>
-            )}
-            {(inspection.state === "error" || inspection.state === "busy") && (
-              <div role="status">
-                <p>
-                  {text(
-                    inspection.state === "busy"
-                      ? "inspectSlow"
-                      : "inspectError",
-                  )}
-                </p>
+        {props.enabled &&
+          (ready || (recovery === "raster" && props.provider !== "none")) &&
+          !props.picking &&
+          inspection && (
+            <aside
+              className="map-inspection"
+              aria-labelledby="map-inspection-heading"
+              data-testid="map-inspection"
+              onKeyDown={(event) => {
+                if (event.key === "Escape") closeInspection();
+              }}
+            >
+              <div className="map-inspection-heading">
+                <h3 id="map-inspection-heading">{text("inspect")}</h3>
                 <button
                   type="button"
-                  className="secondary"
-                  onClick={() => void inspectPoint(inspection.point)}
+                  className="map-tool"
+                  aria-label={text("closePopup")}
+                  onClick={closeInspection}
                 >
-                  {text("retry")}
+                  <X size={18} />
                 </button>
               </div>
-            )}
-            {inspection.result?.status === "empty" && (
-              <p role="status">{text("inspectEmpty")}</p>
-            )}
-            {!!inspection.result?.features.length && (
-              <>
-                {inspection.result.features.map((feature) => (
-                  <article key={feature.id}>
-                    <p className="map-feature-match">
-                      {text(
-                        feature.match === "contains"
-                          ? "contains"
-                          : "nearbyMatch",
-                      )}
-                      {feature.match === "nearby"
-                        ? ` · ${Math.round(feature.distance_meters)} ${text("meters")}`
-                        : ""}
-                    </p>
-                    <h4>{feature.name}</h4>
-                    <p>{feature.kind}</p>
-                    <p>{feature.address ?? text("addressUnknown")}</p>
-                    <p>
-                      {feature.description ?? text("inspectDescriptionUnknown")}
-                    </p>
-                    <dl>
-                      {feature.attributes.map((attribute, index) => (
-                        <div key={`${attribute.label}-${index}`}>
-                          <dt>{attribute.label}</dt>
-                          <dd>{attribute.value}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                    {safeSourceUrl(feature.source_url) && (
-                      <a
-                        href={safeSourceUrl(feature.source_url)!}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {feature.source_label || text("inspectSource")}
-                      </a>
+              <p className="map-inspection-coordinate">
+                {inspection.point.lat.toFixed(5)},{" "}
+                {inspection.point.lon.toFixed(5)}
+              </p>
+              {inspection.state === "loading" && (
+                <p role="status">{text("inspectLoading")}</p>
+              )}
+              {(inspection.state === "error" ||
+                inspection.state === "busy") && (
+                <div role="status">
+                  <p>
+                    {text(
+                      inspection.state === "busy"
+                        ? "inspectSlow"
+                        : "inspectError",
                     )}
-                  </article>
-                ))}
-                <small>{text("sourceClaim")}</small>
-              </>
-            )}
-            {inspection.result && (
-              <footer>
-                <p>{inspection.result.attribution}</p>
-                <p>
-                  {text("retrieved")}:{" "}
-                  <time dateTime={inspection.result.retrieved_at}>
-                    {new Intl.DateTimeFormat(props.locale, {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    }).format(new Date(inspection.result.retrieved_at))}
-                  </time>
-                </p>
-              </footer>
-            )}
-          </aside>
-        )}
+                  </p>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void inspectPoint(inspection.point)}
+                  >
+                    {text("retry")}
+                  </button>
+                </div>
+              )}
+              {inspection.result?.status === "empty" && (
+                <p role="status">{text("inspectEmpty")}</p>
+              )}
+              {!!inspection.result?.features.length && (
+                <>
+                  {inspection.result.features.map((feature) => (
+                    <article key={feature.id}>
+                      <p className="map-feature-match">
+                        {text(
+                          feature.match === "contains"
+                            ? "contains"
+                            : "nearbyMatch",
+                        )}
+                        {feature.match === "nearby"
+                          ? ` · ${Math.round(feature.distance_meters)} ${text("meters")}`
+                          : ""}
+                      </p>
+                      <h4>{feature.name}</h4>
+                      <p>{feature.kind}</p>
+                      <p>{feature.address ?? text("addressUnknown")}</p>
+                      <p>
+                        {feature.description ??
+                          text("inspectDescriptionUnknown")}
+                      </p>
+                      <dl>
+                        {feature.attributes.map((attribute, index) => (
+                          <div key={`${attribute.label}-${index}`}>
+                            <dt>{attribute.label}</dt>
+                            <dd>{attribute.value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                      {safeSourceUrl(feature.source_url) && (
+                        <a
+                          href={safeSourceUrl(feature.source_url)!}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {feature.source_label || text("inspectSource")}
+                        </a>
+                      )}
+                    </article>
+                  ))}
+                  <small>{text("sourceClaim")}</small>
+                </>
+              )}
+              {inspection.result && (
+                <footer>
+                  <p>{inspection.result.attribution}</p>
+                  <p>
+                    {text("retrieved")}:{" "}
+                    <time dateTime={inspection.result.retrieved_at}>
+                      {new Intl.DateTimeFormat(props.locale, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      }).format(new Date(inspection.result.retrieved_at))}
+                    </time>
+                  </p>
+                </footer>
+              )}
+            </aside>
+          )}
         {(!props.enabled || !ready || !props.picking) && (
           <span id="map-keyboard-instructions" className="sr-only">
             {text("keyboard")}
@@ -1317,7 +1411,7 @@ export default function CityMap(props: Props) {
               >
                 © OpenStreetMap
               </a>
-              {props.provider === "openfreemap" && (
+              {effectiveProvider === "openfreemap" && (
                 <>
                   {" "}
                   ·{" "}
@@ -1338,7 +1432,7 @@ export default function CityMap(props: Props) {
               )}
             </span>
           )}
-          {motionEnabled && props.provider === "openfreemap" && (
+          {ready && motionEnabled && effectiveProvider === "openfreemap" && (
             <span
               className="map-simulation-badge"
               data-testid="map-motion-summary"
@@ -1396,22 +1490,24 @@ export default function CityMap(props: Props) {
                   {t(props.locale, geometry ? "routed" : "approximate")}
                 </span>
               )}
-              {props.provider === "openfreemap" && (
+              {effectiveProvider === "openfreemap" && (
                 <span className="map-height-note">{text("heights")}</span>
               )}
-              {motionEnabled && props.provider === "openfreemap" && (
-                <span className="map-motion-status" role="status">
-                  <span className="motion-car">{text("cars")}</span> ·{" "}
-                  <span className="motion-walker">{text("walkers")}</span> ·{" "}
-                  {text("simulation")}{" "}
-                  {motionStatus !== "running" &&
-                    text(
-                      motionStatus === "paused"
-                        ? "motionPaused"
-                        : "motionEmpty",
-                    )}
-                </span>
-              )}
+              {ready &&
+                motionEnabled &&
+                effectiveProvider === "openfreemap" && (
+                  <span className="map-motion-status" role="status">
+                    <span className="motion-car">{text("cars")}</span> ·{" "}
+                    <span className="motion-walker">{text("walkers")}</span> ·{" "}
+                    {text("simulation")}{" "}
+                    {motionStatus !== "running" &&
+                      text(
+                        motionStatus === "paused"
+                          ? "motionPaused"
+                          : "motionEmpty",
+                      )}
+                  </span>
+                )}
               {traffic && (
                 <div className="map-traffic-details">
                   <p>{traffic.attribution}</p>
