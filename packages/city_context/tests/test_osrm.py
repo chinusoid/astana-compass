@@ -1,6 +1,6 @@
 import asyncio
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -79,12 +79,36 @@ def test_rejects_wrong_or_incomplete_routes(problem):
 
 def test_rate_limit_cooldown_prevents_more_provider_requests():
     async def check():
-        http = HTTP(error=ProviderError("rate_limited", retryable=True, retry_after_seconds=120))
+        http = HTTP(error=ProviderError("rate_limited", retryable=True, retry_after_seconds=120, upstream_status=429))
         router = OSRMWalkingRouter(http, allow_approximate=False, clock=lambda: datetime.now(timezone.utc))
         for _ in range(2):
             with pytest.raises(ProviderError, match="rate_limited"):
                 await router.estimate_route(**arguments())
         assert len(http.calls) == 1
+    asyncio.run(check())
+
+
+def test_local_quota_rejection_does_not_create_an_upstream_cooldown(monkeypatch):
+    tick = [datetime(2026, 10, 20, 17, tzinfo=timezone.utc)]
+    monotonic = [100.0]
+    monkeypatch.setattr(osrm, "time", SimpleNamespace(monotonic=lambda: monotonic[0]))
+
+    async def check():
+        http = HTTP()
+        router = OSRMWalkingRouter(http, clock=lambda: tick[0], allow_approximate=False)
+        router._request_times.extend([tick[0] - timedelta(seconds=50)] * 10)
+        with pytest.raises(ProviderError, match="rate_limited"):
+            await router.estimate_route(**arguments())
+        assert not http.calls, "the ten-request local cap must still prevent I/O"
+        assert router._cooldown == 0
+        # Both clocks advance together: the rolling minute clears after eleven
+        # seconds, without an invented additional provider cooldown.
+        tick[0] += timedelta(seconds=11)
+        monotonic[0] += 11
+        route = await router.estimate_route(**arguments())
+        assert route["method"] == "routed" and len(http.calls) == 1
+        assert router._cooldown == 0
+
     asyncio.run(check())
 
 

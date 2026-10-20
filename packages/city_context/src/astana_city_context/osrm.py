@@ -66,6 +66,7 @@ class OSRMWalkingRouter(ORSWalkingRouter):
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self.timeout_seconds
         local_cooldown = False
+        provider_request_started = False
         try:
             # Queueing and request pacing spend the same bounded allowance as
             # HTTP. Expire here before the caller's eight-second port deadline
@@ -99,6 +100,7 @@ class OSRMWalkingRouter(ORSWalkingRouter):
                 if loop.time() >= deadline:
                     raise TimeoutError
                 coordinate_text = ";".join(f"{lon:.6f},{lat:.6f}" for lon, lat in points)
+                provider_request_started = True
                 response = await self.http.request(
                     "GET", ENDPOINT + coordinate_text,
                     headers={"User-Agent": "AstanaCompass/0.1 (+https://github.com/chinusoid/astana-compass)"},
@@ -113,7 +115,8 @@ class OSRMWalkingRouter(ORSWalkingRouter):
                 raise ProviderError("provider_unavailable", retryable=True, reason="timeout") from None
             reason = "timeout"
         except ProviderError as error:
-            if error.code == "rate_limited" and not local_cooldown:
+            # A local rolling-budget rejection is not an upstream Retry-After.
+            if error.code == "rate_limited" and provider_request_started and not local_cooldown:
                 self._cooldown = time.monotonic() + max(60, getattr(error, "retry_after_seconds", 0))
             if not self.allow_approximate:
                 raise
