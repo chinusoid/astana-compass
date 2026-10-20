@@ -1,6 +1,7 @@
 """Named destinations and evidence-backed dishes, entirely in process."""
 import asyncio
 from copy import deepcopy
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,7 @@ class Repository:
 
 
 def fixture(name, category="restaurant", cuisine=None, description=None):
-    identifier = name.replace(" ", "-")
+    identifier = hashlib.sha256(name.encode("utf-8")).hexdigest()[:20]
     evidence = {"id": "synthetic:evidence:" + identifier, "source_name": "Synthetic food regression",
                 "source_type": "synthetic", "source_url": "https://example.invalid/food",
                 "source_record_id": "synthetic:record:" + identifier,
@@ -44,6 +45,60 @@ def search(repository, query, locale="ru", **overrides):
 
 def ids(result):
     return [hit["place_id"] for hit in result["hits"]]
+
+
+@pytest.mark.parametrize("cuisine", ["sushi", "burger", "lagman", "korean", "ice_cream"])
+def test_semantic_stage_cuisine_filters_any_explicit_source_tag(cuisine):
+    confirmed = fixture("Confirmed", cuisine=cuisine)
+    description_only = fixture("Description", description=f"Best {cuisine}")
+    other = fixture("Other", cuisine="italian;japanese")
+    result = search(Repository([description_only, other, confirmed]), "restaurant", cuisine=cuisine)
+    assert ids(result) == [confirmed["id"]]
+    assert "osm:cuisine" in result["hits"][0]["matched_fact_keys"]
+
+
+def test_semantic_stage_named_destination_is_not_replaced_by_same_category():
+    requested = fixture("Старая типография", category="museum")
+    other = fixture("Другой музей", category="museum")
+    result = search(Repository([requested, other]), "музей", named_place="Старая типография")
+    assert ids(result) == [requested["id"]]
+    assert not search(Repository([other]), "музей", named_place="Старая типография")["hits"]
+
+
+def test_semantic_stage_named_venue_and_cuisine_are_both_required():
+    named_without_dish = fixture("Моя кухня", cuisine="japanese")
+    different_with_dish = fixture("Другая кухня", cuisine="sushi")
+    result = search(Repository([named_without_dish, different_with_dish]), "restaurant",
+                    named_place="Моя кухня", cuisine="sushi")
+    assert not result["hits"]
+
+
+def test_structured_name_is_case_normalized_complete_and_independent_of_paraphrase():
+    requested = fixture("Villa Roma")
+    suffix_only = fixture("Roma")
+    result = search(Repository([suffix_only, requested]), "somewhere delightful", named_place="Villa Roma")
+    assert ids(result) == [requested["id"]]
+    assert result["hits"][0]["score"] >= 100
+
+
+def test_semantic_place_type_cannot_match_incidental_description_word():
+    cafe = fixture("Coffee", category="cafe", description="Next to a postcard shop and swimming pool")
+    assert not search(Repository([cafe]), "postcard shop", categories=["gift_shop"])["hits"]
+    assert not search(Repository([cafe]), "swimming pool", categories=["swimming_pool"])["hits"]
+
+
+def test_any_source_category_establishes_relevance_without_a_lexicon_entry():
+    pool = fixture("Aquatics Centre", category="swimming_pool")
+    result = search(Repository([pool]), "go swimming", categories=["swimming_pool"])
+    assert ids(result) == [pool["id"]]
+    assert result["hits"][0]["score"] > 0
+
+
+def test_structured_named_destination_accepts_case_endings_without_shorter_alias_substitution():
+    requested = fixture("Астана Опера", category="theatre")
+    unrelated = fixture("Опера", category="theatre")
+    result = search(Repository([unrelated, requested]), "театр", named_place="Астана Оперы")
+    assert ids(result) == [requested["id"]]
 
 
 @pytest.mark.parametrize("query,locale", [
@@ -139,7 +194,8 @@ def test_unconfirmed_cuisine_is_never_a_pizza_hit(status, value, evidence):
     other = deepcopy(target["evidence"][0])
     other["id"] = "synthetic:evidence:Other"
     target["evidence"].append(other)
-    target["facts"][0].update(status=status, value=value, evidence_ids=evidence)
+    references = [target["evidence"][0]["id"], other["id"]] if evidence else []
+    target["facts"][0].update(status=status, value=value, evidence_ids=references)
     assert ids(search(Repository([target]), "pizza", "en")) == []
 
 

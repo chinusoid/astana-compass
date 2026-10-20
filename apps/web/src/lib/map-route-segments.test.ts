@@ -12,6 +12,24 @@ const route = (coordinates: [number, number][]): RouteGeometry => ({
   coordinates,
 });
 
+it("keeps six ordered stops and their return distinct on one supplied path", () => {
+  const points: [number, number][] = Array.from({ length: 7 }, (_, index) => [
+    71.43 + index * 0.001,
+    51.12,
+  ]);
+  const geometry = route([...points, points[0]]);
+  const legs = journeyLegs(
+    geometry,
+    points.slice(1).map(([lon, lat]) => ({ lon, lat })),
+    true,
+  );
+  expect(
+    legs.map((leg) => `${leg.properties.from}→${leg.properties.to}`),
+  ).toEqual(["S→1", "1→2", "2→3", "3→4", "4→5", "5→6", "6→S"]);
+  expect(new Set(legs.map((leg) => leg.properties.color)).size).toBe(7);
+  expect(legs.at(-1)!.geometry.coordinates.at(-1)).toEqual(points[0]);
+});
+
 it("colours the complete ordered provider path including the explicit return", () => {
   const geometry = route([
     [71.43, 51.12],

@@ -984,7 +984,7 @@ function PartyRoom({
                       <button
                         className="secondary"
                         aria-pressed={index >= 0}
-                        disabled={busy || (index < 0 && chosen.length >= 3)}
+                        disabled={busy || (index < 0 && chosen.length >= 6)}
                         onClick={() =>
                           setSelection({
                             requestId: response.request_id,
@@ -1016,7 +1016,11 @@ function PartyRoom({
                     action: "itinerary",
                     party_id: party.id,
                     revision: party.revision,
-                    request: { ...response.request, place_ids: chosen },
+                    request: {
+                      ...response.request,
+                      limit: Math.max(response.request.limit, chosen.length),
+                      place_ids: chosen,
+                    },
                   })
                 }
               >

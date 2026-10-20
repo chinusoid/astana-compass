@@ -72,6 +72,7 @@ import { stopTitle } from "@/lib/map-route";
 import { journeyColor } from "@/lib/map-route-segments";
 import { sourceDescription } from "@/lib/place-presentation";
 import TimeBudgetNote from "./time-budget-note";
+import ScenarioPlan from "./scenario-plan";
 import scenarioStyles from "./scenario-feedback.module.css";
 
 const CityMap = dynamic(() => import("./city-map"), { ssr: false });
@@ -483,7 +484,11 @@ export default function CompassApp({
     setBuilding(true);
     try {
       const response = await api.itinerary(
-        { ...body, place_ids: stops.map((place) => place.id) },
+        {
+          ...body,
+          limit: Math.max(body.limit, stops.length),
+          place_ids: stops.map((place) => place.id),
+        },
         controller.signal,
       );
       if (!controller.signal.aborted) {
@@ -530,7 +535,7 @@ export default function CompassApp({
     });
   }
   function selectStop(place: Place) {
-    if (selected.length >= 3 || selected.some((p) => p.id === place.id)) return;
+    if (selected.length >= 6 || selected.some((p) => p.id === place.id)) return;
     updateStops([...selected, place]);
   }
   function moveStop(index: number, direction: number) {
@@ -771,7 +776,7 @@ export default function CompassApp({
       locale={locale}
       active={activeId === place.id}
       selected={selectedIds.includes(place.id)}
-      full={selected.length >= 3}
+      full={selected.length >= 6}
       saved={favorites.some((p) => p.id === place.id)}
       onSelect={() => focusPlace(place.id)}
       onDetails={() => void showDetails(place.id)}
@@ -1187,7 +1192,7 @@ export default function CompassApp({
                       <p className={scenarioStyles.query}>
                         «{submittedScenario.query}»
                         {result &&
-                          ` · ${intentText(locale, "scenarioCount")}: ${result.recommendations.length}`}
+                          ` · ${result.journey_plan?.stages.length ? t(locale, "plannedStops") : intentText(locale, "scenarioCount")}: ${result.recommendations.length}`}
                       </p>
                     )}
                     {formError && !origin && form.query.trim() && (
@@ -1206,6 +1211,9 @@ export default function CompassApp({
                       </button>
                     )}
                   </div>
+                  {!scenarioDirty && result?.journey_plan && (
+                    <ScenarioPlan plan={result.journey_plan} locale={locale} />
+                  )}
                   {intentMatches &&
                     inferredIntent &&
                     (inferredIntent.available_seconds !== null ||
@@ -1465,14 +1473,24 @@ export default function CompassApp({
                     <div>
                       <div className="section-label">
                         <span>02</span>
-                        {t(locale, "recommendations")}
+                        {t(
+                          locale,
+                          result?.journey_plan?.stages.length
+                            ? "plannedStops"
+                            : "recommendations",
+                        )}
                       </div>
                       <h2
                         id="results-heading"
                         ref={resultHeading}
                         tabIndex={-1}
                       >
-                        {t(locale, "recommendations")}
+                        {t(
+                          locale,
+                          result?.journey_plan?.stages.length
+                            ? "plannedStops"
+                            : "recommendations",
+                        )}
                       </h2>
                     </div>
                     {result && (
@@ -1515,9 +1533,11 @@ export default function CompassApp({
                             <ShieldCheck size={17} />
                             {t(locale, result.status)}
                           </p>
-                          <p className="field-hint alternatives">
-                            {t(locale, "alternatives")}
-                          </p>
+                          {!result.journey_plan?.stages.length && (
+                            <p className="field-hint alternatives">
+                              {t(locale, "alternatives")}
+                            </p>
+                          )}
                           {building && (
                             <p className="loading-state" role="status">
                               <span className="spinner" />
@@ -1543,11 +1563,12 @@ export default function CompassApp({
                               {t(locale, "approximateHint")}
                             </p>
                           )}
-                          {result.recommendations.length < 3 && (
-                            <p className="field-hint">
-                              {mapText(locale, "fewerStops")}
-                            </p>
-                          )}
+                          {!result.journey_plan?.stages.length &&
+                            result.recommendations.length < 3 && (
+                              <p className="field-hint">
+                                {mapText(locale, "fewerStops")}
+                              </p>
+                            )}
                         </>
                       )}
                       {result.status === "no_match" && (
@@ -1641,7 +1662,7 @@ export default function CompassApp({
                   </div>
                   <h2 id="plan-heading" ref={planHeading} tabIndex={-1}>
                     {t(locale, "plan")}
-                    <span className="count">{selected.length}/3</span>
+                    <span className="count">{selected.length}/6</span>
                   </h2>
                   <p className="field-hint">{t(locale, "planHint")}</p>
                   {selected.length === 0 ? (
@@ -2020,7 +2041,7 @@ export default function CompassApp({
                 scroll={false}
               >
                 <Footprints size={18} />
-                {t(locale, "plan")} · {selected.length}/3
+                {t(locale, "plan")} · {selected.length}/6
                 <ArrowRight size={18} />
               </Link>
             )}
@@ -2252,7 +2273,7 @@ export default function CompassApp({
                     type="button"
                     className="primary"
                     disabled={
-                      selected.length >= 3 || selectedIds.includes(detail.id)
+                      selected.length >= 6 || selectedIds.includes(detail.id)
                     }
                     onClick={() => selectStop(detail)}
                   >

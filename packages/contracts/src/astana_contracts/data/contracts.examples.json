@@ -2326,6 +2326,301 @@
         "warnings": []
       },
       "failure_stage": "schema"
+    },
+    {
+      "name": "grounded_journey_recommendation_valid",
+      "definition": "RecommendationResponse",
+      "valid": true,
+      "instance": {
+        "request_id": "synthetic:req:one",
+        "status": "matched",
+        "request": {
+          "query": "Синтетическая проверка: помещение на час",
+          "locale": "ru",
+          "origin": {
+            "lat": 51.089,
+            "lon": 71.419
+          },
+          "start_at": "2026-10-18T13:00:00+05:00",
+          "timezone": "Asia/Almaty",
+          "available_seconds": 3600,
+          "transport": "walking",
+          "return_to_origin": true,
+          "constraints": [
+            {
+              "key": "indoor",
+              "value": true,
+              "strength": "required"
+            }
+          ],
+          "limit": 3
+        },
+        "places": [
+          {
+            "id": "synthetic:place:one",
+            "name": "SYNTHETIC — indoor fixture",
+            "location": {
+              "lat": 51.09,
+              "lon": 71.42
+            },
+            "categories": [
+              "test_fixture"
+            ],
+            "description": "Synthetic fixture only; no real-world claims.",
+            "facts": [
+              {
+                "key": "indoor",
+                "status": "known",
+                "value": true,
+                "evidence_ids": [
+                  "synthetic:evidence:indoor"
+                ]
+              },
+              {
+                "key": "wheelchair_accessible",
+                "status": "unknown",
+                "value": null,
+                "evidence_ids": []
+              }
+            ],
+            "evidence": [
+              {
+                "id": "synthetic:evidence:indoor",
+                "source_name": "Synthetic contract fixture, not a real venue",
+                "source_type": "synthetic",
+                "source_url": "https://example.invalid/astana-compass/fixtures/indoor",
+                "source_record_id": "synthetic:record:indoor",
+                "retrieved_at": "2026-10-18T12:00:00+05:00",
+                "is_synthetic": true
+              }
+            ],
+            "is_synthetic": true
+          }
+        ],
+        "recommendations": [
+          {
+            "place_id": "synthetic:place:one",
+            "rank": 1,
+            "why": "Synthetic place matches the tested indoor fact.",
+            "suggested_activity": "Синтетическая идея занятия.",
+            "activity_is_ai_suggestion": true,
+            "visit_duration_seconds": 1800,
+            "visit_duration_is_estimate": true,
+            "route": {
+              "method": "approximate",
+              "provider": "synthetic_fixture",
+              "transport": "walking",
+              "distance_meters": 400,
+              "duration_seconds": 360,
+              "includes_return": true,
+              "geometry": null,
+              "assumptions": [
+                "SYNTHETIC estimate; includes outbound and return; no actual street routing."
+              ],
+              "evidence": [
+                {
+                  "id": "synthetic:evidence:indoor",
+                  "source_name": "Synthetic contract fixture, not a real venue",
+                  "source_type": "synthetic",
+                  "source_url": "https://example.invalid/astana-compass/fixtures/indoor",
+                  "source_record_id": "synthetic:record:indoor",
+                  "retrieved_at": "2026-10-18T12:00:00+05:00",
+                  "is_synthetic": true
+                }
+              ],
+              "generated_at": "2026-10-18T12:00:00+05:00"
+            },
+            "total_duration_seconds": 2160,
+            "constraint_evaluations": [
+              {
+                "key": "indoor",
+                "strength": "required",
+                "outcome": "satisfied",
+                "evidence_ids": [
+                  "synthetic:evidence:indoor"
+                ],
+                "explanation": "Synthetic indoor fact is known and true."
+              }
+            ],
+            "warnings": [
+              "Synthetic fixtures must not be shown as real recommendations."
+            ]
+          }
+        ],
+        "clarification_questions": [],
+        "warnings": [
+          "Synthetic data only."
+        ],
+        "generated_at": "2026-10-18T12:00:00+05:00",
+        "journey_plan": {
+          "provider": "rules",
+          "order": "suggested",
+          "stages": [
+            {
+              "source_quote": "Синтетическая проверка: помещение на час",
+              "search_query": "cafe",
+              "kind": "activity",
+              "named_place": null,
+              "cuisine": null,
+              "categories": [
+                "cafe"
+              ]
+            }
+          ],
+          "clarification_questions": [],
+          "warnings": [
+            "Synthetic planning fixture; no model was called."
+          ]
+        }
+      }
+    },
+    {
+      "name": "journey_quote_not_from_user",
+      "definition": "RecommendationResponse",
+      "valid": false,
+      "failure_stage": "invariant",
+      "instance": {
+        "request_id": "synthetic:req:one",
+        "status": "matched",
+        "request": {
+          "query": "Синтетическая проверка: помещение на час",
+          "locale": "ru",
+          "origin": {
+            "lat": 51.089,
+            "lon": 71.419
+          },
+          "start_at": "2026-10-18T13:00:00+05:00",
+          "timezone": "Asia/Almaty",
+          "available_seconds": 3600,
+          "transport": "walking",
+          "return_to_origin": true,
+          "constraints": [
+            {
+              "key": "indoor",
+              "value": true,
+              "strength": "required"
+            }
+          ],
+          "limit": 3
+        },
+        "places": [
+          {
+            "id": "synthetic:place:one",
+            "name": "SYNTHETIC — indoor fixture",
+            "location": {
+              "lat": 51.09,
+              "lon": 71.42
+            },
+            "categories": [
+              "test_fixture"
+            ],
+            "description": "Synthetic fixture only; no real-world claims.",
+            "facts": [
+              {
+                "key": "indoor",
+                "status": "known",
+                "value": true,
+                "evidence_ids": [
+                  "synthetic:evidence:indoor"
+                ]
+              },
+              {
+                "key": "wheelchair_accessible",
+                "status": "unknown",
+                "value": null,
+                "evidence_ids": []
+              }
+            ],
+            "evidence": [
+              {
+                "id": "synthetic:evidence:indoor",
+                "source_name": "Synthetic contract fixture, not a real venue",
+                "source_type": "synthetic",
+                "source_url": "https://example.invalid/astana-compass/fixtures/indoor",
+                "source_record_id": "synthetic:record:indoor",
+                "retrieved_at": "2026-10-18T12:00:00+05:00",
+                "is_synthetic": true
+              }
+            ],
+            "is_synthetic": true
+          }
+        ],
+        "recommendations": [
+          {
+            "place_id": "synthetic:place:one",
+            "rank": 1,
+            "why": "Synthetic place matches the tested indoor fact.",
+            "suggested_activity": "Синтетическая идея занятия.",
+            "activity_is_ai_suggestion": true,
+            "visit_duration_seconds": 1800,
+            "visit_duration_is_estimate": true,
+            "route": {
+              "method": "approximate",
+              "provider": "synthetic_fixture",
+              "transport": "walking",
+              "distance_meters": 400,
+              "duration_seconds": 360,
+              "includes_return": true,
+              "geometry": null,
+              "assumptions": [
+                "SYNTHETIC estimate; includes outbound and return; no actual street routing."
+              ],
+              "evidence": [
+                {
+                  "id": "synthetic:evidence:indoor",
+                  "source_name": "Synthetic contract fixture, not a real venue",
+                  "source_type": "synthetic",
+                  "source_url": "https://example.invalid/astana-compass/fixtures/indoor",
+                  "source_record_id": "synthetic:record:indoor",
+                  "retrieved_at": "2026-10-18T12:00:00+05:00",
+                  "is_synthetic": true
+                }
+              ],
+              "generated_at": "2026-10-18T12:00:00+05:00"
+            },
+            "total_duration_seconds": 2160,
+            "constraint_evaluations": [
+              {
+                "key": "indoor",
+                "strength": "required",
+                "outcome": "satisfied",
+                "evidence_ids": [
+                  "synthetic:evidence:indoor"
+                ],
+                "explanation": "Synthetic indoor fact is known and true."
+              }
+            ],
+            "warnings": [
+              "Synthetic fixtures must not be shown as real recommendations."
+            ]
+          }
+        ],
+        "clarification_questions": [],
+        "warnings": [
+          "Synthetic data only."
+        ],
+        "generated_at": "2026-10-18T12:00:00+05:00",
+        "journey_plan": {
+          "provider": "rules",
+          "order": "suggested",
+          "stages": [
+            {
+              "source_quote": "An invented wish that was not submitted",
+              "search_query": "cafe",
+              "kind": "activity",
+              "named_place": null,
+              "cuisine": null,
+              "categories": [
+                "cafe"
+              ]
+            }
+          ],
+          "clarification_questions": [],
+          "warnings": [
+            "Synthetic planning fixture; no model was called."
+          ]
+        }
+      }
     }
   ]
 }

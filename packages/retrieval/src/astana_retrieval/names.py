@@ -116,6 +116,36 @@ class NameMention:
     key: str | None
 
 
+def exact_source_mentions(text: str, aliases: list[tuple[str, str | None]]) -> list[NameMention]:
+    """A structured destination must match an entire source alias, not its suffix."""
+    value = normalize(text).strip(" \t\r\n\"'«»“”‘’")
+    result = []
+    for name, key in aliases:
+        pattern = _phrase_pattern(name)
+        if pattern is not None and (pattern.fullmatch(value) or _inflected_name(value, name)):
+            result.append(NameMention(0, len(value), key))
+    return result
+
+
+def _inflected_name(requested: str, source: str) -> bool:
+    """Bounded Cyrillic case endings; every full-name token must still agree."""
+    left, right = words(requested), words(source)
+    if not left or len(left) != len(right):
+        return False
+
+    def variants(word: str) -> set[str]:
+        result = {word}
+        if re.fullmatch(r"[а-яё]+", word):
+            for ending in ("ами", "ями", "ого", "ему", "ому", "ыми", "ими", "ый", "ий", "ой",
+                           "ое", "ая", "яя", "ую", "юю", "ые", "ие", "ых", "их", "ом", "ем",
+                           "ам", "ям", "ах", "ях", "а", "я", "у", "ю", "е", "ы", "и"):
+                if word.endswith(ending) and len(word) - len(ending) >= 4:
+                    result.add(word[:-len(ending)])
+        return result
+
+    return all(variants(a).intersection(variants(b)) for a, b in zip(left, right, strict=True))
+
+
 def mentions(text: str, aliases: list[tuple[str, str | None]], *, excluded: bool = False) -> list[NameMention]:
     result = []
     activities = [match.span() for pattern in ACTIVITIES.values() for match in pattern.finditer(text)]

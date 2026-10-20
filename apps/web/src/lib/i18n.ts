@@ -270,6 +270,7 @@ const messages = {
     "Нүкте мен қалауыңыз іздеу үшін қажет. Олар таңдаулыларда немесе пікірде сақталмайды.",
     "Your starting point and request are used for this search, never stored in favorites or feedback.",
   ],
+  plannedStops: ["Остановки маршрута", "Бағыт аялдамалары", "Route stops"],
   recommendations: [
     "Ваши варианты",
     "Сіздің нұсқаларыңыз",
@@ -362,9 +363,9 @@ const messages = {
   unsave: ["Убрать из избранного", "Таңдаулылардан жою", "Unsave place"],
   plan: ["Мой маршрут", "Менің маршрутым", "My little journey"],
   planHint: [
-    "До трёх остановок в одном маршруте: старт → 1 → 2 → 3. Меняйте порядок, добавляйте или удаляйте места — путь пересчитается автоматически.",
-    "Бір маршрутта үш аялдамаға дейін: бастау → 1 → 2 → 3. Ретін өзгерткенде, орын қосқанда немесе жойғанда жол автоматты түрде қайта есептеледі.",
-    "Up to three stops in one route: start → 1 → 2 → 3. Reorder, add or remove places and the path updates automatically.",
+    "До шести остановок в одном маршруте. Меняйте порядок, добавляйте или удаляйте места — путь пересчитается автоматически.",
+    "Бір маршрутта алты аялдамаға дейін. Ретін өзгерткенде, орын қосқанда немесе жойғанда жол автоматты түрде қайта есептеледі.",
+    "Up to six stops in one route. Reorder, add or remove places and the path updates automatically.",
   ],
   emptyPlan: [
     "Добавьте понравившийся вариант",

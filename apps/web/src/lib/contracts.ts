@@ -109,11 +109,26 @@ export function recommendationIntegrity(
     return false;
   const places = new Map(response.places.map((p) => [p.id, p]));
   const ids = response.recommendations.map((r) => r.place_id);
+  const stages = response.journey_plan?.stages;
+  if (
+    stages?.some(
+      (stage) =>
+        !request.query.includes(stage.source_quote) ||
+        (stage.named_place !== null &&
+          !stage.source_quote.includes(stage.named_place)),
+    )
+  )
+    return false;
+  const concreteGoals =
+    stages?.filter((stage) => stage.kind !== "unresolved").length ?? 0;
+  const resultLimit = concreteGoals
+    ? Math.min(6, concreteGoals)
+    : request.limit;
   if (
     places.size !== response.places.length ||
     new Set(ids).size !== ids.length ||
     ids.length !== places.size ||
-    ids.length > request.limit
+    ids.length > resultLimit
   )
     return false;
   return response.recommendations.every((r, index) => {

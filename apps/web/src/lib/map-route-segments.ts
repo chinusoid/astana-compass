@@ -1,6 +1,13 @@
 import type { Location, RouteGeometry } from "@astana/api-client";
 
-export const JOURNEY_COLORS = ["#2563eb", "#9333ea", "#c05621", "#0f766e"];
+export const JOURNEY_COLORS = [
+  "#2563eb",
+  "#9333ea",
+  "#c05621",
+  "#0f766e",
+  "#647115",
+  "#075985",
+];
 export const RETURN_COLOR = "#be185d";
 
 type Coordinate = [number, number];

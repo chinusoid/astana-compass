@@ -6,7 +6,7 @@ from importlib import import_module
 from inspect import Parameter, isasyncgenfunction, isawaitable, iscoroutinefunction, signature
 from contextlib import AsyncExitStack
 
-from astana_contracts import ContextProvider, PlaceRepository, RecommendationService, Retriever
+from astana_contracts import ContextProvider, JourneyPlanner, PlaceRepository, RecommendationService, Retriever
 from astana_recommender import DefaultRecommendationService, ExplanationGenerator
 from .fixtures import FixtureRepository, FixtureRetriever, FixtureContext
 
@@ -139,8 +139,18 @@ async def build_services(settings, stack, *, progress=None):
                 )
             )
             validate_port(generator, ExplanationGenerator)
+        planner = None
+        if settings.mode == "live":
+            progress.enter("journey_planner")
+            from astana_ai_providers import create_journey_planner
+            planner = await own(owned, create_journey_planner(
+                provider=settings.llm_provider if settings.llm_provider != "none" else "rules",
+                model=settings.llm_model or None, api_key=settings.llm_api_key or None,
+                budget=llm_budget,
+            ))
+            validate_port(planner, JourneyPlanner)
         progress.enter("recommender")
-        recommender = DefaultRecommendationService(repository, retriever, context, generator=generator)
+        recommender = DefaultRecommendationService(repository, retriever, context, generator=generator, planner=planner)
         validate_port(recommender, RecommendationService)
         progress.enter("intent")
         from astana_ai_providers.intents import create_intent_analyzer

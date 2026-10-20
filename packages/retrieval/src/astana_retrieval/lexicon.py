@@ -50,6 +50,12 @@ FOOD_CATEGORIES = frozenset({"cafe", "restaurant"})
 CUISINES = {
     # Bounded forms include the common missing-ц typo and Kazakh case suffixes.
     "pizza": r"pizzas?|pizzerias?|пицц?(?:[ауые]|ей|ами|ах|аны|аның|аға|ада|адан|алар(?:ды|дың|ға|да|дан)?)|пиццери(?:я|ю|и|е|й|ей|ям|ями|ях|яға|яда|ядан|яны|яның)",
+    "sushi": r"sushi|суши|сушиге|сушиді|ролл(?:ы|ов|ами)?",
+    "burger": r"burgers?|hamburgers?|бургер\w{0,8}|гамбургер\w{0,8}",
+    "ice_cream": r"ice\s*cream|морожен\w{0,8}|балмұздақ\w{0,8}",
+    "kebab": r"kebabs?|кебаб\w{0,8}",
+    "steak_house": r"steaks?|стейк\w{0,8}",
+    "pasta": r"pasta|паст[ауы]|макарон\w{0,8}",
 }
 CUISINE_PATTERNS = {
     key: re.compile(r"(?<!\w)(?:" + pattern + r")(?!\w)", re.I) for key, pattern in CUISINES.items()
@@ -197,8 +203,13 @@ def known_cuisines(place: dict) -> frozenset[str]:
         items = [raw] if isinstance(raw, str) else raw[:64] if isinstance(raw, list) else []
         values = {value.strip() for item in items if isinstance(item, str)
                   for value in re.split(r"[;,]", normalize(item))}
-        if values.intersection({"pizza", "italian_pizza"}):
+        cuisines.update(value for value in values if re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", value))
+        # These tags explicitly name the same dish; broader cuisines such as
+        # italian/japanese never establish pizza/sushi by themselves.
+        if "italian_pizza" in values:
             cuisines.add("pizza")
+        if "hamburger" in values:
+            cuisines.add("burger")
     return frozenset(cuisines)
 
 

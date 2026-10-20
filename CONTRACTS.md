@@ -6,6 +6,12 @@ The installable `astana-contracts` package contains generated copies, runtime va
 
 ## Public endpoints
 
+Live recommendations first interpret a scenario through the query-only `JourneyPlanner.plan(query, locale) -> JourneyPlan` port. The model supplies ordered activities and exact user excerpts, never venue IDs, coordinates, opening hours or place facts. `JourneyStage.categories`, `named_place` and `cuisine` constrain retrieval against actual source categories, aliases and evidenced cuisine tags. Unsupported or ambiguous goals remain visible; missing stops are not filled with unrelated places.
+
+`RecommendationRequest.limit` still limits discovery alternatives to three. A concrete `journey_plan` can cover up to six requested goals, independently of that alternative count. Its ordered recommendations and their source quotes are validated together. One concrete goal selects one stop; broad discovery can retain three varied alternatives. More than six concrete goals produces an explicit coverage warning. `ItineraryRequest.limit` and `place_ids` allow six selected stops; the complete itinerary preserves their order and includes every selected leg. Older responses without a `journey_plan` retain the original alternative-limit semantics.
+
+The live composition uses the configured server-side LLM and a shared request budget. Missing credentials, refusals, invalid extraction or provider failures select a clearly disclosed local-rules fallback. Synthetic fixture mode retains its deterministic discovery adapter; offline semantic tests use MockTransport and the real checked-in catalog. Neither those fixtures nor schema validation prove arbitrary language will always be understood.
+
 | Method/path | Request | Success | Notes |
 |---|---|---|---|
 | GET `/v1/health/live` | none | `HealthResponse` | Process liveness; no provider probe. |

@@ -398,3 +398,54 @@ test("pizza and the named Botanical Garden automatically form one two-stop walk"
     animations: "disabled",
   });
 });
+
+test("a general four-activity scenario reaches every requested stop automatically", async ({
+  page,
+  request,
+}, testInfo) => {
+  const origin = await request.get(
+    `/api/v1/places/${encodeURIComponent("osm:way/1196402246")}`,
+  );
+  await page.goto("/");
+  await fillWalk(
+    page,
+    (await origin.json()) as Place,
+    "Сначала библиотека, затем суши, потом кино, потом Астана Опера",
+  );
+  await page.locator('input[name="minutes"]').fill("");
+  const response = page.waitForResponse(
+    (res) =>
+      res.url().endsWith("/recommendations") &&
+      res.request().method() === "POST",
+  );
+  const built = page.waitForResponse(
+    (res) =>
+      res.url().endsWith("/itineraries") && res.request().method() === "POST",
+  );
+  await page.locator('textarea[name="query"]').press("Enter");
+  const result = (await (await response).json()) as RecommendationResponse;
+  const ids = result.recommendations.map((item) => item.place_id);
+  expect(ids).toHaveLength(4);
+  const places = new Map(result.places.map((place) => [place.id, place]));
+  expect(places.get(ids[0])!.categories).toContain("library");
+  const cuisine = places
+    .get(ids[1])!
+    .facts.find((fact) => fact.key === "osm:cuisine")!;
+  expect(cuisine.status).toBe("known");
+  expect(String(cuisine.value).split(";")).toContain("sushi");
+  expect(places.get(ids[2])!.categories).toContain("cinema");
+  expect(places.get(ids[3])!.name).toBe("Астана Опера");
+  const itinerary = (await (await built).json()) as ItineraryResponse;
+  expect(itinerary.stops.map((stop) => stop.place_id)).toEqual(ids);
+  await expect(page.getByTestId("scenario-plan").locator("li")).toHaveCount(4);
+  await expect(
+    page.locator(".journey-preview .journey-stop strong"),
+  ).toHaveText(ids.map((id) => places.get(id)!.name));
+  await expect(page.locator(".journey-preview .journey-stop")).toHaveCount(4);
+  await expect(page.getByTestId("map-journey-summary")).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("general-four-stop-walk.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+});

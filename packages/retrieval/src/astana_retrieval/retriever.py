@@ -12,7 +12,7 @@ from typing import Any
 from astana_contracts import JSON, PlaceRepository, validate_payload
 
 from .lexicon import CATEGORY_GROUPS, FOOD_CATEGORIES, LEXICON_VERSION, document_terms, known_cuisines, normalize, understand
-from .names import goal_text, mentions, source_names, source_texts, typo_expansions, words
+from .names import exact_source_mentions, goal_text, mentions, source_names, source_texts, typo_expansions, words
 
 DYNAMIC_KEYS = frozenset({"open_at_requested_time", "weather_suitable"})
 STRATEGY = f"snapshot-bm25-{LEXICON_VERSION}"
@@ -117,6 +117,12 @@ class LexicalRetriever:
             seen.add(place["id"])
         source = [place for place in source if distance_meters(request["origin"], place["location"]) <= request["radius_meters"]]
         aliases = {place["id"]: source_names(place) for place in source}
+        required_name = request.get("named_place")
+        required_cuisine = request.get("cuisine")
+        required_categories = set(request.get("categories", []))
+        structured_names = {place_id: exact_source_mentions(required_name, names) if required_name else []
+                            for place_id, names in aliases.items()}
+        named_ids = {place_id for place_id, found in structured_names.items() if found}
         goal, has_anchor = goal_text(request["query"], list(aliases.values()))
         name_mentions = {place_id: mentions(goal, names) for place_id, names in aliases.items()}
         excluded_names = {place_id for place_id, names in aliases.items() if mentions(goal, names, excluded=True)}
@@ -138,6 +144,11 @@ class LexicalRetriever:
         # other gardens. An explicit second category/cuisine may add candidates.
         named_only = named_goal and not (query.categories or query.cuisines)
         query = replace(query, terms=query.terms | literal_terms)
+        if required_name:
+            query = replace(query, terms=query.terms | set(words(required_name)))
+        if required_cuisine:
+            query = replace(query, cuisines=frozenset({required_cuisine}),
+                            terms=query.terms | {"cuisine:" + required_cuisine})
         corrections = typo_expansions(query.terms, list(aliases.values()))
         if corrections:
             warnings.append(_text("typo", locale))
@@ -149,11 +160,17 @@ class LexicalRetriever:
             distance = distance_meters(request["origin"], place["location"])
             if place["id"] in excluded_names:
                 continue
+            if required_name and place["id"] not in named_ids:
+                continue
+            if required_categories and not required_categories.intersection(place["categories"]):
+                continue
             if named_only and not name_mentions[place["id"]]:
                 continue
-            is_named = bool(name_mentions[place["id"]])
+            is_named = bool(name_mentions[place["id"]] or structured_names[place["id"]])
             food_place = bool(FOOD_CATEGORIES.intersection(place["categories"]))
             cuisines = known_cuisines(place) if food_place else frozenset()
+            if required_cuisine and required_cuisine not in cuisines:
+                continue
             facts = {fact["key"]: fact for fact in place["facts"]}
             violated, deferred, matched = False, False, set()
             for constraint in request["constraints"]:
@@ -193,6 +210,7 @@ class LexicalRetriever:
             if query.cuisines.intersection(cuisines):
                 matched.add("osm:cuisine")
             matched.update(mention.key for mention in name_mentions[place["id"]] if mention.key)
+            matched.update(mention.key for mention in structured_names[place["id"]] if mention.key)
             for name, key in aliases[place["id"]]:
                 if key and query.terms.intersection(words(name)):
                     matched.add(key)
@@ -208,7 +226,8 @@ class LexicalRetriever:
         preferred_keys = {item["key"] for item in request["constraints"] if item["strength"] == "preferred"}
         groups = {}
         for place, terms, distance, matched, deferred in corpus:
-            score = 100.0 if name_mentions[place["id"]] else 0.0
+            score = (100.0 if name_mentions[place["id"]] or structured_names[place["id"]]
+                     else 2.0 if required_categories.intersection(place["categories"]) else 0.0)
             for term in sorted(query.terms):
                 frequency = terms.get(term, 0)
                 if not frequency:
