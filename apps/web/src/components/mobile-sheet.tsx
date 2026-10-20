@@ -7,7 +7,7 @@ import {
   useRef,
   useSyncExternalStore,
   type KeyboardEvent,
-  type PointerEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { Locale } from "@/lib/i18n";
 import styles from "./mobile-sheet.module.css";
@@ -101,6 +101,7 @@ export default function MobileSheet({
     offset: number;
     moved: boolean;
     samples: { y: number; time: number }[];
+    release: () => void;
   } | null>(null);
   const preview = useRef<((notify?: boolean) => void) | null>(null);
   const suppressClick = useRef(false);
@@ -109,15 +110,19 @@ export default function MobileSheet({
     preview.current?.(false);
     onSnap(snaps[Math.max(0, Math.min(2, snaps.indexOf(snap) + direction))]);
   }
-  function finish(event: PointerEvent<HTMLButtonElement>, cancel = false) {
+  function finish(event: PointerEvent, cancel = false) {
     const start = drag.current;
     if (!start || start.pointer !== event.pointerId) return;
     drag.current = null;
+    start.release();
     const delta = event.clientY - start.y;
-    start.moved ||= Math.abs(delta) > 8;
-    suppressClick.current = !cancel && start.moved;
+    start.moved ||= !cancel && Math.abs(delta) > 8;
+    suppressClick.current = !cancel;
     if (!start.moved) {
       preview.current?.(false);
+      // Capturing on the stable ancestor can retarget the compatibility click.
+      // Complete taps here; keyboard clicks still use the button's onClick.
+      if (!cancel) step(snap === "expanded" ? -2 : 1);
       return;
     }
     const now = performance.now();
@@ -156,12 +161,29 @@ export default function MobileSheet({
     preview.current = stop;
     if (animation) animation.onfinish = () => stop();
   }
-  function beginDrag(event: PointerEvent<HTMLButtonElement>) {
+  function move(event: PointerEvent) {
+    const start = drag.current;
+    if (!start || start.pointer !== event.pointerId) return;
+    const now = performance.now();
+    const delta = event.clientY - start.y;
+    start.moved ||= Math.abs(delta) > 8;
+    start.samples = start.samples.filter((point) => now - point.time <= 90);
+    start.samples.push({ y: event.clientY, time: now });
+    start.offset = sheetDragOffset(
+      start.heights[2] - start.height + delta,
+      start.heights[2] - start.heights[0],
+    );
+    start.panel.style.setProperty("--sheet-drag", `${start.offset}px`);
+  }
+  function beginDrag(event: ReactPointerEvent<HTMLButtonElement>) {
     if (event.button !== 0 || event.isPrimary === false || drag.current) return;
     const panel = event.currentTarget.closest<HTMLElement>(
       "[data-mobile-sheet]",
     );
     if (!panel) return;
+    const capture =
+      panel.closest<HTMLElement>(".app-shell") ?? panel.parentElement;
+    if (!capture) return;
     // Cache geometry once. Pointer moves below only write a compositor transform.
     const viewport = window.visualViewport?.height || window.innerHeight;
     const nav = panel.parentElement
@@ -191,11 +213,29 @@ export default function MobileSheet({
       ? Math.max(heights[0], Math.min(maximum, visibleHeight))
       : heights[snaps.indexOf(snap)];
     panel.style.setProperty("--sheet-drag", `${maximum - height}px`);
+    const pointer = event.pointerId;
+    const up = (entry: PointerEvent) => finish(entry);
+    const cancel = (entry: PointerEvent) => finish(entry, true);
+    const lost = (entry: PointerEvent) => {
+      if (entry.target === capture) finish(entry, true);
+    };
+    let listening = true;
+    const release = () => {
+      if (!listening) return;
+      listening = false;
+      document.removeEventListener("pointermove", move, true);
+      document.removeEventListener("pointerup", up, true);
+      document.removeEventListener("pointercancel", cancel, true);
+      document.removeEventListener("lostpointercapture", lost, true);
+      if (capture.hasPointerCapture?.(pointer))
+        capture.releasePointerCapture(pointer);
+    };
     let active = true;
     preview.current = (notify = true) => {
       if (!active) return;
       active = false;
       drag.current = null;
+      release();
       panel.removeAttribute("data-sheet-preview");
       panel.removeAttribute("data-sheet-dragging");
       panel.style.removeProperty("--sheet-drag");
@@ -216,8 +256,19 @@ export default function MobileSheet({
       offset: maximum - height,
       moved: false,
       samples: [{ y: event.clientY, time: performance.now() }],
+      release,
     };
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    document.addEventListener("pointermove", move, true);
+    document.addEventListener("pointerup", up, true);
+    document.addEventListener("pointercancel", cancel, true);
+    document.addEventListener("lostpointercapture", lost, true);
+    // The sheet/handle translates under the finger. Keep capture on its fixed
+    // ancestor so WebKit does not have to retarget a moving capture element.
+    try {
+      capture.setPointerCapture?.(pointer);
+    } catch {
+      // The single document stream still handles input if capture is unavailable.
+    }
   }
   function keyboard(event: KeyboardEvent<HTMLButtonElement>) {
     if (["ArrowUp", "ArrowDown", "Home", "End", "Escape"].includes(event.key)) {
@@ -239,35 +290,15 @@ export default function MobileSheet({
         aria-controls="mobile-sheet-content"
         aria-describedby="sheet-gesture-hint"
         onKeyDown={keyboard}
-        onClick={() => {
-          if (suppressClick.current) {
+        onClick={(event) => {
+          if (suppressClick.current && event.detail > 0) {
             suppressClick.current = false;
             return;
           }
+          suppressClick.current = false;
           step(snap === "expanded" ? -2 : 1);
         }}
         onPointerDown={beginDrag}
-        onPointerMove={(event) => {
-          const start = drag.current;
-          if (!start || start.pointer !== event.pointerId) return;
-          const now = performance.now();
-          const delta = event.clientY - start.y;
-          start.moved ||= Math.abs(delta) > 8;
-          start.samples = start.samples.filter(
-            (point) => now - point.time <= 90,
-          );
-          start.samples.push({ y: event.clientY, time: now });
-          start.offset = sheetDragOffset(
-            start.heights[2] - start.height + delta,
-            start.heights[2] - start.heights[0],
-          );
-          start.panel.style.setProperty("--sheet-drag", `${start.offset}px`);
-        }}
-        onPointerUp={(event) => finish(event)}
-        onPointerCancel={(event) => finish(event, true)}
-        onLostPointerCapture={(event) => {
-          if (drag.current) finish(event, true);
-        }}
       >
         <span aria-hidden="true" />
       </button>

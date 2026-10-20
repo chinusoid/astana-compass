@@ -19,25 +19,32 @@ function Harness({
   const [snap, setSnap] = useState<SheetSnap>(initial);
   onRender();
   return (
-    <main
-      data-mobile-sheet
-      data-testid="sheet"
-      data-snap={snap}
-      style={{ maxHeight: 766 }}
-    >
-      <MobileSheet
-        snap={snap}
-        onSnap={(next) => {
-          onSnap(next);
-          setSnap(next);
-        }}
-        onOpen={() => setSnap("expanded")}
-        locale="en"
-        wish="A museum and coffee"
-        summary="2 stops"
-      />
-    </main>
+    <div className="app-shell" data-testid="shell">
+      <main
+        data-mobile-sheet
+        data-testid="sheet"
+        data-snap={snap}
+        style={{ maxHeight: 766 }}
+      >
+        <MobileSheet
+          snap={snap}
+          onSnap={(next) => {
+            onSnap(next);
+            setSnap(next);
+          }}
+          onOpen={() => setSnap("expanded")}
+          locale="en"
+          wish="A museum and coffee"
+          summary="2 stops"
+        />
+      </main>
+    </div>
   );
+}
+function pointer(target: Element | Document, type: string, y: number, id = 7) {
+  const event = new MouseEvent(type, { bubbles: true, clientY: y, button: 0 });
+  Object.defineProperty(event, "pointerId", { value: id });
+  fireEvent(target, event);
 }
 it("offers keyboard snap controls and opens the existing planning wish", () => {
   render(<Harness />);
@@ -117,11 +124,115 @@ it("tracks the finger directly without layout reads or React work on moves, and 
   fireEvent.pointerUp(handle, { clientY: 60 });
   expect(onSnap).toHaveBeenCalledExactlyOnceWith("expanded");
   expect(sheet).toHaveAttribute("data-snap", "expanded");
-  fireEvent.click(handle); // The synthetic click following a swipe must not snap again.
+  fireEvent.click(handle, { detail: 1 }); // The pointer click following a swipe must not snap again.
   expect(onSnap).toHaveBeenCalledOnce();
   await waitFor(() => expect(sheet).not.toHaveAttribute("data-sheet-preview"));
   expect(sheet.style.transition).toBe("");
   expect(sheet.style.getPropertyValue("--sheet-drag")).toBe("");
+});
+
+it("captures the stable shell and completes one document stream while the sheet translates", async () => {
+  vi.stubGlobal("innerHeight", 844);
+  const onSnap = vi.fn();
+  render(<Harness onSnap={onSnap} />);
+  const shell = screen.getByTestId("shell");
+  const sheet = screen.getByTestId("sheet");
+  const handle = screen.getByRole("button", { name: "Panel size: Collapsed" });
+  let held = false;
+  const capture = vi.fn(() => {
+    held = true;
+  });
+  const release = vi.fn(() => {
+    held = false;
+    pointer(shell, "lostpointercapture", 0);
+  });
+  Object.assign(shell, {
+    setPointerCapture: capture,
+    hasPointerCapture: () => held,
+    releasePointerCapture: release,
+  });
+  const movingCapture = vi.fn();
+  Object.assign(handle, { setPointerCapture: movingCapture });
+  pointer(handle, "pointerdown", 660);
+  expect(capture).toHaveBeenCalledExactlyOnceWith(7);
+  expect(movingCapture).not.toHaveBeenCalled();
+  expect(shell).not.toHaveAttribute("data-sheet-preview");
+  expect(sheet).toHaveAttribute("data-sheet-preview");
+  // Transferring implicit touch capture from the handle must not cancel the new shell capture.
+  pointer(handle, "lostpointercapture", 660);
+  expect(sheet).toHaveAttribute("data-sheet-dragging");
+  pointer(document, "pointermove", 200, 8); // An unrelated pointer cannot move or finish it.
+  pointer(document, "pointerup", 200, 8);
+  expect(sheet.style.getPropertyValue("--sheet-drag")).toBe("634px");
+  pointer(document, "pointermove", 300);
+  expect(sheet.style.getPropertyValue("--sheet-drag")).toBe("274px");
+  pointer(shell, "pointermove", 60);
+  pointer(document, "pointerup", 60);
+  expect(onSnap).toHaveBeenCalledExactlyOnceWith("expanded");
+  expect(release).toHaveBeenCalledOnce();
+  pointer(document, "pointerup", 60);
+  expect(onSnap).toHaveBeenCalledOnce();
+  await waitFor(() => expect(sheet).not.toHaveAttribute("data-sheet-preview"));
+});
+
+it("completes ancestor-targeted taps once and keeps the next keyboard click active", () => {
+  vi.stubGlobal("innerHeight", 844);
+  const onSnap = vi.fn();
+  render(<Harness onSnap={onSnap} />);
+  const shell = screen.getByTestId("shell");
+  const handle = screen.getByRole("button", { name: "Panel size: Collapsed" });
+  pointer(handle, "pointerdown", 660);
+  pointer(shell, "pointerup", 660);
+  fireEvent.click(shell, { detail: 1 });
+  expect(onSnap).toHaveBeenCalledExactlyOnceWith("half");
+  fireEvent.click(handle, { detail: 0 });
+  expect(onSnap).toHaveBeenLastCalledWith("expanded");
+  expect(onSnap).toHaveBeenCalledTimes(2);
+  pointer(handle, "pointerdown", 100);
+  pointer(handle, "pointerup", 100);
+  fireEvent.click(handle, { detail: 1 });
+  expect(onSnap).toHaveBeenCalledTimes(3);
+  expect(onSnap).toHaveBeenLastCalledWith("collapsed");
+});
+
+it("releases stable capture and document handlers on cancellation, interruption and unmount", async () => {
+  vi.stubGlobal("innerHeight", 844);
+  const onSnap = vi.fn();
+  const { unmount } = render(<Harness onSnap={onSnap} />);
+  const shell = screen.getByTestId("shell");
+  const sheet = screen.getByTestId("sheet");
+  const handle = screen.getByRole("button", { name: "Panel size: Collapsed" });
+  const release = vi.fn();
+  Object.assign(shell, {
+    setPointerCapture: vi.fn(),
+    hasPointerCapture: () => true,
+    releasePointerCapture: release,
+  });
+  const remove = vi.spyOn(document, "removeEventListener");
+  pointer(handle, "pointerdown", 660);
+  pointer(document, "pointermove", 300);
+  pointer(document, "pointercancel", 300);
+  expect(release).toHaveBeenCalledOnce();
+  expect(onSnap).not.toHaveBeenCalled();
+  await waitFor(() => expect(sheet).not.toHaveAttribute("data-sheet-preview"));
+  pointer(handle, "pointerdown", 660);
+  fireEvent.keyDown(handle, { key: "End" });
+  expect(release).toHaveBeenCalledTimes(2);
+  pointer(document, "pointerup", 60);
+  expect(onSnap).toHaveBeenCalledExactlyOnceWith("expanded");
+  pointer(handle, "pointerdown", 100);
+  unmount();
+  expect(release).toHaveBeenCalledTimes(3);
+  for (const type of [
+    "pointermove",
+    "pointerup",
+    "pointercancel",
+    "lostpointercapture",
+  ])
+    expect(remove).toHaveBeenCalledWith(type, expect.any(Function), true);
+  pointer(document, "pointermove", 600);
+  pointer(document, "pointerup", 600);
+  expect(onSnap).toHaveBeenCalledOnce();
 });
 
 it("accepts a light short flick and cleans up a cancelled gesture without changing its snap", async () => {
