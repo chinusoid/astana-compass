@@ -55,6 +55,13 @@ and `сауда орталығы` become category `mall` with no proper-name fil
 `shopping_mall` is normalized to the source category `mall`; true compound
 proper names remain literal source excerpts. This small type ontology does
 not veto unknown category tokens or claim that a matching venue exists.
+`botanical_garden` expands to the existing source group `park`/`garden`;
+strict aliases such as `art_gallery` and `movie_theater` map to `gallery` and
+`cinema`. Expansion never silently discards other unknown type filters.
+For a true named destination, incidental category hints are cleared only when
+the text outside its exact name contains solely visit/order/preposition filler.
+Independent wording such as `cafe Mega` or `watch a movie at MEGA` keeps its type
+constraint. Generic type-only labels keep their category constraints as well.
 A broad discovery walk can keep `stages: []` to allow diverse recommendations.
 Explicit sequences take precedence over suggested logical ordering, while
 unsupported or ambiguous wishes remain visible as `unresolved` stages with a

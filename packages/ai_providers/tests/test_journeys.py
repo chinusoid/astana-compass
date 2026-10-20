@@ -2,7 +2,9 @@
 
 import asyncio
 from copy import deepcopy
+from datetime import datetime, timedelta
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -530,6 +532,101 @@ def test_shopping_mall_alias_is_canonicalized_without_vetoing_other_categories()
     result = hosted("go shopping", plan([stage("shopping", categories=["shopping_mall", "future_place_type"])]))
     assert result["provider"] == "openai"
     assert result["stages"][0]["categories"] == ["mall", "future_place_type"]
+
+
+@pytest.mark.parametrize("alias,categories", [
+    ("botanical_garden", ["park", "garden"]), ("art_gallery", ["gallery"]),
+    ("arts_center", ["arts_centre"]), ("movie_theater", ["cinema"]), ("movie_theatre", ["cinema"]),
+])
+def test_common_semantic_type_aliases_expand_only_to_existing_source_groups(alias, categories):
+    result = hosted("visit a place", plan([stage("place", categories=[alias, "future_place_type"])]))
+    assert result["provider"] == "openai"
+    assert result["stages"][0]["categories"] == [*categories, "future_place_type"]
+
+
+def test_botanical_source_group_deduplicates_without_silently_truncating_unknown_types():
+    result = hosted("garden visit", plan([stage("garden", categories=["botanical_garden", "park", "garden"])]))
+    assert result["provider"] == "openai" and result["stages"][0]["categories"] == ["park", "garden"]
+    result = hosted("garden visit", plan([stage("garden", categories=["botanical_garden", "one", "two", "three", "four", "five"])]))
+    assert result["provider"] == "rules" and result["warnings"]
+
+
+@pytest.mark.parametrize("query,quote,name,categories,expected", [
+    ("Visit Museum of Science", "Visit Museum of Science", "Museum of Science", ["museum"], []),
+    ("в Ботанический сад сходить", "в Ботанический сад сходить", "Ботанический сад", ["garden"], []),
+    ("Visit cafe Museum of Science", "Visit cafe Museum of Science", "Museum of Science", ["cafe"], ["cafe"]),
+    ("watch a movie at MEGA Silk Way", "watch a movie at MEGA Silk Way", "MEGA Silk Way", ["cinema"], ["cinema"]),
+    ("кафе Mega", "кафе Mega", "Mega", ["cafe"], ["cafe"]),
+])
+def test_true_named_destination_category_hints_do_not_override_identity_or_independent_type(query, quote, name, categories, expected):
+    result = hosted(query, plan([stage(quote, kind="named_place", named=name, categories=categories)]))
+    assert result["provider"] == "openai" and result["stages"][0]["named_place"] == name
+    assert result["stages"][0]["categories"] == expected
+
+
+def test_actual_hosted_botanical_alias_plan_retrieves_the_exact_source_garden():
+    from astana_city_data import SnapshotRepository
+    from astana_recommender import DefaultRecommendationService
+    from astana_retrieval import LexicalRetriever
+    from packages.recommender.tests.test_service import Context, request
+
+    path = Path(__file__).resolve().parents[3] / "data/samples/astana-osm.json"
+    snapshot = json.loads(path.read_text(encoding="utf-8"))
+    now = max(datetime.fromisoformat(item["retrieved_at"].replace("Z", "+00:00"))
+              for source in snapshot["places"] for item in source["evidence"]) + timedelta(hours=1)
+    query = "Хочу поесть пиццу и в ботанический сад сходить"
+    answer = plan([stage("поесть пиццу", kind="meal", cuisine="pizza", categories=["restaurant"]),
+                   stage("в ботанический сад сходить", "посетить ботанический сад", categories=["botanical_garden"])])
+
+    async def check():
+        repository = SnapshotRepository(path, clock=lambda: now)
+        garden_id = "osm:way/1196402246"
+        garden = await repository.get(garden_id)
+        calls = []
+
+        def handler(payload):
+            calls.append(json.loads(payload.content))
+            return httpx.Response(200, json=envelope(answer))
+
+        context = Context()
+        async with create_journey_planner("openai", "gpt-6-luna", SECRET, transport=httpx.MockTransport(handler)) as planner:
+            service = DefaultRecommendationService(repository, LexicalRetriever(repository, pool_limit=1_000),
+                                                   context, planner=planner, clock=lambda: now)
+            result = await service.recommend(request(query=query, origin=garden["location"]))
+        assert result["journey_plan"]["provider"] == "openai"
+        assert result["journey_plan"]["stages"][1]["categories"] == ["park", "garden"]
+        assert result["journey_plan"]["stages"][1]["named_place"] is None
+        assert len(result["recommendations"]) == 2
+        assert result["recommendations"][1]["place_id"] == garden_id
+        assert len(calls) == 1 and len(context.routes) == 2
+        assert all(not source["is_synthetic"] for source in result["places"])
+        validate_payload("RecommendationResponse", result)
+
+    asyncio.run(check())
+
+
+def test_independent_cafe_type_outside_museum_name_is_not_weakened_by_name_hint_cleanup():
+    from astana_recommender import DefaultRecommendationService
+    from astana_retrieval import LexicalRetriever
+    from packages.recommender.tests.test_service import Context, Repository, place, request
+
+    source = place(1)
+    source.update(name="Museum of Science", categories=["museum"])
+    query = "Visit cafe Museum of Science"
+    answer = plan([stage(query, kind="named_place", named=source["name"], categories=["cafe"])])
+
+    async def check():
+        repository, context = Repository([source]), Context()
+        async with create_journey_planner(
+            "openai", "gpt-6-luna", SECRET,
+            transport=httpx.MockTransport(lambda _: httpx.Response(200, json=envelope(answer))),
+        ) as planner:
+            result = await DefaultRecommendationService(repository, LexicalRetriever(repository), context, planner=planner).recommend(request(query=query))
+        assert result["journey_plan"]["stages"][0]["categories"] == ["cafe"]
+        assert result["status"] == "no_match" and result["recommendations"] == []
+        assert not context.routes
+
+    asyncio.run(check())
 
 
 @pytest.mark.parametrize("query,first,second", [

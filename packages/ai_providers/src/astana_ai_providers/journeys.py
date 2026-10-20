@@ -77,7 +77,11 @@ _GENERIC_TYPES = {
     "playground": "playground|детская площадка|детскую площадку|ойын алаңы",
 }
 _GENERIC_LABELS = {alias: category for category, aliases in _GENERIC_TYPES.items() for alias in aliases.split("|")}
-_CATEGORY_ALIASES = {"shopping_mall": "mall", "shopping_center": "mall", "shopping_centre": "mall"}
+_CATEGORY_ALIASES = {
+    "shopping_mall": ("mall",), "shopping_center": ("mall",), "shopping_centre": ("mall",),
+    "botanical_garden": ("park", "garden"), "art_gallery": ("gallery",),
+    "arts_center": ("arts_centre",), "movie_theater": ("cinema",), "movie_theatre": ("cinema",),
+}
 _UNSAFE_TEXT = re.compile(r"https?://|www\.|[\x00-\x08\x0b-\x1f\x7f]", re.I)
 _FILLER = frozenset(
     "хочу хотим нужно надо мне нам пожалуйста затем потом сначала можно хочу бы хочу хотели "
@@ -87,6 +91,9 @@ _FILLER = frozenset(
     "мен біз маған бізге қалаймын қалаймыз керек өтінемін сосын алдымен содан кейін және".split()
 )
 _NAME_CONNECTORS = frozenset("of the and de del la le du des et und и имени атындағы".split())
+_NAME_VISIT_CONTEXT = frozenset(
+    "at in into on towards toward via во ко на зайти посетить сходить бару барғым барғымыз келеді барамын".split()
+)
 _TIME_REFERENCE = re.compile(
     r"^\s*(?:(?:at|в|сағат)\s+)?(?:\d|today\b|tomorrow\b|tonight\b|noon\b|midnight\b|"
     r"сегодня\b|завтра\b|полудн\w*|полуноч\w*|бүгін\b|ертең\b)", re.I,
@@ -320,7 +327,8 @@ def _via_pair(query: str, stages: list[dict[str, Any]], protected: list[tuple[in
 
 def _normalize_types(stages: list[dict[str, Any]]) -> None:
     for stage in stages:
-        categories = list(dict.fromkeys(_CATEGORY_ALIASES.get(value, value) for value in stage.get("categories", [])))
+        categories = list(dict.fromkeys(category for value in stage.get("categories", [])
+                                       for category in _CATEGORY_ALIASES.get(value, (value,))))
         named = stage["named_place"]
         generic = _GENERIC_LABELS.get(" ".join(named.casefold().split())) if named is not None else None
         if generic is not None:
@@ -330,6 +338,15 @@ def _normalize_types(stages: list[dict[str, Any]]) -> None:
                 stage["kind"] = "meal" if generic in {"cafe", "restaurant"} else "activity"
             if stage["cuisine"] is not None and generic not in {"cafe", "restaurant"}:
                 raise ValueError("a generic place type does not establish a cuisine")
+        elif stage["kind"] == "named_place" and named is not None and stage["cuisine"] is None:
+            outside = stage["source_quote"].replace(named, " ")
+            if not _concepts(outside).difference(_NAME_VISIT_CONTEXT):
+                # A proper name may contain a type word that does not match the
+                # catalog's chosen category. Exact source identity is decisive
+                # when no independent activity/type was requested outside it.
+                categories = []
+        if len(categories) > 6:
+            raise ValueError("expanded source category group exceeds planning bound")
         stage["categories"] = categories
 
 
