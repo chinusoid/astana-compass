@@ -15,6 +15,9 @@ export interface SocialPlannerValue {
   locale: Locale;
   allowFixtures: boolean;
   origin: Location | null;
+  /** Local wish draft; editing never publishes a group action. */
+  query: string;
+  setQuery: (query: string) => void;
   beginOriginPick: () => void;
   setCommunityEvents: (events: CommunityEvent[]) => void;
   setSharedLocations: (locations: SharedLocation[]) => void;

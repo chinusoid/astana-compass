@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import Image from "next/image";
 import {
   Check,
@@ -121,12 +120,31 @@ const copy = {
     "Қатысушылардың ең қысқа уақыты — бағдар; артық уақыт бөлек көрсетіледі. Барлық міндетті шарттар сақталады. Шарттар өзгерсе, бұрынғы есеп жойылады.",
     "The shortest member duration is a target; extra time is shown explicitly. All required conditions still apply. Changing needs clears the previous calculation.",
   ],
-  planSetup: [
-    "Сначала задайте старт, пожелание и время в разделе «Прогулка».",
-    "Алдымен «Серуен» бөлімінде бастау нүктесін, тілекті және уақытты таңдаңыз.",
-    "First set your start, request and time on the Walk page.",
+  wishHint: [
+    "Опишите прогулку для компании. Пожелание отправится только по кнопке «Найти варианты для всех».",
+    "Топқа арналған серуенді сипаттаңыз. Тілек тек «Барлығына нұсқалар табу» батырмасынан кейін жіберіледі.",
+    "Describe the group’s walk. Your wish is sent only when you choose Find options for everyone.",
   ],
-  goWalk: ["Настроить прогулку", "Серуенді баптау", "Set up the walk"],
+  needsQuery: [
+    "Опишите, куда хотите сходить вместе.",
+    "Бірге қайда барғыңыз келетінін сипаттаңыз.",
+    "Describe where you would like to go together.",
+  ],
+  needsOrigin: [
+    "Выберите старт на карте, по геолокации или введите координаты выше.",
+    "Жоғарыда картадан, геолокациямен не координаталар арқылы бастау нүктесін таңдаңыз.",
+    "Choose a start on the map, use your location or enter coordinates above.",
+  ],
+  invalidPlan: [
+    "Проверьте пожелание, координаты и дополнительные условия прогулки.",
+    "Тілекті, координаталарды және серуеннің қосымша шарттарын тексеріңіз.",
+    "Check your wish, coordinates and optional walk settings.",
+  ],
+  draftChanged: [
+    "Параметры изменены — нажмите «Найти варианты для всех». Ниже показан прежний общий план.",
+    "Параметрлер өзгерді — «Барлығына нұсқалар табу» батырмасын басыңыз. Төменде бұрынғы ортақ жоспар көрсетілген.",
+    "Settings changed — choose Find options for everyone. The previous shared plan is shown below.",
+  ],
   recommend: [
     "Найти варианты для всех",
     "Барлығына нұсқалар табу",
@@ -777,18 +795,26 @@ function PartyRoom({
   mutate: Mutate;
   busy: boolean;
 }) {
-  const { locale, currentRequest } = useSharedPlanner();
+  const { locale, query, setQuery, origin, currentRequest } = useSharedPlanner();
   const text = (key: CopyKey) => say(locale, key);
   const member = party.members.find(
     (item) => item.profile.id === state.profile.id,
   )!;
   const [invited, setInvited] = useState("");
-  const [setupNeeded, setSetupNeeded] = useState(false);
+  const [setupError, setSetupError] = useState<CopyKey | null>(null);
+  const queryRef = useRef<HTMLTextAreaElement>(null);
   const [selection, setSelection] = useState<{
     requestId: string;
     ids: string[];
   }>({ requestId: "", ids: [] });
   const response = party.recommendations;
+  const sharedRequest = response?.request ?? party.itinerary?.request;
+  const draftChanged = sharedRequest && (
+    query.trim() !== sharedRequest.query ||
+    !origin ||
+    origin.lat !== sharedRequest.origin.lat ||
+    origin.lon !== sharedRequest.origin.lon
+  );
   const chosen =
     selection.requestId === response?.request_id ? selection.ids : [];
   const eligible = state.friends.filter(
@@ -797,10 +823,13 @@ function PartyRoom({
   function recommend() {
     const request = currentRequest();
     if (!request) {
-      setSetupNeeded(true);
+      setSetupError(
+        !query.trim() ? "needsQuery" : !origin ? "needsOrigin" : "invalidPlan",
+      );
+      if (!query.trim()) queryRef.current?.focus();
       return;
     }
-    setSetupNeeded(false);
+    setSetupError(null);
     void mutate({
       action: "recommend",
       party_id: party.id,
@@ -902,18 +931,51 @@ function PartyRoom({
         mutate={mutate}
       />
       <p className="field-hint">{text("groupHint")}</p>
-      <Link href="/walk" className="text-button" scroll={false}>
-        {text("goWalk")}
-      </Link>
-      {setupNeeded && (
-        <p className="notice amber" role="status">
-          {text("planSetup")}
+      <form
+        className="party-form party-planner"
+        data-query-form
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          recommend();
+        }}
+      >
+        <label className="field">
+          <span>{t(locale, "query")}</span>
+          <textarea
+            ref={queryRef}
+            name="query"
+            rows={3}
+            maxLength={2000}
+            required
+            value={query}
+            placeholder={t(locale, "queryPlaceholder")}
+            aria-describedby="party-query-hint party-query-error"
+            aria-invalid={setupError === "needsQuery" || undefined}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setSetupError(null);
+            }}
+          />
+        </label>
+        <p className="field-hint" id="party-query-hint">
+          {text("wishHint")}
         </p>
-      )}
-      <button className="primary" disabled={busy} onClick={recommend}>
-        <Users size={16} />
-        {text("recommend")}
-      </button>
+        {draftChanged && (
+          <p className="notice amber" role="status">{text("draftChanged")}</p>
+        )}
+        <div className="search-actions">
+          <button type="submit" className="primary" disabled={busy}>
+            <Users size={16} />
+            {text("recommend")}
+          </button>
+        </div>
+        <div id="party-query-error" aria-live="polite">
+          {setupError && (
+            <p className="notice amber" role="status">{text(setupError)}</p>
+          )}
+        </div>
+      </form>
       {response && (
         <section
           className="party-results"

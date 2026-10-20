@@ -81,6 +81,7 @@ export default function MobileSheet({
   summary,
   ideasCount = 0,
   onOpenIdeas,
+  plannerHref = "/walk",
 }: {
   snap: SheetSnap;
   onSnap: (snap: SheetSnap) => void;
@@ -90,6 +91,7 @@ export default function MobileSheet({
   summary: string;
   ideasCount?: number;
   onOpenIdeas?: () => void;
+  plannerHref?: string;
 }) {
   const text = copy[locale];
   const drag = useRef<{
@@ -313,7 +315,7 @@ export default function MobileSheet({
       </span>
       <div className={styles.searchRow}>
         <Link
-          href="/walk"
+          href={plannerHref}
           scroll={false}
           className={styles.search}
           onClick={() => {

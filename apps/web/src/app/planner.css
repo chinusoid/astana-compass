@@ -9,6 +9,9 @@
 .search-actions .primary {
   min-height: 48px;
 }
+.party-planner .search-actions .primary {
+  width: 100%;
+}
 .filter-toggle {
   display: flex;
   align-items: center;

@@ -19,6 +19,8 @@ import type {
 } from "@astana/api-client";
 import examples from "../../../../contracts.examples.json";
 import CompassApp from "./compass-app";
+import PartyPanel from "./party-panel";
+import { socialStateFixture } from "@/test/social-state";
 import { locales, t } from "@/lib/i18n";
 import { intentText } from "@/lib/intent-copy";
 import { mapText } from "@/lib/map-copy";
@@ -28,11 +30,18 @@ import { LOCATION_TIMEOUT_MS } from "@/lib/geolocation";
 
 const navigation = vi.hoisted(() => ({ pathname: "/walk" }));
 const intentMock = vi.hoisted(() => vi.fn());
+const socialMock = vi.hoisted(() => ({ state: vi.fn(), action: vi.fn() }));
+vi.mock("@/lib/social-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/social-api")>()),
+  createSocialApi: () => socialMock,
+}));
 vi.mock("@/lib/intent", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/intent")>()),
   interpretIntent: intentMock,
 }));
 beforeEach(() => {
+  socialMock.state.mockReset().mockResolvedValue(socialStateFixture());
+  socialMock.action.mockReset().mockResolvedValue(socialStateFixture());
   intentMock
     .mockReset()
     .mockRejectedValue(new Error("Interpretation unavailable in this test"));
@@ -135,7 +144,8 @@ function scenarioResponse(
   };
 }
 
-it("mobile viewport follows keyboard resize and pan, keeps focus internally visible, and restores after dismissal", async () => {
+it.each(["/walk", "/party"])("mobile viewport in %s follows keyboard resize and pan, keeps focus internally visible, and restores after dismissal", async (path) => {
+  navigation.pathname = path;
   vi.stubGlobal(
     "matchMedia",
     vi.fn((query: string) => ({
@@ -175,7 +185,9 @@ it("mobile viewport follows keyboard resize and pan, keeps focus internally visi
       initialStart="2026-10-19T12:00"
       allowFixtures
       mapProvider="none"
-    />,
+    >
+      {path === "/party" && <PartyPanel />}
+    </CompassApp>,
   );
   const shell = container.querySelector<HTMLElement>(".app-shell")!;
   await waitFor(() =>
@@ -184,7 +196,7 @@ it("mobile viewport follows keyboard resize and pan, keeps focus internally visi
   fireEvent.keyDown(container.querySelector("[data-sheet-handle]")!, {
     key: "End",
   });
-  const wish = screen.getByRole("textbox", { name: t("ru", "query") });
+  const wish = await screen.findByRole("textbox", { name: t("ru", "query") });
   const content = container.querySelector<HTMLElement>(
     "#mobile-sheet-content",
   )!;

@@ -51,6 +51,8 @@ function context(
     locale: "ru",
     allowFixtures: false,
     origin: event.location,
+    query: "",
+    setQuery: vi.fn(),
     beginOriginPick: vi.fn(),
     currentRequest: () => null,
     selectedPlaceIds: [],

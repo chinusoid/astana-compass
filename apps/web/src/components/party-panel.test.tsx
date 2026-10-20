@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SocialState } from "@astana/api-client";
 import PartyPanel from "./party-panel";
+import { socialStateFixture as initial } from "@/test/social-state";
 
 const mocks = vi.hoisted(() => ({
   state: vi.fn(),
@@ -20,6 +21,9 @@ vi.mock("@/lib/shared-planner", () => ({
     setSharedItinerary: mocks.itinerary,
     setSharedLocations: mocks.locations,
     currentRequest: mocks.current,
+    query: "",
+    setQuery: vi.fn(),
+    origin: null,
     selectedPlaceIds: [],
   }),
 }));
@@ -32,33 +36,6 @@ vi.mock("@/lib/social-api", async (importOriginal) => ({
   }),
   encodeSharedPhoto: mocks.photo,
 }));
-const initial = (): SocialState => ({
-  profile: { id: "guest", name: "Synthetic guest" },
-  friend_code: "offline-code",
-  friends: [],
-  friend_requests: [],
-  party_invites: [],
-  expires_at: "2026-10-20T12:00:00+05:00",
-  parties: [
-    {
-      id: "party",
-      name: "Offline test",
-      owner_id: "guest",
-      revision: 1,
-      members: [
-        {
-          profile: { id: "guest", name: "Synthetic guest" },
-          available_seconds: 3600,
-          constraints: [],
-        },
-      ],
-      recommendations: null,
-      itinerary: null,
-      messages: [],
-      locations: [],
-    },
-  ],
-});
 let receiveLocation: PositionCallback | undefined;
 let locate: ReturnType<typeof vi.fn>;
 beforeEach(() => {

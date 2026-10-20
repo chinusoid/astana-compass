@@ -182,7 +182,7 @@ export default function CompassApp({
       const field = active.getBoundingClientRect();
       if (!bounds.height || !field.height) return;
       const action = active
-        .closest("#planner-form")
+        .closest("[data-query-form]")
         ?.querySelector(".search-actions");
       const reserved = keyboard
         ? (action?.getBoundingClientRect().height ?? 0)
@@ -456,6 +456,7 @@ export default function CompassApp({
   }
   function updateForm(patch: Partial<FormState>, rebuild = false) {
     const next = { ...plannerSnapshot.current.form, ...patch };
+    if ("query" in patch) parsedIntent.current = null;
     invalidateSearch();
     if ("lat" in patch || "lon" in patch) {
       geoVersion.current++;
@@ -1053,6 +1054,8 @@ export default function CompassApp({
         locale,
         allowFixtures,
         origin,
+        query: form.query,
+        setQuery: (query) => updateForm({ query }),
         beginOriginPick: () => {
           setPicking(true);
           setMapEnabled(true);
@@ -1141,6 +1144,7 @@ export default function CompassApp({
             onSnap={resizeMobileSheet}
             locale={locale}
             wish={form.query}
+            plannerHref={view === "party" ? "/party" : "/walk"}
             summary={selected.length ? routeSummary : ""}
             ideasCount={
               view === "walk" && !scenarioDirty && !searching
@@ -1184,7 +1188,7 @@ export default function CompassApp({
               </div>
             )}
             <div className="sidebar-content">
-              {(view === "discover" || view === "walk" || view === "events") &&
+              {(view === "discover" || view === "walk" || view === "events" || view === "party") &&
                 startCard}
               {children}
               {view === "discover" && (
@@ -1299,6 +1303,7 @@ export default function CompassApp({
                 <>
                   <form
                     id="planner-form"
+                    data-query-form
                     className="planner panel"
                     noValidate
                     onSubmit={(event) => {
@@ -2394,7 +2399,7 @@ export default function CompassApp({
             locale={locale}
             picking={
               picking &&
-              (view === "discover" || view === "walk" || view === "events")
+              (view === "discover" || view === "walk" || view === "events" || view === "party")
             }
             enabled={mapEnabled}
             provider={mapProvider}
