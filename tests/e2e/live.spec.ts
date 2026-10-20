@@ -83,14 +83,20 @@ for (const locale of locales) {
     await searchCatalog(page, place.name);
     const card = page.locator(`[id="place-catalog-${place.id}"]`);
     await expect(card).toBeVisible();
-    await expect(card.locator(".source-summary")).toContainText("Wi-Fi");
-    await expect(card.locator(".source-summary")).toContainText("24/7");
-    await expect(card.locator(".source-summary")).toContainText(
+    await expect(card.getByTestId("place-visit-summary")).toContainText(
+      "Wi-Fi",
+    );
+    await expect(card.getByTestId("place-visit-summary")).toContainText("24/7");
+    await expect(card.getByTestId("place-visit-summary")).toContainText(
       t(locale, "toilets"),
     );
     await expect(card.getByRole("link", { name: "ODbL 1.0" })).toBeVisible();
     await card.getByRole("button", { name: t(locale, "details") }).click();
     const dialog = page.getByRole("dialog");
+    await dialog
+      .getByTestId("place-source-records")
+      .locator(":scope > summary")
+      .click();
     const wifi = dialog
       .locator(".fact")
       .filter({ has: page.locator("strong", { hasText: /^Wi-Fi$/ }) });
@@ -115,10 +121,18 @@ for (const locale of locales) {
     );
     await expect(unknownCard).toBeVisible();
     await expect(
-      unknownCard.locator(".source-summary dt").filter({ hasText: /^Wi-Fi$/ }),
+      unknownCard
+        .getByTestId("place-visit-summary")
+        .locator("dt")
+        .filter({ hasText: /^Wi-Fi$/ }),
     ).toHaveCount(0);
     await unknownCard
       .getByRole("button", { name: t(locale, "details") })
+      .click();
+    await page
+      .getByRole("dialog")
+      .getByTestId("unknown-place-facts")
+      .locator(":scope > summary")
       .click();
     const unknownWifi = page
       .getByRole("dialog")

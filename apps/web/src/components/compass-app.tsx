@@ -64,7 +64,8 @@ import { applyWalkIntent, textRequestsReturn } from "@/lib/walk-intent";
 import { walkText } from "@/lib/walk-copy";
 import { requestLocation } from "@/lib/geolocation";
 import VoiceInput from "./voice-input";
-import WalkCompanion from "./walk-companion";
+import WalkAssistantDock from "./walk-assistant-dock";
+import { refineWalkQuery } from "@/lib/walk-plan-brief";
 import { intentText } from "@/lib/intent-copy";
 import { mapText } from "@/lib/map-copy";
 import { stopTitle } from "@/lib/map-route";
@@ -148,6 +149,7 @@ export default function CompassApp({
     constraints: {},
   });
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [inferredIntent, setInferredIntent] = useState<IntentResponse | null>(
     null,
   );
@@ -172,6 +174,7 @@ export default function CompassApp({
   const [answer, setAnswer] = useState("");
   const [selected, setSelected] = useState<Place[]>([]);
   const [itinerary, setItinerary] = useState<ItineraryResponse | null>(null);
+  const [itineraryHasTimeTarget, setItineraryHasTimeTarget] = useState(false);
   const [communityEvents, setCommunityEvents] = useState<CommunityEvent[]>([]);
   const [sharedLocations, setSharedLocations] = useState<SharedLocation[]>([]);
   const [sharedItinerary, setSharedItinerary] =
@@ -470,6 +473,11 @@ export default function CompassApp({
       return;
     }
     const controller = begin("itinerary");
+    const hasTimeTarget =
+      body.available_seconds < 86400 ||
+      Boolean(form.minutes.trim()) ||
+      (parsedIntent.current?.query === body.query &&
+        parsedIntent.current.intent.available_seconds === 86400);
     setPicking(false);
     setBuilding(true);
     try {
@@ -479,6 +487,7 @@ export default function CompassApp({
       );
       if (!controller.signal.aborted) {
         setItinerary(response);
+        setItineraryHasTimeTarget(hasTimeTarget);
         if (response.stops.length) showRouteOverview();
       }
     } catch (error) {
@@ -1184,7 +1193,8 @@ export default function CompassApp({
                   {intentMatches &&
                     inferredIntent &&
                     (inferredIntent.available_seconds !== null ||
-                      inferredIntent.constraints.length > 0) && (
+                      inferredIntent.constraints.length > 0 ||
+                      inferredIntent.categories.length > 0) && (
                       <p className="intent-summary" role="status">
                         <Sparkles size={15} aria-hidden="true" />
                         {walkText(locale, "inferred")}:{" "}
@@ -1197,10 +1207,20 @@ export default function CompassApp({
                                 ),
                               ]
                             : []),
+                          ...inferredIntent.categories.map((category) =>
+                            label(locale, category),
+                          ),
                           ...inferredIntent.constraints.map(({ constraint }) =>
                             label(locale, constraint.key),
                           ),
                         ].join(" · ")}
+                        <small className="intent-provider">
+                          {inferredIntent.provider === "rules"
+                            ? intentText(locale, "rules")
+                            : inferredIntent.provider === "openai"
+                              ? "OpenAI"
+                              : "NVIDIA"}
+                        </small>
                       </p>
                     )}
                   {intentUnavailable && !scenarioDirty && (
@@ -1419,41 +1439,6 @@ export default function CompassApp({
                     {walkText(locale, "aiPrivacy")}
                   </p>
                 </form>
-                <WalkCompanion
-                  locale={locale}
-                  phase={
-                    searching
-                      ? "searching"
-                      : building
-                        ? "routing"
-                        : resultError || itineraryError
-                          ? "error"
-                          : result?.status === "no_match"
-                            ? "empty"
-                            : itinerary?.stops.length
-                              ? "ready"
-                              : "idle"
-                  }
-                  stopCount={selected.length}
-                  overBudgetMinutes={
-                    itinerary && itinerary.request.available_seconds < 86400
-                      ? Math.max(
-                          0,
-                          Math.ceil(
-                            (itinerary.total_duration_seconds -
-                              itinerary.request.available_seconds) /
-                              60,
-                          ),
-                        )
-                      : 0
-                  }
-                  suggestions={[
-                    walkText(locale, "coffeePark"),
-                    walkText(locale, "night"),
-                    walkText(locale, "river"),
-                  ]}
-                  onSuggestion={(query) => updateForm({ query })}
-                />
 
                 <section
                   className="results"
@@ -2055,6 +2040,19 @@ export default function CompassApp({
                     <button
                       type="button"
                       className="text-button"
+                      onClick={() => setAssistantOpen(true)}
+                    >
+                      {locale === "ru"
+                        ? "Разбор прогулки"
+                        : locale === "kk"
+                          ? "Серуенді талдау"
+                          : "Walk insights"}
+                    </button>
+                  )}
+                  {itinerary && (
+                    <button
+                      type="button"
+                      className="text-button"
                       onClick={showRouteOverview}
                     >
                       {walkText(locale, "viewRoute")}
@@ -2137,6 +2135,54 @@ export default function CompassApp({
             onSelect={focusPlace}
             onDetails={(id) => void showDetails(id)}
           />
+          {view === "walk" && (
+            <WalkAssistantDock
+              locale={locale}
+              open={assistantOpen}
+              onOpenChange={setAssistantOpen}
+              itinerary={itinerary}
+              hasTimeTarget={itineraryHasTimeTarget}
+              onDetails={(id) => void showDetails(id)}
+              onRefine={(goal) => {
+                const query = refineWalkQuery(form.query, goal, locale);
+                if (query === form.query.trim()) return;
+                updateForm({ query });
+                void recommend(query);
+              }}
+              phase={
+                searching
+                  ? "searching"
+                  : building
+                    ? "routing"
+                    : resultError || itineraryError
+                      ? "error"
+                      : result?.status === "no_match"
+                        ? "empty"
+                        : itinerary?.stops.length
+                          ? "ready"
+                          : "idle"
+              }
+              stopCount={selected.length}
+              overBudgetMinutes={
+                itinerary && itinerary.request.available_seconds < 86400
+                  ? Math.max(
+                      0,
+                      Math.ceil(
+                        (itinerary.total_duration_seconds -
+                          itinerary.request.available_seconds) /
+                          60,
+                      ),
+                    )
+                  : 0
+              }
+              suggestions={[
+                walkText(locale, "coffeePark"),
+                walkText(locale, "night"),
+                walkText(locale, "river"),
+              ]}
+              onSuggestion={(query) => updateForm({ query })}
+            />
+          )}
         </div>
       </div>
       {dialog === "place" && (
@@ -2170,7 +2216,17 @@ export default function CompassApp({
                     {walkText(locale, "remove")}
                   </button>
                 )}
-                <PlaceFacts place={detail} locale={locale} />
+                <PlaceFacts
+                  place={detail}
+                  locale={locale}
+                  visitSeconds={
+                    itinerary?.stops.find((stop) => stop.place_id === detail.id)
+                      ?.visit_duration_seconds ??
+                    result?.recommendations.find(
+                      (item) => item.place_id === detail.id,
+                    )?.visit_duration_seconds
+                  }
+                />
                 <div className="dialog-actions">
                   <button
                     type="button"

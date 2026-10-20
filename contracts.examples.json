@@ -2289,6 +2289,43 @@
         }
       },
       "failure_stage": "schema"
+    },
+    {
+      "name": "intent_compound_day_budget_valid",
+      "definition": "IntentResponse",
+      "valid": true,
+      "instance": {
+        "provider": "rules",
+        "locale": "ru",
+        "available_seconds": 19800,
+        "time_evidence": "5 часов 30 минут",
+        "anchor_text": null,
+        "categories": [
+          "park"
+        ],
+        "constraints": [],
+        "clarification_questions": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "intent_rejects_more_than_one_day",
+      "definition": "IntentResponse",
+      "valid": false,
+      "instance": {
+        "provider": "rules",
+        "locale": "ru",
+        "available_seconds": 86401,
+        "time_evidence": "5 часов 30 минут",
+        "anchor_text": null,
+        "categories": [
+          "park"
+        ],
+        "constraints": [],
+        "clarification_questions": [],
+        "warnings": []
+      },
+      "failure_stage": "schema"
     }
   ]
 }

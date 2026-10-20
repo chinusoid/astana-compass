@@ -2293,7 +2293,7 @@
             {
               "type": "integer",
               "minimum": 60,
-              "maximum": 14400
+              "maximum": 86400
             },
             {
               "type": "null"

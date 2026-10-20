@@ -114,7 +114,7 @@ const copy = {
   },
 } as const;
 
-function CompassCharacter({
+export function CompassCharacter({
   emotion,
 }: {
   emotion: "idle" | "thinking" | "happy" | "concern";

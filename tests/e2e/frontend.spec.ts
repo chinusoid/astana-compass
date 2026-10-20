@@ -211,6 +211,68 @@ test("the map-side plan opens a readable side card and removes its middle destin
   );
 });
 
+test("compound time beyond four hours is used automatically without enabling manual filters", async ({
+  page,
+}) => {
+  await manualStart(page, "Хочу погулять по паркам 5 часов 30 минут");
+  const sent = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/recommendations") && request.method() === "POST",
+  );
+  await page.locator(".find-button").click();
+  const request = (await sent).postDataJSON() as RecommendationRequest;
+  expect(request.available_seconds).toBe(19800);
+  expect(request.return_to_origin).toBe(false);
+  await expect(cards(page)).toHaveCount(3);
+  await expect(page.locator(".intent-summary")).toContainText("330 мин");
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("");
+  await expect(page.locator("#walk-filters")).toBeHidden();
+});
+
+test("the visible companion explains actual plan times and can search with less walking", async ({
+  page,
+}) => {
+  await fill(page);
+  const response = page.waitForResponse(
+    (r) => r.url().endsWith("/itineraries") && r.request().method() === "POST",
+  );
+  await search(page);
+  const plan = (await (await response).json()) as ItineraryResponse;
+  await page
+    .getByRole("button", {
+      name: "Открыть спутника и разбор прогулки",
+      exact: true,
+    })
+    .click();
+  const brief = page.getByRole("region", {
+    name: "Разбор вашей прогулки",
+    exact: true,
+  });
+  await expect(brief).toBeVisible();
+  await expect(
+    brief.getByText("Ваш ориентир:", { exact: false }),
+  ).toContainText("90 мин");
+  await expect(brief.locator("ol > li")).toHaveCount(plan.stops.length);
+  const original = await page.locator('textarea[name="query"]').inputValue();
+  const next = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/recommendations") && request.method() === "POST",
+  );
+  await brief
+    .getByRole("button", { name: "Найти с меньшей ходьбой", exact: true })
+    .click();
+  const refined = (await next).postDataJSON() as RecommendationRequest;
+  expect(refined.query).toContain(original);
+  expect(refined.query).toContain("короткие переходы");
+  expect(refined.available_seconds).toBe(5400);
+  expect(refined.return_to_origin).toBe(true);
+  await expect(cards(page)).toHaveCount(3);
+  await page
+    .getByRole("button", { name: "Закрыть спутника", exact: true })
+    .click();
+  await expect(brief).toHaveCount(0);
+});
+
 test("real foundation API: manual start, sources, exact seconds, return itinerary, feedback, favorites", async ({
   page,
 }) => {
@@ -237,6 +299,8 @@ test("real foundation API: manual start, sources, exact seconds, return itinerar
     .first()
     .getByRole("button", { name: "Факты и источники" });
   await detailsButton.click();
+  const records = page.getByRole("dialog").getByTestId("place-source-records");
+  await records.locator(":scope > summary").click();
   await expect(
     page
       .getByRole("dialog")
