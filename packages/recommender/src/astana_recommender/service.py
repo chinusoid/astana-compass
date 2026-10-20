@@ -248,6 +248,17 @@ class DefaultRecommendationService:
             response["warnings"].append(TEXT[response["request"]["locale"]]["work_deadline"])
             if response["status"] == "matched":
                 response["status"] = "partial"
+        questions = _dedupe(response["clarification_questions"])
+        if response["status"] != "needs_clarification" and questions:
+            # Canonical core-result statuses forbid top-level questions. Keep
+            # the complete questions in journey_plan and visible warnings;
+            # do not discard confirmed stops or mislabel a valid plan failure.
+            response["warnings"].extend([TEXT[response["request"]["locale"]]["clarification_pending"], *questions])
+            response["clarification_questions"] = []
+            if response["status"] == "matched":
+                response["status"] = "partial"
+        else:
+            response["clarification_questions"] = questions
         response["warnings"] = _dedupe(response["warnings"])
         return validate_payload(
             "ItineraryResponse" if itinerary else "RecommendationResponse", response

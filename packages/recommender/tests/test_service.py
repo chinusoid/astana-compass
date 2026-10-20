@@ -1262,6 +1262,59 @@ class PlannedJourneyTests(ServiceSetupMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(value["status"], "needs_clarification")
         self.assertEqual(value["clarification_questions"], ["Which museum did you mean?"])
 
+    async def test_valid_three_goal_plan_with_questions_keeps_core_and_canonical_partial_status(self):
+        query = "Хочу сходить покушать пиццу а потом в ботанический сад. А потом сходить в какое-нибудь место культурного искусства"
+        stages = [planned_stage("покушать пиццу", search="pizza"),
+                  planned_stage("ботанический сад", search="garden"),
+                  planned_stage("культурного искусства", search="museum")]
+        venues = [place(index, facts=[fact()]) for index in range(1, 4)]
+        for locale, question, notice in (
+            ("ru", "Какое направление искусства вам интереснее?", "Часть пожеланий требует уточнения"),
+            ("kk", "Өнердің қай бағыты қызықты?", "Қалаудың бір бөлігін нақтылау керек"),
+            ("en", "Which kind of art interests you?", "Part of the request still needs clarification"),
+        ):
+            with self.subTest(locale=locale):
+                planner = self.setup_planned(stages, {stage["search_query"]: [venue]
+                                                     for stage, venue in zip(stages, venues, strict=True)},
+                                             generator=Generator())
+                planner.value["clarification_questions"] = [question]
+                original_plan = deepcopy(planner.value)
+                value = await self.service.recommend(request(query=query, locale=locale, constraints=[constraint()]))
+                self.assertEqual(value["status"], "partial")
+                self.assertEqual(value["clarification_questions"], [])
+                self.assertEqual(value["journey_plan"], original_plan)
+                self.assertEqual([item["place_id"] for item in value["recommendations"]], [venue["id"] for venue in venues])
+                self.assertTrue(all(item["constraint_evaluations"][0]["outcome"] == "satisfied" for item in value["recommendations"]))
+                self.assertEqual(value["warnings"].count(question), 1)
+                self.assertTrue(any(notice in warning for warning in value["warnings"]))
+                self.assertEqual(value["suggestions"], [])
+                self.assertEqual(len(self.context.routes), 3)
+                validate_payload("RecommendationResponse", value)
+                # This is the exact formerly escaping final-response boundary:
+                # partial may contain core results, but no top-level questions.
+                invalid = deepcopy(value)
+                invalid["clarification_questions"] = [question]
+                with self.assertRaises(ContractValidationError) as error:
+                    validate_payload("RecommendationResponse", invalid)
+                self.assertEqual(error.exception.path, ("clarification_questions",))
+
+    async def test_partial_core_retains_questions_and_every_unresolved_or_missing_goal(self):
+        stages = [planned_stage("coffee"), planned_stage("unclear activity", kind="unresolved"),
+                  planned_stage("unknown museum"), planned_stage("unknown workshop")]
+        planner = self.setup_planned(stages, {"coffee": [place(1)]}, generator=Generator())
+        questions = ["Which activity?", "Which museum?", "Which workshop?", "What order?", "Any preference?"]
+        planner.value["clarification_questions"] = questions
+        result = await self.service.recommend(request(query="coffee then unclear activity then unknown museum then unknown workshop"))
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["clarification_questions"], [])
+        self.assertEqual(result["journey_plan"]["clarification_questions"], questions)
+        self.assertEqual(result["journey_plan"]["stages"], stages)
+        self.assertEqual([item["place_id"] for item in result["recommendations"]], [place(1)["id"]])
+        self.assertTrue(all(question in result["warnings"] for question in questions))
+        for order in (2, 3, 4):
+            self.assertIn(f"stage {order}", " ".join(result["warnings"]))
+        validate_payload("RecommendationResponse", result)
+
     async def test_discovery_route_failures_are_also_bounded(self):
         self.setup_service([place(index) for index in range(1, 101)], planner=Planner([]), candidate_limit=100)
         self.context.route_error = RuntimeError("private provider failure")

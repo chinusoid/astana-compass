@@ -2,6 +2,7 @@
 
 TEXT = {
     "ru": {
+        "clarification_pending": "Часть пожеланий требует уточнения; подтверждённые результаты сохранены.",
         "work_deadline": "Лимит времени обработки запроса исчерпан. Проверенные результаты сохранены; оставшиеся этапы или сведения не удалось подтвердить вовремя.",
         "plan_failed": "Не удалось надёжно разобрать пожелание. Запрос сохранён как неуточнённый этап; случайные места не добавлены.",
         "plan_question": "Уточните, какие места или занятия вы хотите включить в прогулку и в каком порядке.",
@@ -62,6 +63,7 @@ TEXT = {
         "take_break": "Если обстановка позволяет, сделайте небольшую паузу.",
     },
     "kk": {
+        "clarification_pending": "Қалаудың бір бөлігін нақтылау керек; расталған нәтижелер сақталды.",
         "work_deadline": "Сұрауды өңдеу уақытының шегі аяқталды. Тексерілген нәтижелер сақталды; қалған кезеңдер не мәліметтер уақытында расталмады.",
         "plan_failed": "Қалауды сенімді талдау мүмкін болмады. Сұрау нақтыланбаған кезең ретінде сақталды; кездейсоқ орындар қосылмады.",
         "plan_question": "Серуенге қандай орындар мен әрекеттерді, қандай ретпен қосқыңыз келетінін нақтылаңыз.",
@@ -122,6 +124,7 @@ TEXT = {
         "take_break": "Жағдай мүмкіндік берсе, аздап үзіліс жасаңыз.",
     },
     "en": {
+        "clarification_pending": "Part of the request still needs clarification; confirmed results are retained.",
         "work_deadline": "The request processing time budget was reached. Verified results were retained; remaining stages or details could not be confirmed in time.",
         "plan_failed": "Your wish could not be reliably interpreted. It was kept as an unresolved stage; no arbitrary places were added.",
         "plan_question": "Clarify which places or activities you want to include and in what order.",
