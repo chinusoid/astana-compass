@@ -158,7 +158,11 @@ def test_real_supplement_covers_priority_places_without_promising_unsupported_am
     snapshot = load_json(root / "data/samples/astana-osm.json")
     validate_bundle(supplement, clock=lambda: NOW)
     assert len(supplement["places"]) == 11 and len(supplement["sources"]) == 16
-    assert len(snapshot["places"]) == 628
+    assert len(snapshot["places"]) == 682
+    malls = [place for place in snapshot["places"] if "mall" in place["categories"]]
+    assert len(malls) == 54
+    assert len(snapshot["places"]) - len(malls) == 628
+    assert all(facts(place)["osm:shop"]["value"] == "mall" for place in malls)
     lookup = {p["id"]: p for p in snapshot["places"]}
     for entry in supplement["places"]:
         result = lookup[entry["place_id"]]

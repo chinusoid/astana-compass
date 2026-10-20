@@ -1,8 +1,8 @@
 {
-  "dataset": "astana-osm-628-source-regression-v1",
+  "dataset": "astana-osm-682-source-regression-v2",
   "judgment_kind": "agent-authored source-informed regression judgments; not independent human relevance labels",
-  "snapshot_sha256": "b9fcecd9ae69192bc72a543a8bf1256b87ee3829849c50c0cf276fb70ad0d5ba",
-  "snapshot_places": 628,
+  "snapshot_sha256": "35e2ac72f0a10b00870ed323f4d8f313c9933c67b5115de5803e5e517211fdc2",
+  "snapshot_places": 682,
   "origin": {
     "lat": 51.127,
     "lon": 71.43
@@ -14,7 +14,8 @@
     "Queries are authored public examples, not user logs.",
     "Names and categories support candidate judgments; amenities, spatial anchors, business operation and subjective suitability remain unverified.",
     "Known defects and concept prompts are development cases; do not report these counts as citywide or independent quality.",
-    "All implementations must use this same snapshot, radius, pool and judgments."
+    "All implementations must use this same snapshot, radius, pool and judgments.",
+    "Rebound after retaining all 628 previous IDs, checking unchanged category judgments, and adding 54 explicit shop=mall records; historical evaluation reports are unchanged."
   ],
   "cases": [
     {

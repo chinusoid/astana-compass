@@ -71,9 +71,23 @@ def test_multilingual_coffee_category_excludes_unrelated_nearer_places(query, lo
     ("галерея", "ru", "gallery"), ("art exhibition", "en", "arts_centre"),
     ("серуен", "kk", "park"), ("ботанический сад", "ru", "garden"),
     ("children playground", "en", "playground"),
+    ("красивый торговый центр", "ru", "mall"), ("ТРЦ", "ru", "mall"),
+    ("торгово-развлекательный центр", "ru", "mall"),
+    ("shopping mall", "en", "mall"), ("shopping centre", "en", "mall"),
+    ("shopping center", "en", "mall"), ("сауда орталығы", "kk", "mall"),
+    ("сауда ойын-сауық орталығы", "kk", "mall"),
 ])
 def test_supported_categories_across_languages(query, locale, category):
     assert ids(search([place("Target", category), place("Other", "cinema")], query, locale)) == ["synthetic:Target"]
+
+
+@pytest.mark.parametrize("category", ["mall", "shopping_mall"])
+def test_structured_mall_type_requires_source_category_even_for_a_named_cafe(category):
+    mall = place("RetailCentre", "mall")
+    cafe = place("Mega", "cafe", description="Shopping mall nearby; this source record describes a cafe.")
+    result = search([cafe, mall], "a beautiful shopping centre", categories=[category])
+    assert ids(result) == [mall["id"]]
+    assert not search([cafe], "Mega", categories=[category])["hits"]
 
 
 @pytest.mark.parametrize("query,locale", [

@@ -7,8 +7,9 @@
 
 - `astana-overpass-cache.json` — полный полученный Overpass JSON в envelope с
   временем загрузки и SHA-256. Служит воспроизводимым входом и 24-hour cache.
-- `astana-osm.json` — 628 canonical Place records и встроенный manifest.
-- `astana-wikidata-cache.json` — один ответ API для семи точных OSM QID, labels,
+- `astana-osm.json` — 682 canonical Place records и встроенный manifest,
+  включая 54 явных `shop=mall`; все прежние 628 OSM ID сохранены.
+- `astana-wikidata-cache.json` — один ответ API для девяти точных OSM QID, labels,
   aliases и короткие descriptions на ru/kk/en. Данные Wikidata доступны по
   [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/); [условия](https://www.wikidata.org/wiki/Wikidata:Licensing).
   В комбинированном snapshot сохранена ODbL атрибуция OSM и отдельные Wikidata evidence.
@@ -26,12 +27,18 @@ raw cache, `places_sha256` — к массиву normalized `places`. Это к�
 
 Не используйте названия, категории или время загрузки как подтверждение
 безопасности, доступности и фактической работы. Время загрузки источника —
-2026-10-18 22:30:43 UTC; время OSM replica — 2026-10-18 22:29:47 UTC.
+2026-10-20 14:46:57 UTC; время OSM replica — 2026-10-20 14:44:50 UTC.
 Это реальный импорт, не synthetic fixture. Политика выбора и инструкции
 обновления описаны в `packages/city_data/README.md`.
-Wikidata получена одним GET 2026-10-19 07:45:49 UTC. Это время загрузки, не
+Wikidata получена одним GET 2026-10-20 14:48:09 UTC. Это время загрузки, не
 проверки фактов; source revisions и их modified_at сохранены отдельно. OSM-кэш
-при расширении 300 → 628 и добавлении Wikidata не обновлялся.
+при прежнем расширении 300 → 628 и добавлении Wikidata не обновлялся.
+Расширение до 682 мест выполнило новый ограниченный Overpass POST с `shop=mall`
+и сохранило полный ответ; нормализация — `osm-tags-v3`.
+MEGA Silk Way представлен исходными `node/4965336822` и `way/499328514`,
+Abu Dhabi Plaza — `way/762780007`. Идентичность не выводится из близости к кафе:
+отдельная запись `node/1198118007` с названием Mega остаётся кафе.
+Way locations являются центрами геометрии, а не проверенными входами.
 
 Официальные страницы прочитаны 2026-10-19 и 2026-10-20; `retrieved_at` в дополнении — время
 исследования опубликованных страниц через веб-индекс, не полевой проверки и не

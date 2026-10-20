@@ -11,7 +11,7 @@ from typing import Any
 
 from astana_contracts import JSON, PlaceRepository, validate_payload
 
-from .lexicon import CATEGORY_GROUPS, FOOD_CATEGORIES, LEXICON_VERSION, document_terms, known_cuisines, normalize, understand
+from .lexicon import CATEGORY_ALIASES, CATEGORY_GROUPS, FOOD_CATEGORIES, LEXICON_VERSION, document_terms, known_cuisines, normalize, understand
 from .names import exact_source_mentions, goal_text, mentions, source_names, source_texts, typo_expansions, words
 
 DYNAMIC_KEYS = frozenset({"open_at_requested_time", "weather_suitable"})
@@ -119,7 +119,7 @@ class LexicalRetriever:
         aliases = {place["id"]: source_names(place) for place in source}
         required_name = request.get("named_place")
         required_cuisine = request.get("cuisine")
-        required_categories = set(request.get("categories", []))
+        required_categories = {CATEGORY_ALIASES.get(category, category) for category in request.get("categories", [])}
         structured_names = {place_id: exact_source_mentions(required_name, names) if required_name else []
                             for place_id, names in aliases.items()}
         named_ids = {place_id for place_id, found in structured_names.items() if found}

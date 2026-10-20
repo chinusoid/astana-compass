@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import re
 import unicodedata
 
-LEXICON_VERSION = "ru-kk-en-5"
+LEXICON_VERSION = "ru-kk-en-6"
 CATEGORIES = {
     "cafe": r"кафе(?:ге|де|ден|ні|нің|лер(?:ге|де|ден|і|ін)?)?|кофе\w{0,12}|coffee|caf[eé]s?|cappuccino|капучино|латте",
     "restaurant": r"рестора\w{0,12}|поесть|покушать|перекусить|пообедать|поужинать|обед\w{0,12}|ужин\w{0,12}|еда|restaurants?|dining|lunch|dinner|eat|тамақ\w{0,12}|мейрамхана\w{0,12}",
@@ -17,6 +17,9 @@ CATEGORIES = {
     "library": r"библиотек\w{0,12}|librar(?:y|ies)|кітапхана\w{0,12}",
     "theatre": r"театр\w{0,12}|theat(?:re|er)s?|спектакл\w{0,12}",
     "cinema": r"кино\w{0,12}|cinemas?|movies?|film|фильм\w{0,12}",
+    "mall": r"торгов(?:о[- ]развлекательн)?\w{0,8}\s+(?:центр\w{0,8}|комплекс\w{0,8})|трц|тц|"
+            r"(?:shopping\s+)?malls?|shopping\s+cent(?:re|er)s?|"
+            r"сауда\s+(?:ойын[- ]сауық\s+)?(?:орталы\w{0,8}|кешен\w{0,8})",
     "art": r"галере\w{0,12}|искусств\w{0,12}|выстав\w{0,12}|art|galler(?:y|ies)|exhibition\w{0,12}|өнер|көрме\w{0,12}",
     "viewpoint": r"смотров\w{0,12}|панорам\w{0,12}|viewpoints?|observation\s+deck|panoram\w{0,12}",
     "attraction": r"достопримечательност\w{0,12}|attractions?|sightseeing|көрікті\s+жер\w{0,12}",
@@ -26,6 +29,7 @@ CATEGORIES = {
 OUTDOOR_CATEGORIES = frozenset({"park", "garden", "viewpoint", "artwork"})
 DISCOVERY_CATEGORIES = OUTDOOR_CATEGORIES | frozenset({"attraction", "theatre", "museum", "library", "arts_centre"})
 SOURCE_THEMES = frozenset({"architecture", "waterfront"})
+CATEGORY_ALIASES = {"shopping_mall": "mall"}
 CATEGORY_GROUPS = {
     **{key: frozenset({key}) for key in CATEGORIES},
     "art": frozenset({"art", "gallery", "arts_centre", "artwork"}),
