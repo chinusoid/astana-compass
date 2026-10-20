@@ -1,8 +1,10 @@
 """Select known fact references through bounded, validated hosted inference.
 
-No raw query, coordinates, source URLs, descriptions, or unrestricted fact values
-leave this boundary. The model selects opaque references; prose is rendered by
-the recommender. No model IDs or credentials are supplied by this package.
+The legacy generate() boundary selects opaque references without sending the raw
+query, coordinates, URLs or descriptions. The separate, explicitly requested
+generate_route_explanations() feature sends the applied wish and bounded public
+venue context for personalized visit advice; see narratives.py for its boundary.
+No model IDs or credentials are supplied by this package.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from typing import Any, Literal, cast
 
 import httpx
 from astana_recommender import GroundedExplanation, GroundedReason
+from astana_recommender.explanations import RouteExplanation
 from astana_recommender.preferences import query_interests, source_categories
 from .budgets import BudgetExhausted, RequestBudget
 
@@ -421,6 +424,14 @@ class HostedExplanationGenerator:
             return GroundedExplanation(())
         envelope = await self._request(self._payload(data, allowed))
         return self._validate(self._output_text(envelope), allowed)
+
+    async def generate_route_explanations(
+        self, *, locale: str, query: str, stops: list[dict[str, Any]],
+    ) -> dict[str, RouteExplanation]:
+        """Write personalized advice for up to six selected stops in one call."""
+        from .narratives import generate_route_explanations
+
+        return await generate_route_explanations(self, locale=locale, query=query, stops=stops)
 
 
 def create_generator(

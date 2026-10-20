@@ -1,4 +1,4 @@
-"""An optional generator selects verifiable facts, never unrestricted factual prose."""
+"""Optional fact selection and source-bounded personalized visit advice."""
 
 from dataclasses import dataclass
 from typing import Literal, Protocol
@@ -37,4 +37,30 @@ class ExplanationGenerator(Protocol):
         constraint_evaluations: list[JSON],
     ) -> GroundedExplanation:
         """Select grounded reasons; receives no private origin or raw request."""
+        ...
+
+
+@dataclass(frozen=True)
+class RouteExplanation:
+    """Model-written advice, distinct from the canonical verified venue facts.
+
+    The adapter validates supporting references against that stop's supplied
+    public sources. References establish provenance, not semantic entailment;
+    generated prose remains advice and must never update a PlaceFact.
+    """
+
+    why: str
+    suggested_activity: str
+
+
+class RouteExplanationGenerator(Protocol):
+    async def generate_route_explanations(
+        self, *, locale: str, query: str, stops: list[JSON],
+    ) -> dict[str, RouteExplanation]:
+        """Explain at most six {place, purpose?} stops in one bounded request.
+
+        Unlike the legacy fact selector, this explicitly authorized feature
+        shares the applied wish and bounded public venue context with the model.
+        Origins, coordinates, profiles, chats and source URLs are excluded.
+        """
         ...
