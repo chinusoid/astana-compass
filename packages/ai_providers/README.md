@@ -34,6 +34,12 @@ Each independent concrete goal gets a separate ordered stage, with an exact
 `source_quote` and a normalized `search_query`. Names must be literal excerpts
 of that stage's quoted user text; cuisine identifiers describe a requested
 food, never a confirmed venue menu. A single concrete goal produces one stage.
+Semantic `categories` are source category search filters: reading can request
+`library`, buying books `bookshop`, and swimming `swimming_pool`. These tokens
+are not limited to a finite list of activities and cannot establish that a
+matching venue exists. Strict provider schemas require every stage property,
+including `categories`, while the public schema keeps that field optional for
+older adapters.
 A broad discovery walk can keep `stages: []` to allow diverse recommendations.
 Explicit sequences take precedence over suggested logical ordering, while
 unsupported or ambiguous wishes remain visible as `unresolved` stages with a
@@ -43,9 +49,15 @@ belong to retrieval, after planning.
 Missing configuration, provider failure or invalid output returns a visibly
 limited local fallback. It separates ordinary clauses and conjunctions without
 special treatment for a named destination or cuisine; uncertain relative order
-and long fragments remain unresolved. Local validation rejects invented source
+and long fragments remain unresolved. A generic meal-first suggestion applies
+only to unordered wishes; explicit sequences remain intact. Local validation rejects invented source
 quotes/names, cropped negation, omitted independent lexical clauses, duplicate
-stages and extra fields. These checks establish text provenance and basic
+stages and extra fields. Distinct clauses require distinct source-bound stages;
+a shared verb cannot cover another goal, and a whole-query quote cannot hide
+merged goals. Grounded plausible or quoted proper names can retain internal
+conjunctions. Simple before/after dependencies are checked separately from
+first/then sequence groups; ambiguous relative clauses need clarification in
+the affected stage. These checks establish text provenance and basic
 coverage, not proof that arbitrary semantics were understood correctly. The
 fallback and planner warnings are intended to remain visible to users. Neither
 mocked tests nor a well-formed plan establish live model quality or POI coverage.

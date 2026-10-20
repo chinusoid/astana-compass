@@ -16,9 +16,9 @@ from astana_contracts import ContractValidationError, validate_payload
 SECRET = "offline-private-test-key"
 
 
-def stage(quote, search=None, *, kind="activity", named=None, cuisine=None):
+def stage(quote, search=None, *, kind="activity", named=None, cuisine=None, categories=None):
     return {"source_quote": quote, "search_query": search or quote, "kind": kind,
-            "named_place": named, "cuisine": cuisine}
+            "named_place": named, "cuisine": cuisine, "categories": categories or []}
 
 
 def plan(stages, *, provider="openai", order="suggested", questions=None, warnings=None):
@@ -89,6 +89,9 @@ def test_query_only_payload_reuses_bounded_private_transport(provider):
             schema = payload["text"]["format"]["schema"]
             assert schema["properties"]["stages"]["maxItems"] == 8
             assert schema["properties"]["stages"]["items"]["properties"]["kind"]["type"] == "string"
+            stage_schema = schema["properties"]["stages"]["items"]
+            assert set(stage_schema["required"]) == set(stage_schema["properties"])
+            assert "categories" in stage_schema["required"]
             data = json.loads(payload["input"][0]["content"])
         else:
             assert str(request.url) == "https://integrate.api.nvidia.com/v1/chat/completions"
@@ -300,3 +303,116 @@ def test_bounded_rules_fallback_does_not_claim_overflow_coverage():
     assert len(result["stages"]) == 3
     assert all(stage["kind"] == "unresolved" for stage in result["stages"])
     validate_payload("JourneyPlan", result)
+
+
+@pytest.mark.parametrize("query,only", [
+    ("Visit a library and visit a swimming pool", "Visit a library"),
+    ("Try zorbflinging and try starweaving", "Try zorbflinging"),
+    ("Хочу посетить библиотеку и хочу посетить бассейн", "Хочу посетить библиотеку"),
+])
+def test_shared_generic_verbs_cannot_cover_a_different_source_clause(query, only):
+    result = hosted(query, plan([stage(only)]))
+    assert result["provider"] == "rules"
+    assert len(result["stages"]) == 2
+
+
+@pytest.mark.parametrize("query,kind,named", [
+    ("I want coffee and a museum", "meal", None),
+    ("Visit Library And Visit Swimming Pool", "named_place", "Visit Library And Visit Swimming Pool"),
+])
+def test_whole_query_quote_cannot_hide_merged_independent_goals(query, kind, named):
+    result = hosted(query, plan([stage(query, "coffee", kind=kind, named=named)]))
+    assert result["provider"] == "rules"
+    assert len(result["stages"]) == 2
+
+
+@pytest.mark.parametrize("query,name", [
+    ("Visit Museum of Science and Technology", "Museum of Science and Technology"),
+    ('Visit "science and technology museum"', "science and technology museum"),
+])
+def test_grounded_proper_name_conjunction_does_not_invent_a_second_goal(query, name):
+    answer = plan([stage(name, kind="named_place", named=name)])
+    assert hosted(query, answer)["provider"] == "openai"
+
+
+def test_relative_clock_reference_never_waives_explicit_first_then_order():
+    query = "First a museum, then coffee after 5pm"
+    good = [stage("museum"), stage("coffee", kind="meal")]
+    assert hosted(query, plan(good, order="explicit"))["provider"] == "openai"
+    assert hosted(query, plan(list(reversed(good)), order="explicit"))["provider"] == "rules"
+    assert hosted(query, plan(good, order="suggested"))["provider"] == "rules"
+
+
+@pytest.mark.parametrize("query,first,second", [
+    ("Coffee after the museum", "museum", "Coffee"),
+    ("Coffee before the museum", "Coffee", "museum"),
+    ("Before the museum, coffee", "coffee", "museum"),
+    ("After the museum, coffee", "museum", "coffee"),
+    ("Перед музеем хочу кофе", "кофе", "музеем"),
+    ("После музея хочу кофе", "музея", "кофе"),
+    ("Мұражайдан кейін кофе", "Мұражайдан", "кофе"),
+])
+def test_unambiguous_relative_activity_order_is_explicit_and_source_validated(query, first, second):
+    correct = [stage(first), stage(second)]
+    assert hosted(query, plan(correct, order="explicit"))["provider"] == "openai"
+    assert hosted(query, plan(correct, order="suggested"))["provider"] == "rules"
+    assert hosted(query, plan(list(reversed(correct)), order="explicit"))["provider"] == "rules"
+
+
+def test_ambiguous_relative_chain_requires_clarification_in_the_affected_clause():
+    query = "Coffee after the museum before dinner and teleportation"
+    unchecked = [stage("museum"), stage("Coffee"), stage("dinner"),
+                 stage("teleportation", kind="unresolved")]
+    assert hosted(query, plan(unchecked, order="explicit", questions=["What does teleportation mean?"]))["provider"] == "rules"
+    safe = [stage("Coffee after the museum before dinner", kind="unresolved"),
+            stage("teleportation", kind="unresolved")]
+    result = hosted(query, plan(safe, questions=["Which activity should come before dinner?"]))
+    assert result["provider"] == "openai"
+    assert all(item["kind"] == "unresolved" for item in result["stages"])
+
+
+@pytest.mark.parametrize("query,negative,positive", [
+    ("Do not visit a museum and visit a cafe", "museum", "visit a cafe"),
+    ("Don't go to a museum and visit a cafe", "museum", "visit a cafe"),
+    ("Don't try zorbflinging and try starweaving", "zorbflinging", "try starweaving"),
+    ("coffee and without pizza", "pizza", "coffee"),
+])
+def test_generic_negated_verbs_and_separate_exclusions_never_become_stops(query, negative, positive):
+    result = rules_journey_plan(query, "en")
+    assert len(result["stages"]) == 1
+    assert positive in result["stages"][0]["source_quote"]
+    assert hosted(query, plan([stage(positive)]))["provider"] == "openai"
+    assert hosted(query, plan([stage(negative), stage(positive)]))["provider"] == "rules"
+
+
+def test_nonnegative_brand_and_beverage_source_are_not_misinterpreted():
+    assert hosted("NoNameCoffee", plan([stage("NoNameCoffee", kind="named_place", named="NoNameCoffee")]))["provider"] == "openai"
+    for quote in ("coffee", "Хочу кофе", "шай"):
+        wrong = plan([stage(quote, "sushi", kind="meal", cuisine="sushi")])
+        assert hosted(quote, wrong)["provider"] == "rules"
+    # The contradiction check is deliberately narrow; semantic food aliases
+    # remain open ended and factual cuisine validation belongs to retrieval.
+    assert hosted("кофе с суши", plan([stage("кофе с суши", kind="meal", cuisine="sushi")]))["provider"] == "openai"
+
+
+def test_semantic_category_filters_preserve_arbitrary_user_purposes():
+    query = "Read a novel and buy a book and swim laps and watch a movie"
+    stages = [stage("Read a novel", "library reading", categories=["library"]),
+              stage("buy a book", "bookshop", categories=["bookshop"]),
+              stage("swim laps", "swimming pool", categories=["swimming_pool"]),
+              stage("watch a movie", "cinema", categories=["cinema"])]
+    result = hosted(query, plan(stages))
+    assert result["provider"] == "openai"
+    assert [item["categories"] for item in result["stages"]] == [["library"], ["bookshop"], ["swimming_pool"], ["cinema"]]
+
+
+def test_rules_generic_meal_suggestion_respects_explicit_multilingual_sequences():
+    unordered = rules_journey_plan("библиотека и покушать", "ru")
+    assert [item["kind"] for item in unordered["stages"]] == ["meal", "activity"]
+    assert unordered["stages"][0]["source_quote"] == "покушать"
+    assert unordered["order"] == "suggested"
+    ordered = rules_journey_plan("Сначала библиотека, потом покушать", "ru")
+    assert [item["kind"] for item in ordered["stages"]] == ["activity", "meal"]
+    kazakh = rules_journey_plan("Алдымен кофе, содан кейін саябақ", "kk")
+    assert kazakh["order"] == "explicit" and len(kazakh["stages"]) == 2
+    assert all(item["kind"] != "unresolved" for item in kazakh["stages"])

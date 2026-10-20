@@ -32,7 +32,7 @@ _JOIN = re.compile(
 )
 _NEGATIVE = re.compile(
     r"^\s*(?:не\s+(?:хочу|нуж\w*|надо|пойду)|не\s+(?=\S)|"
-    r"(?:I\s+)?(?:(?:don['’]?t|do\s+not)\s+(?:want|need|like)|not|no|avoid)\b)|"
+    r"(?:(?:I|we)\s+)?(?:don['’]?t|do\s+not|not|no|without|avoid)\b|без\b)|"
     r"(?:керек|қажет)\s+емес\s*$", re.I,
 )
 _NEGATION_WORD = re.compile(r"(?<!\w)(?:не|без|not|no|without|avoid|don['’]?t|емес)(?!\w)", re.I)
@@ -50,7 +50,26 @@ _UNSAFE_TEXT = re.compile(r"https?://|www\.|[\x00-\x08\x0b-\x1f\x7f]", re.I)
 _FILLER = frozenset(
     "хочу хотим нужно надо мне нам пожалуйста затем потом сначала можно хочу бы хочу хотели "
     "i we want would like please then first next finally and also have some a the to for "
+    "visit visits visited go get try see browse want need like a an the "
+    "посетить посетим посетим посетите пойду пойти идем сходить выпить "
     "мен біз маған бізге қалаймын қалаймыз керек өтінемін сосын алдымен содан кейін және".split()
+)
+_NAME_CONNECTORS = frozenset("of the and de del la le du des et und и имени атындағы".split())
+_TIME_REFERENCE = re.compile(
+    r"^\s*(?:(?:at|в|сағат)\s+)?(?:\d|today\b|tomorrow\b|tonight\b|noon\b|midnight\b|"
+    r"сегодня\b|завтра\b|полудн\w*|полуноч\w*|бүгін\b|ертең\b)", re.I,
+)
+_DRINK = re.compile(r"(?<!\w)(?:coffee|кофе|tea|чай|шай|cocoa|какао)(?!\w)", re.I)
+_MEAL = re.compile(
+    r"(?<!\w)(?:поесть|покушать|перекусить|пообедать|поужинать|обед\w*|ужин\w*|кафе|"
+    r"eat|eating|drink|drinking|food|meal|lunch|dinner|breakfast|caf[eé]|"
+    r"тамақ\w*|жегім|жегіміз|ішкім|ішкіміз|түскі\s+ас|кешкі\s+ас)(?!\w)", re.I,
+)
+_SOLID_FOOD = frozenset({"sushi", "pizza", "burger", "steak", "kebab", "seafood", "sandwich", "noodles"})
+_DISH_WORDS = re.compile(
+    r"(?<!\w)(?:sushi|суши|pizza\w*|пиц\w*|burger\w*|бургер\w*|steak\w*|стейк\w*|"
+    r"kebab\w*|кебаб\w*|шашлык\w*|seafood|морепродукт\w*|sandwich\w*|сэндвич\w*|"
+    r"noodles|лапш\w*|кеспе)(?!\w)", re.I,
 )
 _DISCOVERY_WORDS = frozenset(
     "просто интересная интересную интересный интересное интересные прогулка прогулку погулять "
@@ -94,10 +113,58 @@ def _text(key: str, locale: str) -> str:
     return _COPY[key][{"ru": 0, "kk": 1, "en": 2}[locale]]
 
 
+def _clauses(query: str, protected: list[tuple[int, int]] | None = None) -> list[tuple[int, int, str]]:
+    """Exact source spans, shielding grounded compound names from conjunctions."""
+    separators = sorted(
+        [*(_NEXT.finditer(query)), *(_JOIN.finditer(query))], key=lambda match: (match.start(), -match.end()),
+    )
+    result = []
+    start = 0
+    for match in [*separators, None]:
+        if match is not None:
+            if match.start() < start or any(left <= match.start() < right for left, right in (protected or [])):
+                continue
+            end, following = match.start(), match.end()
+        else:
+            end, following = len(query), len(query)
+        text = query[start:end]
+        left = start + len(text) - len(text.lstrip(" ,;:.!?\n\t"))
+        right = end - len(text) + len(text.rstrip(" ,;:.!?\n\t"))
+        if left < right:
+            result.append((left, right, query[left:right]))
+        start = following
+    return result
+
+
 def _segments(query: str) -> list[str]:
-    """Lexical coverage hints, never a finite dictionary of supported activities."""
-    parts = [part.strip(" ,;:.!?\n\t") for part in _JOIN.split(_NEXT.sub(";", query))]
-    return [part for part in parts if part]
+    return [text for _, _, text in _clauses(query)]
+
+
+def _occurrences(query: str, quote: str) -> list[tuple[int, int]]:
+    return [(match.start(), match.end()) for match in re.finditer(re.escape(quote), query)]
+
+
+def _concepts(text: str) -> set[str]:
+    return {word.casefold() for word in re.findall(r"\w{2,}", text)}.difference(_FILLER)
+
+
+def _compound_names(query: str, stages: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    protected = []
+    for stage in stages:
+        name = stage["named_place"]
+        if name is None or stage["kind"] != "named_place":
+            continue
+        words = re.findall(r"[^\W\d_]+", name)
+        content = [word for word in words if word.casefold() not in _NAME_CONNECTORS]
+        # A grounded string alone does not make a compound request a name.
+        # Quoted names or conventional title casing can safely shield a join;
+        # action words cannot turn two requests into one invented proper name.
+        plausible = bool(content) and all(word[0].isupper() and word.casefold() not in _FILLER for word in content)
+        for left, right in _occurrences(query, name):
+            quoted = left > 0 and right < len(query) and query[left - 1] in '\"«“' and query[right] in '\"»”'
+            if plausible or quoted:
+                protected.append((left, right))
+    return protected
 
 
 def _pieces(text: str, maximum: int = 500) -> list[str]:
@@ -124,9 +191,16 @@ def _negative_only(text: str) -> bool:
     return bool(_NEGATIVE.search(text)) and adjective is None
 
 
+def _relative_markers(query: str) -> list[re.Match[str]]:
+    sequence_spans = [(marker.start(), marker.end()) for marker in _NEXT.finditer(query)]
+    return [marker for marker in _RELATIVE_ORDER.finditer(query)
+            if not any(left <= marker.start() < right for left, right in sequence_spans)
+            and not _TIME_REFERENCE.search(query[marker.end():])]
+
+
 def _rules(query: str, locale: str) -> dict[str, Any]:
     stages = []
-    relative_order = bool(_RELATIVE_ORDER.search(query))
+    relative_order = bool(_relative_markers(query))
     for part in ([] if _broad_discovery(query) else _segments(query)):
         if _negative_only(part) or _CONTEXT.search(part):
             continue
@@ -137,10 +211,16 @@ def _rules(query: str, locale: str) -> dict[str, Any]:
             stages.append({
                 "source_quote": quote,
                 "search_query": quote[:300],
-                "kind": "unresolved" if unresolved else "activity",
+                "kind": "unresolved" if unresolved else "meal" if _MEAL.search(quote) or _DRINK.search(quote) else "activity",
                 "named_place": None,
                 "cuisine": None,
+                "categories": [],
             })
+    explicit = bool(_NEXT.search(query) or _FIRST.search(query))
+    if not explicit and not relative_order:
+        # A generic meal-first suggestion applies to any unordered wish list;
+        # no destination, dish or source venue is special-cased or invented.
+        stages.sort(key=lambda stage: stage["kind"] != "meal")
     warnings = [_text("rules", locale)]
     questions = []
     if len(stages) > 8:
@@ -155,7 +235,7 @@ def _rules(query: str, locale: str) -> dict[str, Any]:
         warnings.append(_text("unresolved", locale))
     return {
         "provider": "rules", "stages": stages,
-        "order": "explicit" if not relative_order and (_NEXT.search(query) or _FIRST.search(query)) else "suggested",
+        "order": "explicit" if explicit else "suggested",
         "clarification_questions": questions, "warnings": warnings,
     }
 
@@ -184,6 +264,14 @@ _INSTRUCTIONS = (
     "exact user-supplied substring within source_quote; distinguish visiting a place "
     "from merely searching nearby it. cuisine is null or the conventional lower-case "
     "ASCII cuisine/food identifier explicitly requested, never an invented venue fact. "
+    "For a drink request do not invent a dish cuisine (coffee does not request sushi). "
+    "categories contains semantic place-type search filters, not facts about a venue. "
+    "Use the user's purpose to distinguish reading books (library) from buying books "
+    "(bookshop), watching a movie (cinema), or swimming (swimming_pool). Eating can use "
+    "restaurant or cafe with the requested cuisine. Other relevant source category "
+    "identifiers are allowed; do not force an unsupported activity into a familiar "
+    "category. Named destinations may use an empty categories array when their type "
+    "is not established by the user's text. Every property must be returned. "
     "kind meal is for eating/drinking wishes, named_place for an explicit destination, "
     "activity for other clear activities, unresolved for ambiguity. Any cuisine requires "
     "kind meal. Preserve explicit order even if inconvenient; understand before/after "
@@ -220,6 +308,8 @@ def _schema(provider: str) -> dict[str, Any]:
         # provider constrained decoding expects that type to be explicit.
         if "enum" in resolved and "type" not in resolved and all(isinstance(item, str) for item in resolved["enum"]):
             resolved["type"] = "string"
+        if resolved.get("type") == "object" and "properties" in resolved:
+            resolved["required"] = list(resolved["properties"])
         return resolved
 
     result = resolve(definitions["JourneyPlan"])
@@ -229,6 +319,115 @@ def _schema(provider: str) -> dict[str, Any]:
 
 def _safe_text(value: str) -> bool:
     return not _UNSAFE_TEXT.search(value)
+
+
+def _validate_coverage(query: str, result: dict[str, Any], protected: list[tuple[int, int]]) -> None:
+    clauses = [] if _broad_discovery(query) else _clauses(query, protected)
+    active = [(left, right, text) for left, right, text in clauses if not _negative_only(text) and not _CONTEXT.search(text)]
+    assignments: list[list[int]] = [[] for _ in active]
+    safely_unresolved: set[int] = set()
+    for stage_index, stage in enumerate(result["stages"]):
+        quote = stage["source_quote"]
+        if not _concepts(quote) and stage["kind"] != "unresolved":
+            raise ValueError("stage lacks a source concept")
+        spans = _occurrences(query, quote)
+        contained = [index for index, (left, right, _) in enumerate(active)
+                     if any(left <= start and end <= right for start, end in spans)]
+        if stage["kind"] != "unresolved" and len(contained) != 1:
+            raise ValueError("stage combines or ambiguously quotes independent goals")
+        for index in contained:
+            assignments[index].append(stage_index)
+        if stage["kind"] == "unresolved":
+            for index, (left, right, _) in enumerate(active):
+                if any(start <= left and right <= end for start, end in spans):
+                    safely_unresolved.add(index)
+    # Each independent clause needs a distinct stage tied to that exact source
+    # span. Shared verbs or repeated nouns in another clause cannot cover it.
+    pending = [choices for index, choices in enumerate(assignments) if index not in safely_unresolved]
+    if len(result["stages"]) == 8 and result["clarification_questions"]:
+        pending = [choices for choices in pending if choices]
+
+    def match(remaining: list[list[int]], used: set[int]) -> bool:
+        if not remaining:
+            return True
+        choices, *rest = sorted(remaining, key=len)
+        return any(match(rest, used | {index}) for index in choices if index not in used)
+
+    if not match(pending, set()):
+        raise ValueError("omitted independent source goal")
+    for _, _, part in active:
+        if _NEGATION_WORD.search(part):
+            overlapping = [stage["source_quote"] for stage in result["stages"]
+                           if stage["source_quote"] in part or part in stage["source_quote"]]
+            if overlapping and not any(_NEGATION_WORD.search(quote) for quote in overlapping):
+                raise ValueError("cropped negation")
+
+
+def _validate_order(query: str, result: dict[str, Any], protected: list[tuple[int, int]]) -> None:
+    def outside(match: re.Match[str]) -> bool:
+        return not any(left <= match.start() < right for left, right in protected)
+
+    stages = result["stages"]
+    positions = [(query.index(stage["source_quote"]), query.index(stage["source_quote"]) + len(stage["source_quote"]))
+                 for stage in stages]
+    next_markers = [marker for marker in _NEXT.finditer(query) if outside(marker)]
+    first_markers = [marker for marker in _FIRST.finditer(query) if outside(marker)]
+    if next_markers or first_markers:
+        if result["order"] != "explicit":
+            raise ValueError("explicit order omitted")
+        # Sequence groups retain source order even when a stage independently
+        # says "after 5pm". Activity-relative grammar can reorder within a
+        # group; it can never waive an explicit first/then group boundary.
+        groups = [sum(marker.end() <= left for marker in next_markers) for left, _ in positions]
+        if groups != sorted(groups):
+            raise ValueError("explicit sequence changed")
+
+    relations = [marker for marker in _relative_markers(query) if outside(marker)]
+    clauses = _clauses(query, protected)
+    if next_markers or first_markers:
+        for group in set(groups):
+            within = [position for position, stage_group in zip(positions, groups, strict=True) if stage_group == group]
+            relative_within = any(sum(item.end() <= marker.start() for item in next_markers) == group for marker in relations)
+            if not relative_within and within != sorted(within):
+                raise ValueError("explicit within-group sequence changed")
+
+    def unresolved_relation(marker: re.Match[str]) -> bool:
+        affected = [text for left, right, text in clauses if left <= marker.start() < right]
+        return any(stage["kind"] == "unresolved" and any(text in stage["source_quote"] for text in affected)
+                   for stage in stages)
+
+    for marker in relations:
+        same_clause = [other for other in relations if any(
+            left <= marker.start() < right and left <= other.start() < right for left, right, _ in clauses
+        )]
+        if len(same_clause) > 1:
+            if unresolved_relation(marker):
+                continue
+            raise ValueError("ambiguous relative sequence needs clarification")
+        concrete = sorted((left, right, index) for index, (left, right) in enumerate(positions)
+                          if stages[index]["kind"] != "unresolved")
+        before = [span for span in concrete if span[1] <= marker.start()]
+        after = [span for span in concrete if span[0] >= marker.end()]
+        operator = marker.group().casefold()
+        is_before = operator in {"before", "перед", "прежде чем", "дейін"}
+        postposition = operator in {"дейін", "кейін"}
+        pair = None
+        if before and after:
+            left, right = before[-1][2], after[0][2]
+            pair = (left, right) if is_before != postposition else (right, left)
+        elif not before and len(after) == 2:
+            # "Before the museum, coffee" mentions the anchor first.
+            left, right = after[0][2], after[1][2]
+            pair = (right, left) if is_before else (left, right)
+        elif postposition and not after and len(before) == 2:
+            left, right = before[0][2], before[1][2]
+            pair = (left, right) if is_before else (right, left)
+        if pair is None:
+            if unresolved_relation(marker):
+                continue
+            raise ValueError("unverified relative sequence needs clarification")
+        if result["order"] != "explicit" or pair[0] >= pair[1]:
+            raise ValueError("relative order changed")
 
 
 def _ground(raw: Any, query: str, provider: str) -> dict[str, Any]:
@@ -252,36 +451,17 @@ def _ground(raw: Any, query: str, provider: str) -> dict[str, Any]:
             raise ValueError("missing named destination")
         if stage["cuisine"] is not None and stage["kind"] != "meal":
             raise ValueError("invalid cuisine stage")
+        if _DRINK.search(quote) and stage["cuisine"] in _SOLID_FOOD and not _DISH_WORDS.search(quote):
+            raise ValueError("a drink request does not establish a dish cuisine")
         seen.add(quote)
     for value in result["clarification_questions"] + result["warnings"]:
         if not value.strip() or not _safe_text(value):
             raise ValueError("invalid planning text")
     if any(stage["kind"] == "unresolved" for stage in result["stages"]) and not result["clarification_questions"]:
         raise ValueError("unresolved goal needs clarification")
-    if (_NEXT.search(query) or _FIRST.search(query)) and not _RELATIVE_ORDER.search(query):
-        if result["order"] != "explicit":
-            raise ValueError("explicit order omitted")
-        positions = [query.index(stage["source_quote"]) for stage in result["stages"]]
-        if positions != sorted(positions):
-            raise ValueError("explicit order changed")
-    # This catches omitted lexical clauses, without allowing a finite activity
-    # dictionary to veto semantic paraphrases. It is a conservative coverage
-    # check, not a proof of a model's semantic interpretation.
-    quotes = [stage["source_quote"] for stage in result["stages"]]
-    for part in ([] if _broad_discovery(query) else _segments(query)):
-        if _negative_only(part) or _CONTEXT.search(part):
-            continue
-        words = set(re.findall(r"\w{3,}", _FIRST.sub("", part).casefold())).difference(_FILLER)
-        if words and not any(words.intersection(re.findall(r"\w{3,}", quote.casefold())) for quote in quotes):
-            if len(result["stages"]) == 8 and result["clarification_questions"]:
-                continue
-            raise ValueError("omitted source clause")
-        # A cropped noun cannot erase an exclusion or turn a negative request
-        # into a positive stop. Keep the full modifier context in the quote.
-        if _NEGATION_WORD.search(part):
-            overlapping = [quote for quote in quotes if quote in part or part in quote]
-            if overlapping and not any(_NEGATION_WORD.search(quote) for quote in overlapping):
-                raise ValueError("cropped negation")
+    protected = _compound_names(query, result["stages"])
+    _validate_coverage(query, result, protected)
+    _validate_order(query, result, protected)
     return result
 
 
