@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ChevronDown, Maximize2, Search } from "lucide-react";
 import {
+  useEffect,
   useRef,
   useSyncExternalStore,
   type KeyboardEvent,
@@ -11,6 +12,11 @@ import {
 import type { Locale } from "@/lib/i18n";
 import styles from "./mobile-sheet.module.css";
 import { ideasCopy } from "./route-ideas";
+import {
+  SHEET_SETTLED_EVENT,
+  sheetDragOffset,
+  sheetSnapIndex,
+} from "@/lib/sheet-gesture";
 
 export type SheetSnap = "collapsed" | "half" | "expanded";
 const snaps: SheetSnap[] = ["collapsed", "half", "expanded"];
@@ -86,25 +92,137 @@ export default function MobileSheet({
   onOpenIdeas?: () => void;
 }) {
   const text = copy[locale];
-  const drag = useRef<{ y: number; moved: boolean } | null>(null);
+  const drag = useRef<{
+    pointer: number;
+    panel: HTMLElement;
+    y: number;
+    height: number;
+    heights: number[];
+    offset: number;
+    moved: boolean;
+    samples: { y: number; time: number }[];
+  } | null>(null);
+  const preview = useRef<((notify?: boolean) => void) | null>(null);
   const suppressClick = useRef(false);
+  useEffect(() => () => preview.current?.(false), []);
   function step(direction: number) {
+    preview.current?.(false);
     onSnap(snaps[Math.max(0, Math.min(2, snaps.indexOf(snap) + direction))]);
   }
   function finish(event: PointerEvent<HTMLButtonElement>, cancel = false) {
     const start = drag.current;
+    if (!start || start.pointer !== event.pointerId) return;
     drag.current = null;
-    event.currentTarget
-      .closest<HTMLElement>("[data-mobile-sheet]")
-      ?.style.removeProperty("--sheet-drag");
-    if (!start) return;
-    suppressClick.current = start.moved;
-    if (!cancel && Math.abs(event.clientY - start.y) > 35)
-      step(event.clientY < start.y ? 1 : -1);
+    const delta = event.clientY - start.y;
+    start.moved ||= Math.abs(delta) > 8;
+    suppressClick.current = !cancel && start.moved;
+    if (!start.moved) {
+      preview.current?.(false);
+      return;
+    }
+    const now = performance.now();
+    const recent = start.samples.find((point) => now - point.time <= 90);
+    const velocity = recent
+      ? (event.clientY - recent.y) / Math.max(16, now - recent.time)
+      : 0;
+    const index = cancel
+      ? snaps.indexOf(snap)
+      : sheetSnapIndex(start.heights, start.height, delta, velocity);
+    const target = start.heights[2] - start.heights[index];
+    start.panel.removeAttribute("data-sheet-dragging");
+    start.panel.style.setProperty("--sheet-drag", `${target}px`);
+    if (!cancel) onSnap(snaps[index]);
+    const duration = window.matchMedia?.("(prefers-reduced-motion: reduce)")
+      .matches
+      ? 0
+      : 180;
+    const animation = duration
+      ? start.panel.animate?.(
+          [
+            { transform: `translate3d(0, ${start.offset}px, 0)` },
+            { transform: `translate3d(0, ${target}px, 0)` },
+          ],
+          { duration, easing: "cubic-bezier(.2,.8,.2,1)" },
+        )
+      : undefined;
+    const cleanup = preview.current;
+    const stop = (notify = true) => {
+      window.clearTimeout(timer);
+      if (animation) animation.onfinish = null;
+      animation?.cancel();
+      cleanup?.(notify);
+    };
+    const timer = window.setTimeout(() => stop(), duration + 20);
+    preview.current = stop;
+    if (animation) animation.onfinish = () => stop();
+  }
+  function beginDrag(event: PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0 || event.isPrimary === false || drag.current) return;
+    const panel = event.currentTarget.closest<HTMLElement>(
+      "[data-mobile-sheet]",
+    );
+    if (!panel) return;
+    // Cache geometry once. Pointer moves below only write a compositor transform.
+    const viewport = window.visualViewport?.height || window.innerHeight;
+    const nav = panel.parentElement
+      ?.querySelector(".app-rail")
+      ?.getBoundingClientRect();
+    const fallbackMaximum =
+      Number.parseFloat(getComputedStyle(panel).maxHeight) ||
+      Math.max(132, viewport - (nav?.height || 66) - 12);
+    const rect = panel.getBoundingClientRect();
+    const visibleHeight = panel.hasAttribute("data-sheet-preview")
+      ? (nav?.top || viewport - 66) - rect.top
+      : rect.height;
+    preview.current?.(false);
+    suppressClick.current = false;
+    const transition = panel.style.transition;
+    panel.style.transition = "none";
+    panel.setAttribute("data-sheet-preview", "true");
+    panel.setAttribute("data-sheet-dragging", "true");
+    // Resolve the expanded CSS size once, including safe areas and the keyboard.
+    const maximum = panel.offsetHeight || fallbackMaximum;
+    const heights = [
+      Math.min(132, maximum),
+      Math.min(maximum, Math.max(132, viewport * 0.54)),
+      maximum,
+    ];
+    const height = visibleHeight
+      ? Math.max(heights[0], Math.min(maximum, visibleHeight))
+      : heights[snaps.indexOf(snap)];
+    panel.style.setProperty("--sheet-drag", `${maximum - height}px`);
+    let active = true;
+    preview.current = (notify = true) => {
+      if (!active) return;
+      active = false;
+      drag.current = null;
+      panel.removeAttribute("data-sheet-preview");
+      panel.removeAttribute("data-sheet-dragging");
+      panel.style.removeProperty("--sheet-drag");
+      // Commit the target height without animating layout after the GPU settle.
+      void panel.offsetHeight;
+      panel.style.transition = transition;
+      if (!transition) panel.style.removeProperty("transition");
+      preview.current = null;
+      if (notify && panel.isConnected)
+        panel.dispatchEvent(new Event(SHEET_SETTLED_EVENT));
+    };
+    drag.current = {
+      pointer: event.pointerId,
+      panel,
+      y: event.clientY,
+      height,
+      heights,
+      offset: maximum - height,
+      moved: false,
+      samples: [{ y: event.clientY, time: performance.now() }],
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
   }
   function keyboard(event: KeyboardEvent<HTMLButtonElement>) {
     if (["ArrowUp", "ArrowDown", "Home", "End", "Escape"].includes(event.key)) {
       event.preventDefault();
+      preview.current?.(false);
       if (event.key === "Home" || event.key === "Escape") onSnap("collapsed");
       else if (event.key === "End") onSnap("expanded");
       else step(event.key === "ArrowUp" ? 1 : -1);
@@ -128,24 +246,28 @@ export default function MobileSheet({
           }
           step(snap === "expanded" ? -2 : 1);
         }}
-        onPointerDown={(event) => {
-          suppressClick.current = false;
-          drag.current = { y: event.clientY, moved: false };
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-        }}
+        onPointerDown={beginDrag}
         onPointerMove={(event) => {
-          if (!drag.current) return;
-          const delta = event.clientY - drag.current.y;
-          drag.current.moved ||= Math.abs(delta) > 8;
-          event.currentTarget
-            .closest<HTMLElement>("[data-mobile-sheet]")
-            ?.style.setProperty(
-              "--sheet-drag",
-              `${Math.max(-70, Math.min(100, delta))}px`,
-            );
+          const start = drag.current;
+          if (!start || start.pointer !== event.pointerId) return;
+          const now = performance.now();
+          const delta = event.clientY - start.y;
+          start.moved ||= Math.abs(delta) > 8;
+          start.samples = start.samples.filter(
+            (point) => now - point.time <= 90,
+          );
+          start.samples.push({ y: event.clientY, time: now });
+          start.offset = sheetDragOffset(
+            start.heights[2] - start.height + delta,
+            start.heights[2] - start.heights[0],
+          );
+          start.panel.style.setProperty("--sheet-drag", `${start.offset}px`);
         }}
         onPointerUp={(event) => finish(event)}
         onPointerCancel={(event) => finish(event, true)}
+        onLostPointerCapture={(event) => {
+          if (drag.current) finish(event, true);
+        }}
       >
         <span aria-hidden="true" />
       </button>
@@ -157,7 +279,10 @@ export default function MobileSheet({
           href="/walk"
           scroll={false}
           className={styles.search}
-          onClick={onOpen}
+          onClick={() => {
+            preview.current?.(false);
+            onOpen();
+          }}
           aria-label={text.open}
         >
           <Search size={21} aria-hidden="true" />
@@ -167,7 +292,10 @@ export default function MobileSheet({
           <button
             type="button"
             className={styles.mapButton}
-            onClick={() => onSnap("collapsed")}
+            onClick={() => {
+              preview.current?.(false);
+              onSnap("collapsed");
+            }}
             aria-label={text.map}
           >
             <ChevronDown size={22} aria-hidden="true" />
@@ -180,7 +308,10 @@ export default function MobileSheet({
           <button
             type="button"
             className={styles.ideasAction}
-            onClick={onOpenIdeas}
+            onClick={() => {
+              preview.current?.(false);
+              onOpenIdeas();
+            }}
             aria-controls="route-ideas"
           >
             {ideasCopy[locale].title}: {ideasCount}
@@ -188,7 +319,10 @@ export default function MobileSheet({
         )}
         <button
           type="button"
-          onClick={() => onSnap(snap === "half" ? "expanded" : "half")}
+          onClick={() => {
+            preview.current?.(false);
+            onSnap(snap === "half" ? "expanded" : "half");
+          }}
           aria-label={text.expand}
         >
           <Maximize2 size={16} aria-hidden="true" />

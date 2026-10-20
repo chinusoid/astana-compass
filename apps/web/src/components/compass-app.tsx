@@ -84,6 +84,7 @@ import scenarioStyles from "./scenario-feedback.module.css";
 import MobileSheet, { useMobileViewport, type SheetSnap } from "./mobile-sheet";
 import mobileStyles from "./mobile-sheet.module.css";
 import RouteIdeas from "./route-ideas";
+import { SHEET_SETTLED_EVENT } from "@/lib/sheet-gesture";
 
 const CityMap = dynamic(() => import("./city-map"), { ssr: false });
 const FAVORITES_KEY = "astana-compass:favorites:v1";
@@ -160,6 +161,7 @@ export default function CompassApp({
   useEffect(() => {
     if (!isMobile) return;
     const measure = () => {
+      if (sheetRef.current?.hasAttribute("data-sheet-preview")) return;
       if (window.visualViewport?.height)
         setMobileViewportHeight(Math.round(window.visualViewport.height));
       const height = sheetRef.current?.getBoundingClientRect().height;
@@ -171,10 +173,13 @@ export default function CompassApp({
     if (sheetRef.current?.parentElement)
       observer?.observe(sheetRef.current.parentElement);
     window.visualViewport?.addEventListener("resize", measure);
+    const panel = sheetRef.current;
+    panel?.addEventListener(SHEET_SETTLED_EVENT, measure);
     return () => {
       window.clearTimeout(timer);
       observer?.disconnect();
       window.visualViewport?.removeEventListener("resize", measure);
+      panel?.removeEventListener(SHEET_SETTLED_EVENT, measure);
     };
   }, [isMobile, mobileSheet]);
   function resizeMobileSheet(snap: SheetSnap) {

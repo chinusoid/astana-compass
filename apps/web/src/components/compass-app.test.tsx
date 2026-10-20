@@ -209,6 +209,26 @@ it.each([false, true])(
         Number(screen.getByTestId("map").getAttribute("data-overview")),
       ).toBeGreaterThan(0);
       const route = screen.getByTestId("map").getAttribute("data-route");
+      const overview = screen.getByTestId("map").getAttribute("data-overview");
+      const stops = screen.getByTestId("map").getAttribute("data-stops");
+      vi.stubGlobal("PointerEvent", MouseEvent);
+      const handle = container.querySelector("[data-sheet-handle]")!;
+      fireEvent.pointerDown(handle, { clientY: 700 });
+      fireEvent.pointerMove(handle, { clientY: 450 });
+      fireEvent.pointerMove(handle, { clientY: 200 });
+      expect(screen.getByTestId("map")).toHaveAttribute("data-route", route!);
+      expect(screen.getByTestId("map")).toHaveAttribute("data-stops", stops!);
+      expect(screen.getByTestId("map")).toHaveAttribute(
+        "data-overview",
+        overview!,
+      );
+      fireEvent.pointerCancel(handle, { clientY: 200 });
+      await waitFor(() =>
+        expect(
+          container.querySelector("[data-mobile-sheet]"),
+        ).not.toHaveAttribute("data-sheet-preview"),
+      );
+      expect(screen.getByTestId("map")).toHaveAttribute("data-route", route!);
       await user.click(
         screen.getByRole("link", { name: "Открыть планирование" }),
       );
