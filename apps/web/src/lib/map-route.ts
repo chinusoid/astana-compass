@@ -224,6 +224,7 @@ export function fitJourney(
   geometry: RouteGeometry | null,
   stops: Location[] = [],
   animate = false,
+  bottomInset = 0,
 ) {
   // Include the actual POIs even if the routing provider snapped to a road.
   // With an approximate estimate, fit the stops without inventing a path.
@@ -266,7 +267,14 @@ export function fitJourney(
   )
     return false;
   const horizontalScale = Math.min(1, availableWidth / 260);
-  const verticalScale = Math.min(1, availableHeight / 340);
+  const inset = Math.max(
+    0,
+    Math.min(
+      Number.isFinite(bottomInset) ? bottomInset : 0,
+      availableHeight - 2,
+    ),
+  );
+  const verticalScale = Math.min(1, (availableHeight - inset) / 340);
   const longitude = points.map((point) => point[0]);
   const latitude = points.map((point) => point[1]);
   map.fitBounds(
@@ -278,11 +286,12 @@ export function fitJourney(
       padding: {
         top: 100 * verticalScale,
         right: 65 * horizontalScale,
-        bottom: 70 * verticalScale,
+        bottom: inset + 70 * verticalScale,
         left: 65 * horizontalScale,
       },
       maxZoom: 16,
       duration: animate && !reducedMapMotion() ? 750 : 0,
+      ...(inset ? { retainPadding: false } : {}),
     },
   );
   return true;

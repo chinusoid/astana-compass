@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -74,6 +81,8 @@ import { sourceDescription } from "@/lib/place-presentation";
 import TimeBudgetNote from "./time-budget-note";
 import ScenarioPlan from "./scenario-plan";
 import scenarioStyles from "./scenario-feedback.module.css";
+import MobileSheet, { useMobileViewport, type SheetSnap } from "./mobile-sheet";
+import mobileStyles from "./mobile-sheet.module.css";
 
 const CityMap = dynamic(() => import("./city-map"), { ssr: false });
 const FAVORITES_KEY = "astana-compass:favorites:v1";
@@ -140,6 +149,46 @@ export default function CompassApp({
               ? "events"
               : "discover";
   const [locale, setLocale] = useState<Locale>("ru");
+  const isMobile = useMobileViewport();
+  const [mobileSheet, setMobileSheet] = useState<SheetSnap>("collapsed");
+  const [sheetHeight, setSheetHeight] = useState(132);
+  const [mobileViewportHeight, setMobileViewportHeight] = useState<
+    number | null
+  >(null);
+  const sheetRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!isMobile) return;
+    const measure = () => {
+      if (window.visualViewport?.height)
+        setMobileViewportHeight(Math.round(window.visualViewport.height));
+      const height = sheetRef.current?.getBoundingClientRect().height;
+      if (height) setSheetHeight(Math.ceil(height));
+    };
+    const timer = window.setTimeout(measure, 260);
+    const observer =
+      typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    if (sheetRef.current?.parentElement)
+      observer?.observe(sheetRef.current.parentElement);
+    window.visualViewport?.addEventListener("resize", measure);
+    return () => {
+      window.clearTimeout(timer);
+      observer?.disconnect();
+      window.visualViewport?.removeEventListener("resize", measure);
+    };
+  }, [isMobile, mobileSheet]);
+  function resizeMobileSheet(snap: SheetSnap) {
+    if (isMobile && snap === "collapsed") {
+      setSheetHeight(132);
+      if (sheetRef.current?.contains(document.activeElement))
+        (document.activeElement as HTMLElement | null)?.blur();
+      window.requestAnimationFrame?.(() =>
+        sheetRef.current
+          ?.querySelector<HTMLButtonElement>("[data-sheet-handle]")
+          ?.focus({ preventScroll: true }),
+      );
+    }
+    setMobileSheet(snap);
+  }
   const [form, setForm] = useState<FormState>({
     query: "",
     minutes: "",
@@ -495,7 +544,10 @@ export default function CompassApp({
       if (!controller.signal.aborted) {
         setItinerary(response);
         setItineraryHasTimeTarget(hasTimeTarget);
-        if (response.stops.length) showRouteOverview();
+        if (response.stops.length && response.route) {
+          if (isMobile) resizeMobileSheet("collapsed");
+          showRouteOverview();
+        }
       }
     } catch (error) {
       if (!controller.signal.aborted) setItineraryError(asApiError(error));
@@ -834,6 +886,7 @@ export default function CompassApp({
           onClick={() => {
             setPicking(true);
             setMapEnabled(true);
+            if (isMobile) resizeMobileSheet("collapsed");
           }}
         >
           {t(locale, origin ? "changeStart" : "pickMap")}
@@ -922,6 +975,7 @@ export default function CompassApp({
         beginOriginPick: () => {
           setPicking(true);
           setMapEnabled(true);
+          if (isMobile) resizeMobileSheet("collapsed");
         },
         setCommunityEvents,
         setSharedLocations,
@@ -939,7 +993,18 @@ export default function CompassApp({
       <a className="skip-link" href="#sidebar-content">
         {t(locale, "skip")}
       </a>
-      <div className="app-shell">
+      <div
+        className={`app-shell ${mobileStyles.shell}`}
+        data-sheet-snap={mobileSheet}
+        style={
+          {
+            "--mobile-overlay": `${sheetHeight}px`,
+            ...(isMobile && mobileViewportHeight
+              ? { "--mobile-viewport": `${mobileViewportHeight}px` }
+              : {}),
+          } as CSSProperties
+        }
+      >
         <nav className="app-rail" aria-label={t(locale, "navigation")}>
           <Link href="/" className="rail-brand" aria-label="Astana Compass">
             <Compass size={30} />
@@ -951,7 +1016,13 @@ export default function CompassApp({
               scroll={false}
               className="rail-link"
               aria-current={view === key ? "page" : undefined}
-              onClick={closeDialog}
+              onClick={() => {
+                closeDialog();
+                if (isMobile)
+                  resizeMobileSheet(
+                    key === "walk" || key === "discover" ? "half" : "expanded",
+                  );
+              }}
             >
               <Icon size={23} aria-hidden="true" />
               <span>{t(locale, key)}</span>
@@ -975,1081 +1046,1133 @@ export default function CompassApp({
             </select>
           </label>
         </nav>
-        <main className="app-sidebar" id="sidebar-content" tabIndex={-1}>
-          <header className="sidebar-header">
-            <p className="eyebrow">ASTANA COMPASS</p>
-            <h1>{t(locale, view)}</h1>
-            <span className="city-pill">Астана · Asia/Almaty</span>
-          </header>
-          {showFixture && (
-            <div className="fixture-banner" role="status">
-              <ShieldCheck size={17} />
-              {t(locale, "fixtureBanner")}
-            </div>
-          )}
-          <div className="sidebar-content">
-            {(view === "discover" || view === "walk" || view === "events") &&
-              startCard}
-            {children}
-            {view === "discover" && (
-              <>
-                <div className="discovery-intro">
-                  <p>{t(locale, "discoveryIntro")}</p>
-                  <Link href="/walk" className="primary" scroll={false}>
-                    {t(locale, "planWalk")}
-                    <ArrowRight size={17} />
-                  </Link>
-                </div>
-                <section className="catalog" aria-labelledby="catalog-heading">
-                  <div className="catalog-heading">
-                    <h2 id="catalog-heading">{t(locale, "browse")}</h2>
-                    <ChevronRight size={22} />
+        <main
+          className="app-sidebar"
+          id="sidebar-content"
+          tabIndex={-1}
+          ref={sheetRef}
+          data-mobile-sheet
+        >
+          <MobileSheet
+            snap={mobileSheet}
+            onSnap={resizeMobileSheet}
+            locale={locale}
+            wish={form.query}
+            summary={selected.length ? routeSummary : ""}
+            onOpen={() => {
+              resizeMobileSheet("expanded");
+              window.requestAnimationFrame?.(() =>
+                document
+                  .querySelector<HTMLTextAreaElement>('textarea[name="query"]')
+                  ?.focus({ preventScroll: true }),
+              );
+            }}
+          />
+          <div
+            className={mobileStyles.content}
+            id="mobile-sheet-content"
+            inert={isMobile && mobileSheet === "collapsed"}
+            aria-hidden={
+              isMobile && mobileSheet === "collapsed" ? true : undefined
+            }
+          >
+            <header className="sidebar-header">
+              <p className="eyebrow">ASTANA COMPASS</p>
+              <h1>{t(locale, view)}</h1>
+              <span className="city-pill">Астана · Asia/Almaty</span>
+            </header>
+            {showFixture && (
+              <div className="fixture-banner" role="status">
+                <ShieldCheck size={17} />
+                {t(locale, "fixtureBanner")}
+              </div>
+            )}
+            <div className="sidebar-content">
+              {(view === "discover" || view === "walk" || view === "events") &&
+                startCard}
+              {children}
+              {view === "discover" && (
+                <>
+                  <div className="discovery-intro">
+                    <p>{t(locale, "discoveryIntro")}</p>
+                    <Link href="/walk" className="primary" scroll={false}>
+                      {t(locale, "planWalk")}
+                      <ArrowRight size={17} />
+                    </Link>
                   </div>
-                  <p className="field-hint">{t(locale, "browseHint")}</p>
+                  <section
+                    className="catalog"
+                    aria-labelledby="catalog-heading"
+                  >
+                    <div className="catalog-heading">
+                      <h2 id="catalog-heading">{t(locale, "browse")}</h2>
+                      <ChevronRight size={22} />
+                    </div>
+                    <p className="field-hint">{t(locale, "browseHint")}</p>
+                    <form
+                      className="catalog-search"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void loadCatalog(catalogQuery);
+                      }}
+                    >
+                      <label className="sr-only" htmlFor="catalog-query">
+                        {t(locale, "catalogSearch")}
+                      </label>
+                      <input
+                        id="catalog-query"
+                        value={catalogQuery}
+                        maxLength={2000}
+                        placeholder={t(locale, "catalogSearch")}
+                        aria-describedby="catalog-query-hint"
+                        onChange={(e) => {
+                          requests.current.catalog?.abort();
+                          setCatalogLoading(false);
+                          setCursor(null);
+                          setCatalogQuery(e.target.value);
+                        }}
+                      />
+                      <button
+                        className="secondary"
+                        disabled={catalogLoading}
+                        type="submit"
+                      >
+                        {t(locale, "search")}
+                      </button>
+                    </form>
+                    <p className="field-hint" id="catalog-query-hint">
+                      {t(locale, "catalogQueryHint")}
+                    </p>
+                    {!catalogLoading &&
+                      catalogQuery.trim() !== loadedQuery.trim() && (
+                        <p className="notice amber small" role="status">
+                          {t(locale, "catalogPendingQuery")}
+                        </p>
+                      )}
+                    {!catalogLoading && loadedQuery.trim() && (
+                      <p className="field-hint">
+                        {t(locale, "catalogResultsFor")}: «{loadedQuery}»
+                      </p>
+                    )}
+                    <ErrorNotice
+                      error={catalogError}
+                      locale={locale}
+                      retry={() => void loadCatalog(catalogQuery)}
+                    />
+                    <div className="catalog-cards">
+                      {catalog.map((place) => card(place))}
+                    </div>
+                    {catalogLoading ? (
+                      <p role="status">{t(locale, "catalogLoading")}</p>
+                    ) : !catalog.length && !catalogError ? (
+                      loadedQuery.trim() ? (
+                        <div className="catalog-empty" role="status">
+                          <p>{t(locale, "catalogNoMatch")}</p>
+                          <p className="field-hint">
+                            {t(locale, "catalogNoMatchHint")}
+                          </p>
+                          <button
+                            className="text-button"
+                            type="button"
+                            onClick={() => {
+                              setCatalogQuery("");
+                              void loadCatalog("");
+                            }}
+                          >
+                            {t(locale, "catalogShowAll")}
+                          </button>
+                        </div>
+                      ) : (
+                        <p>{t(locale, "empty")}</p>
+                      )
+                    ) : null}
+                    {cursor && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={catalogLoading}
+                        onClick={() => void loadCatalog(loadedQuery, cursor)}
+                      >
+                        {t(locale, "more")}
+                      </button>
+                    )}
+                  </section>
+                </>
+              )}
+              {view === "walk" && (
+                <>
                   <form
-                    className="catalog-search"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void loadCatalog(catalogQuery);
+                    id="planner-form"
+                    className="planner panel"
+                    noValidate
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void recommend();
                     }}
                   >
-                    <label className="sr-only" htmlFor="catalog-query">
-                      {t(locale, "catalogSearch")}
+                    <div className="section-label">
+                      <span>01</span>
+                      {t(locale, "explore")}
+                    </div>
+                    <h2>{t(locale, "planPrompt")}</h2>
+                    <label className="field">
+                      <span>{t(locale, "query")}</span>
+                      <textarea
+                        name="query"
+                        value={form.query}
+                        required
+                        maxLength={2000}
+                        rows={3}
+                        placeholder={t(locale, "queryPlaceholder")}
+                        aria-describedby="query-hint scenario-keyboard-hint scenario-status"
+                        onChange={(e) => updateForm({ query: e.target.value })}
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === "Enter" &&
+                            !event.shiftKey &&
+                            !event.nativeEvent.isComposing &&
+                            event.keyCode !== 229
+                          ) {
+                            event.preventDefault();
+                            void recommend();
+                          }
+                        }}
+                      />
                     </label>
-                    <input
-                      id="catalog-query"
-                      value={catalogQuery}
-                      maxLength={2000}
-                      placeholder={t(locale, "catalogSearch")}
-                      aria-describedby="catalog-query-hint"
-                      onChange={(e) => {
-                        requests.current.catalog?.abort();
-                        setCatalogLoading(false);
-                        setCursor(null);
-                        setCatalogQuery(e.target.value);
-                      }}
-                    />
-                    <button
-                      className="secondary"
-                      disabled={catalogLoading}
-                      type="submit"
-                    >
-                      {t(locale, "search")}
-                    </button>
-                  </form>
-                  <p className="field-hint" id="catalog-query-hint">
-                    {t(locale, "catalogQueryHint")}
-                  </p>
-                  {!catalogLoading &&
-                    catalogQuery.trim() !== loadedQuery.trim() && (
-                      <p className="notice amber small" role="status">
-                        {t(locale, "catalogPendingQuery")}
-                      </p>
-                    )}
-                  {!catalogLoading && loadedQuery.trim() && (
-                    <p className="field-hint">
-                      {t(locale, "catalogResultsFor")}: «{loadedQuery}»
+                    <p id="query-hint" className="field-hint">
+                      {walkText(locale, "queryHint")}
                     </p>
-                  )}
-                  <ErrorNotice
-                    error={catalogError}
-                    locale={locale}
-                    retry={() => void loadCatalog(catalogQuery)}
-                  />
-                  <div className="catalog-cards">
-                    {catalog.map((place) => card(place))}
-                  </div>
-                  {catalogLoading ? (
-                    <p role="status">{t(locale, "catalogLoading")}</p>
-                  ) : !catalog.length && !catalogError ? (
-                    loadedQuery.trim() ? (
-                      <div className="catalog-empty" role="status">
-                        <p>{t(locale, "catalogNoMatch")}</p>
-                        <p className="field-hint">
-                          {t(locale, "catalogNoMatchHint")}
+                    <VoiceInput
+                      locale={locale}
+                      disabled={searching}
+                      onTranscript={(text) =>
+                        updateForm({
+                          query: [form.query.trim(), text]
+                            .filter(Boolean)
+                            .join(" ")
+                            .slice(0, 2000),
+                        })
+                      }
+                    />
+                    <div className={`${scenarioStyles.action} search-actions`}>
+                      <button
+                        className="primary find-button"
+                        type="submit"
+                        disabled={searching}
+                      >
+                        {searching ? (
+                          <span className="spinner" aria-hidden="true" />
+                        ) : (
+                          <Search size={18} aria-hidden="true" />
+                        )}
+                        {intentText(
+                          locale,
+                          searching ? "scenarioFinding" : "scenarioFind",
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="filter-toggle"
+                        aria-expanded={filtersOpen}
+                        aria-controls="walk-filters"
+                        onClick={() => setFiltersOpen(!filtersOpen)}
+                      >
+                        <SlidersHorizontal size={18} aria-hidden="true" />
+                        {walkText(locale, "filters")}
+                        {filterCount > 0 && (
+                          <span className="filter-count">{filterCount}</span>
+                        )}
+                      </button>
+                      <p id="scenario-keyboard-hint" className="field-hint">
+                        {intentText(locale, "scenarioKeyboard")}
+                      </p>
+                    </div>
+                    <div
+                      id="scenario-status"
+                      className={scenarioStyles.status}
+                      role="status"
+                      aria-live="polite"
+                      aria-atomic="true"
+                      data-state={scenarioState}
+                    >
+                      <p>{scenarioMessage}</p>
+                      {submittedScenario && !scenarioDirty && !formError && (
+                        <p className={scenarioStyles.query}>
+                          «{submittedScenario.query}»
+                          {result &&
+                            ` · ${result.journey_plan?.stages.length ? t(locale, "plannedStops") : intentText(locale, "scenarioCount")}: ${result.recommendations.length}`}
                         </p>
+                      )}
+                      {formError && !origin && form.query.trim() && (
                         <button
-                          className="text-button"
                           type="button"
+                          className="text-button"
                           onClick={() => {
-                            setCatalogQuery("");
-                            void loadCatalog("");
+                            setPicking(true);
+                            setMapEnabled(true);
+                            document
+                              .getElementById("start-heading")
+                              ?.scrollIntoView?.({ block: "nearest" });
                           }}
                         >
-                          {t(locale, "catalogShowAll")}
+                          {t(locale, "pickMap")}
                         </button>
-                      </div>
-                    ) : (
-                      <p>{t(locale, "empty")}</p>
-                    )
-                  ) : null}
-                  {cursor && (
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={catalogLoading}
-                      onClick={() => void loadCatalog(loadedQuery, cursor)}
-                    >
-                      {t(locale, "more")}
-                    </button>
-                  )}
-                </section>
-              </>
-            )}
-            {view === "walk" && (
-              <>
-                <form
-                  id="planner-form"
-                  className="planner panel"
-                  noValidate
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void recommend();
-                  }}
-                >
-                  <div className="section-label">
-                    <span>01</span>
-                    {t(locale, "explore")}
-                  </div>
-                  <h2>{t(locale, "planPrompt")}</h2>
-                  <label className="field">
-                    <span>{t(locale, "query")}</span>
-                    <textarea
-                      name="query"
-                      value={form.query}
-                      required
-                      maxLength={2000}
-                      rows={3}
-                      placeholder={t(locale, "queryPlaceholder")}
-                      aria-describedby="query-hint scenario-keyboard-hint scenario-status"
-                      onChange={(e) => updateForm({ query: e.target.value })}
-                      onKeyDown={(event) => {
-                        if (
-                          event.key === "Enter" &&
-                          !event.shiftKey &&
-                          !event.nativeEvent.isComposing &&
-                          event.keyCode !== 229
-                        ) {
-                          event.preventDefault();
-                          void recommend();
-                        }
-                      }}
-                    />
-                  </label>
-                  <p id="query-hint" className="field-hint">
-                    {walkText(locale, "queryHint")}
-                  </p>
-                  <VoiceInput
-                    locale={locale}
-                    disabled={searching}
-                    onTranscript={(text) =>
-                      updateForm({
-                        query: [form.query.trim(), text]
-                          .filter(Boolean)
-                          .join(" ")
-                          .slice(0, 2000),
-                      })
-                    }
-                  />
-                  <div className={`${scenarioStyles.action} search-actions`}>
-                    <button
-                      className="primary find-button"
-                      type="submit"
-                      disabled={searching}
-                    >
-                      {searching ? (
-                        <span className="spinner" aria-hidden="true" />
-                      ) : (
-                        <Search size={18} aria-hidden="true" />
                       )}
-                      {intentText(
-                        locale,
-                        searching ? "scenarioFinding" : "scenarioFind",
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      className="filter-toggle"
-                      aria-expanded={filtersOpen}
-                      aria-controls="walk-filters"
-                      onClick={() => setFiltersOpen(!filtersOpen)}
-                    >
-                      <SlidersHorizontal size={18} aria-hidden="true" />
-                      {walkText(locale, "filters")}
-                      {filterCount > 0 && (
-                        <span className="filter-count">{filterCount}</span>
-                      )}
-                    </button>
-                    <p id="scenario-keyboard-hint" className="field-hint">
-                      {intentText(locale, "scenarioKeyboard")}
-                    </p>
-                  </div>
-                  <div
-                    id="scenario-status"
-                    className={scenarioStyles.status}
-                    role="status"
-                    aria-live="polite"
-                    aria-atomic="true"
-                    data-state={scenarioState}
-                  >
-                    <p>{scenarioMessage}</p>
-                    {submittedScenario && !scenarioDirty && !formError && (
-                      <p className={scenarioStyles.query}>
-                        «{submittedScenario.query}»
-                        {result &&
-                          ` · ${result.journey_plan?.stages.length ? t(locale, "plannedStops") : intentText(locale, "scenarioCount")}: ${result.recommendations.length}`}
-                      </p>
-                    )}
-                    {formError && !origin && form.query.trim() && (
-                      <button
-                        type="button"
-                        className="text-button"
-                        onClick={() => {
-                          setPicking(true);
-                          setMapEnabled(true);
-                          document
-                            .getElementById("start-heading")
-                            ?.scrollIntoView?.({ block: "nearest" });
-                        }}
-                      >
-                        {t(locale, "pickMap")}
-                      </button>
-                    )}
-                  </div>
-                  {!scenarioDirty && result?.journey_plan && (
-                    <ScenarioPlan plan={result.journey_plan} locale={locale} />
-                  )}
-                  {intentMatches &&
-                    inferredIntent &&
-                    (inferredIntent.available_seconds !== null ||
-                      inferredIntent.constraints.length > 0 ||
-                      inferredIntent.categories.length > 0) && (
-                      <p className="intent-summary" role="status">
-                        <Sparkles size={15} aria-hidden="true" />
-                        {walkText(locale, "inferred")}:{" "}
-                        {[
-                          ...(inferredIntent.available_seconds !== null
-                            ? [
-                                duration(
-                                  inferredIntent.available_seconds,
-                                  locale,
-                                ),
-                              ]
-                            : []),
-                          ...inferredIntent.categories.map((category) =>
-                            label(locale, category),
-                          ),
-                          ...inferredIntent.constraints.map(({ constraint }) =>
-                            label(locale, constraint.key),
-                          ),
-                        ].join(" · ")}
-                        <small className="intent-provider">
-                          {inferredIntent.provider === "rules"
-                            ? intentText(locale, "rules")
-                            : inferredIntent.provider === "openai"
-                              ? "OpenAI"
-                              : "NVIDIA"}
-                        </small>
-                      </p>
-                    )}
-                  {intentUnavailable && !scenarioDirty && (
-                    <p className="field-hint">
-                      {walkText(locale, "intentFallback")}
-                    </p>
-                  )}
-                  <div className="preset-row">
-                    {walkPresets.map(({ label: presetLabel, query }) => (
-                      <button
-                        className="chip"
-                        type="button"
-                        key={presetLabel}
-                        onClick={() => updateForm({ query: t(locale, query) })}
-                      >
-                        <Footprints size={14} aria-hidden="true" />
-                        {t(locale, presetLabel)}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="filter-summary">
-                    {filterCount
-                      ? `${walkText(locale, "filters")}: ${filterCount}`
-                      : walkText(locale, "noFilters")}
-                  </p>
-                  <section
-                    id="walk-filters"
-                    className="walk-filters"
-                    aria-label={walkText(locale, "filters")}
-                    hidden={!filtersOpen}
-                  >
-                    <h3>{walkText(locale, "filters")}</h3>
-                    <p className="field-hint">
-                      {walkText(locale, "filterHint")}
-                    </p>
-                    <div className="time-grid">
-                      <label className="field">
-                        <span>{t(locale, "timeBudget")}</span>
-                        <input
-                          name="minutes"
-                          type="number"
-                          min="1"
-                          max="1440"
-                          step="any"
-                          placeholder={walkText(locale, "noTime")}
-                          value={form.minutes}
-                          onChange={(e) =>
-                            updateForm({ minutes: e.target.value })
-                          }
-                        />
-                      </label>
-                      <label className="field">
-                        <span>{t(locale, "startTime")}</span>
-                        <input
-                          name="start"
-                          type="datetime-local"
-                          required
-                          value={form.start}
-                          onChange={(e) =>
-                            updateForm({ start: e.target.value })
-                          }
-                        />
-                      </label>
                     </div>
-                    <p className="field-hint">{t(locale, "timeBudgetHint")}</p>
-                    <label className="return-control">
-                      <input
-                        type="checkbox"
-                        name="return"
-                        checked={form.returnToOrigin}
-                        onChange={(e) =>
-                          updateForm({ returnToOrigin: e.target.checked })
-                        }
+                    {!scenarioDirty && result?.journey_plan && (
+                      <ScenarioPlan
+                        plan={result.journey_plan}
+                        locale={locale}
                       />
-                      <RotateCcw size={18} aria-hidden="true" />
-                      <span>
-                        <strong>{t(locale, "return")}</strong>
-                        <small>{t(locale, "returnHint")}</small>
-                      </span>
-                    </label>
-                    <details className="constraint-details" open>
-                      <summary>{t(locale, "constraints")}</summary>
-                      <p className="field-hint">
-                        {t(locale, "constraintsHint")}
-                      </p>
-                      <div className="constraint-list preference-list">
-                        {constraintKeys.map((key) => (
-                          <label key={key}>
-                            <input
-                              type="checkbox"
-                              aria-label={t(locale, key)}
-                              checked={Boolean(form.constraints[key])}
-                              disabled={form.constraints[key] === "required"}
-                              onChange={(e) =>
-                                updateForm({
-                                  constraints: {
-                                    ...form.constraints,
-                                    [key]: e.target.checked ? "preferred" : "",
-                                  },
-                                })
-                              }
-                            />
-                            <span>{t(locale, key)}</span>
-                            {form.constraints[key] === "required" && (
-                              <small className="required-badge">
-                                {t(locale, "required")}
-                              </small>
-                            )}
-                          </label>
-                        ))}
-                      </div>
-                      <details className="strict-constraints">
-                        <summary>
-                          {t(locale, "strictConstraints")}
-                          {Object.values(form.constraints).some(
-                            (strength) => strength === "required",
-                          ) && (
-                            <strong className="required-count">
-                              {" "}
-                              ·{" "}
-                              {
-                                Object.values(form.constraints).filter(
-                                  (strength) => strength === "required",
-                                ).length
-                              }
-                            </strong>
-                          )}
-                        </summary>
-                        <p className="field-hint">
-                          {t(locale, "strictConstraintsHint")}
+                    )}
+                    {intentMatches &&
+                      inferredIntent &&
+                      (inferredIntent.available_seconds !== null ||
+                        inferredIntent.constraints.length > 0 ||
+                        inferredIntent.categories.length > 0) && (
+                        <p className="intent-summary" role="status">
+                          <Sparkles size={15} aria-hidden="true" />
+                          {walkText(locale, "inferred")}:{" "}
+                          {[
+                            ...(inferredIntent.available_seconds !== null
+                              ? [
+                                  duration(
+                                    inferredIntent.available_seconds,
+                                    locale,
+                                  ),
+                                ]
+                              : []),
+                            ...inferredIntent.categories.map((category) =>
+                              label(locale, category),
+                            ),
+                            ...inferredIntent.constraints.map(
+                              ({ constraint }) => label(locale, constraint.key),
+                            ),
+                          ].join(" · ")}
+                          <small className="intent-provider">
+                            {inferredIntent.provider === "rules"
+                              ? intentText(locale, "rules")
+                              : inferredIntent.provider === "openai"
+                                ? "OpenAI"
+                                : "NVIDIA"}
+                          </small>
                         </p>
-                        <div className="constraint-list">
+                      )}
+                    {intentUnavailable && !scenarioDirty && (
+                      <p className="field-hint">
+                        {walkText(locale, "intentFallback")}
+                      </p>
+                    )}
+                    <div className="preset-row">
+                      {walkPresets.map(({ label: presetLabel, query }) => (
+                        <button
+                          className="chip"
+                          type="button"
+                          key={presetLabel}
+                          onClick={() =>
+                            updateForm({ query: t(locale, query) })
+                          }
+                        >
+                          <Footprints size={14} aria-hidden="true" />
+                          {t(locale, presetLabel)}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="filter-summary">
+                      {filterCount
+                        ? `${walkText(locale, "filters")}: ${filterCount}`
+                        : walkText(locale, "noFilters")}
+                    </p>
+                    <section
+                      id="walk-filters"
+                      className="walk-filters"
+                      aria-label={walkText(locale, "filters")}
+                      hidden={!filtersOpen}
+                    >
+                      <h3>{walkText(locale, "filters")}</h3>
+                      <p className="field-hint">
+                        {walkText(locale, "filterHint")}
+                      </p>
+                      <div className="time-grid">
+                        <label className="field">
+                          <span>{t(locale, "timeBudget")}</span>
+                          <input
+                            name="minutes"
+                            type="number"
+                            min="1"
+                            max="1440"
+                            step="any"
+                            placeholder={walkText(locale, "noTime")}
+                            value={form.minutes}
+                            onChange={(e) =>
+                              updateForm({ minutes: e.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>{t(locale, "startTime")}</span>
+                          <input
+                            name="start"
+                            type="datetime-local"
+                            required
+                            value={form.start}
+                            onChange={(e) =>
+                              updateForm({ start: e.target.value })
+                            }
+                          />
+                        </label>
+                      </div>
+                      <p className="field-hint">
+                        {t(locale, "timeBudgetHint")}
+                      </p>
+                      <label className="return-control">
+                        <input
+                          type="checkbox"
+                          name="return"
+                          checked={form.returnToOrigin}
+                          onChange={(e) =>
+                            updateForm({ returnToOrigin: e.target.checked })
+                          }
+                        />
+                        <RotateCcw size={18} aria-hidden="true" />
+                        <span>
+                          <strong>{t(locale, "return")}</strong>
+                          <small>{t(locale, "returnHint")}</small>
+                        </span>
+                      </label>
+                      <details className="constraint-details" open>
+                        <summary>{t(locale, "constraints")}</summary>
+                        <p className="field-hint">
+                          {t(locale, "constraintsHint")}
+                        </p>
+                        <div className="constraint-list preference-list">
                           {constraintKeys.map((key) => (
                             <label key={key}>
-                              <span>{t(locale, key)}</span>
-                              <select
+                              <input
+                                type="checkbox"
                                 aria-label={t(locale, key)}
-                                value={form.constraints[key] ?? ""}
+                                checked={Boolean(form.constraints[key])}
+                                disabled={form.constraints[key] === "required"}
                                 onChange={(e) =>
                                   updateForm({
                                     constraints: {
                                       ...form.constraints,
-                                      [key]: e.target.value as
-                                        Constraint["strength"] | "",
+                                      [key]: e.target.checked
+                                        ? "preferred"
+                                        : "",
                                     },
                                   })
                                 }
-                              >
-                                <option value="">
-                                  {t(locale, "indifferent")}
-                                </option>
-                                <option value="preferred">
-                                  {t(locale, "preferred")}
-                                </option>
-                                <option value="required">
+                              />
+                              <span>{t(locale, key)}</span>
+                              {form.constraints[key] === "required" && (
+                                <small className="required-badge">
                                   {t(locale, "required")}
-                                </option>
-                              </select>
+                                </small>
+                              )}
                             </label>
                           ))}
                         </div>
-                      </details>
-                    </details>
-                    <details className="advanced-intent">
-                      <summary>{walkText(locale, "advancedIntent")}</summary>
-                      <IntentReview
-                        query={form.query}
-                        locale={locale}
-                        onApply={(selection) =>
-                          updateForm({
-                            constraints: applyIntentConstraints(
-                              form.constraints,
-                              selection.constraints,
-                            ),
-                            ...(selection.available_seconds !== null
-                              ? {
-                                  minutes: String(
-                                    selection.available_seconds / 60,
-                                  ),
+                        <details className="strict-constraints">
+                          <summary>
+                            {t(locale, "strictConstraints")}
+                            {Object.values(form.constraints).some(
+                              (strength) => strength === "required",
+                            ) && (
+                              <strong className="required-count">
+                                {" "}
+                                ·{" "}
+                                {
+                                  Object.values(form.constraints).filter(
+                                    (strength) => strength === "required",
+                                  ).length
                                 }
-                              : {}),
-                          })
-                        }
-                      />
-                    </details>
-                    <div className="filter-footer">
-                      <button
-                        type="button"
-                        className="text-button"
-                        onClick={() =>
-                          updateForm({
-                            minutes: "",
-                            start: initialStart,
-                            returnToOrigin: false,
-                            constraints: {},
-                          })
-                        }
-                      >
-                        {walkText(locale, "clearFilters")}
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => setFiltersOpen(false)}
-                      >
-                        {walkText(locale, "done")}
-                      </button>
-                    </div>
-                  </section>
-                  {formError && (
-                    <p className="notice error" role="alert">
-                      {t(locale, "invalidForm")}
-                    </p>
-                  )}
-                  <p className="privacy-note">
-                    {walkText(locale, "aiPrivacy")}
-                  </p>
-                </form>
-
-                <section
-                  className="results"
-                  aria-labelledby="results-heading"
-                  aria-busy={searching}
-                >
-                  <div className="results-heading">
-                    <div>
-                      <div className="section-label">
-                        <span>02</span>
-                        {t(
-                          locale,
-                          result?.journey_plan?.stages.length
-                            ? "plannedStops"
-                            : "recommendations",
-                        )}
-                      </div>
-                      <h2
-                        id="results-heading"
-                        ref={resultHeading}
-                        tabIndex={-1}
-                      >
-                        {t(
-                          locale,
-                          result?.journey_plan?.stages.length
-                            ? "plannedStops"
-                            : "recommendations",
-                        )}
-                      </h2>
-                    </div>
-                    {result && (
-                      <span className="result-count">
-                        {result.recommendations.length
-                          .toString()
-                          .padStart(2, "0")}
-                      </span>
-                    )}
-                  </div>
-                  <ErrorNotice
-                    error={resultError}
-                    locale={locale}
-                    retry={() => void recommend()}
-                  />
-                  {searching && (
-                    <div className="loading-state" role="status">
-                      <span className="spinner" />
-                      {t(locale, "finding")}
-                    </div>
-                  )}
-                  {!result && !searching && !resultError && (
-                    <div className="empty-results">
-                      <div className="empty-icon">
-                        <Compass size={32} strokeWidth={1.3} />
-                      </div>
-                      <h3>{t(locale, "readyTitle")}</h3>
-                      <p>{t(locale, "readyText")}</p>
-                      <span className="empty-decoration" aria-hidden="true">
-                        ↗
-                      </span>
-                    </div>
-                  )}
-                  {result && (
-                    <>
-                      {(result.status === "matched" ||
-                        result.status === "partial") && (
-                        <>
-                          <p className="result-status" role="status">
-                            <ShieldCheck size={17} />
-                            {t(locale, result.status)}
-                          </p>
-                          {!result.journey_plan?.stages.length && (
-                            <p className="field-hint alternatives">
-                              {t(locale, "alternatives")}
-                            </p>
-                          )}
-                          {building && (
-                            <p className="loading-state" role="status">
-                              <span className="spinner" />
-                              {mapText(locale, "connectingStops")}
-                            </p>
-                          )}
-                          {itinerary?.route?.geometry && (
-                            <p className="result-status" role="status">
-                              <Footprints size={18} aria-hidden="true" />
-                              {mapText(locale, "connectedStops").replace(
-                                "{count}",
-                                String(itinerary.stops.length),
-                              )}
-                            </p>
-                          )}
-                          {itineraryError && (
-                            <p className="notice amber" role="status">
-                              {mapText(locale, "connectionFailed")}
-                            </p>
-                          )}
-                          {itinerary?.route && !itinerary.route.geometry && (
-                            <p className="notice amber" role="status">
-                              {t(locale, "approximateHint")}
-                            </p>
-                          )}
-                          {!result.journey_plan?.stages.length &&
-                            result.recommendations.length < 3 && (
-                              <p className="field-hint">
-                                {mapText(locale, "fewerStops")}
-                              </p>
+                              </strong>
                             )}
-                        </>
-                      )}
-                      {result.status === "no_match" && (
-                        <div className="empty-results" role="status">
-                          <h3>{t(locale, "noMatch")}</h3>
-                          <p>{t(locale, "noMatchHint")}</p>
-                        </div>
-                      )}
-                      {result.status === "needs_clarification" && (
-                        <form
-                          className="clarification panel"
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            const query = `${form.query}\n${answer}`;
-                            setForm((previous) => ({ ...previous, query }));
-                            void recommend(query);
-                          }}
-                        >
-                          <h3>{t(locale, "clarify")}</h3>
-                          {result.clarification_questions.map((q) => (
-                            <p key={q}>{q}</p>
-                          ))}
-                          <label className="field">
-                            <span>{t(locale, "answer")}</span>
-                            <input
-                              required
-                              maxLength={Math.max(0, 1999 - form.query.length)}
-                              value={answer}
-                              onChange={(e) => setAnswer(e.target.value)}
-                            />
-                          </label>
-                          <button className="primary" type="submit">
-                            {t(locale, "sendAnswer")}
-                            <ArrowRight size={16} />
-                          </button>
-                        </form>
-                      )}
-                      <div className="result-cards">
-                        {result.recommendations.map((recommendation) => {
-                          const place = result.places.find(
-                            (p) => p.id === recommendation.place_id,
-                          );
-                          return place && card(place, recommendation);
-                        })}
-                      </div>
-                      <Warnings
-                        warnings={result.warnings}
-                        locale={locale}
-                        expanded={result.status === "no_match"}
-                      />
-                      <div className="feedback">
-                        <p>
-                          {feedbackState === "sent"
-                            ? t(locale, "thanks")
-                            : t(locale, "feedback")}
-                        </p>
-                        {feedbackState !== "sent" && (
-                          <div>
-                            <button
-                              type="button"
-                              className="chip"
-                              disabled={feedbackState === "loading"}
-                              onClick={() => void feedback("helpful")}
-                            >
-                              {t(locale, "helpful")}
-                            </button>
-                            <button
-                              type="button"
-                              className="chip"
-                              disabled={feedbackState === "loading"}
-                              onClick={() => void feedback("not_helpful")}
-                            >
-                              {t(locale, "notHelpful")}
-                            </button>
+                          </summary>
+                          <p className="field-hint">
+                            {t(locale, "strictConstraintsHint")}
+                          </p>
+                          <div className="constraint-list">
+                            {constraintKeys.map((key) => (
+                              <label key={key}>
+                                <span>{t(locale, key)}</span>
+                                <select
+                                  aria-label={t(locale, key)}
+                                  value={form.constraints[key] ?? ""}
+                                  onChange={(e) =>
+                                    updateForm({
+                                      constraints: {
+                                        ...form.constraints,
+                                        [key]: e.target.value as
+                                          Constraint["strength"] | "",
+                                      },
+                                    })
+                                  }
+                                >
+                                  <option value="">
+                                    {t(locale, "indifferent")}
+                                  </option>
+                                  <option value="preferred">
+                                    {t(locale, "preferred")}
+                                  </option>
+                                  <option value="required">
+                                    {t(locale, "required")}
+                                  </option>
+                                </select>
+                              </label>
+                            ))}
                           </div>
-                        )}
-                        <small>{t(locale, "feedbackHint")}</small>
-                        <ErrorNotice error={feedbackError} locale={locale} />
-                      </div>
-                    </>
-                  )}
-                </section>
-
-                <section
-                  className="journey panel"
-                  aria-labelledby="plan-heading"
-                >
-                  <div className="section-label">
-                    <span>03</span>
-                    {t(locale, "walking")}
-                  </div>
-                  <h2 id="plan-heading" ref={planHeading} tabIndex={-1}>
-                    {t(locale, "plan")}
-                    <span className="count">{selected.length}/6</span>
-                  </h2>
-                  <p className="field-hint">{t(locale, "planHint")}</p>
-                  {selected.length === 0 ? (
-                    <div className="empty-plan">
-                      <Plus size={20} />
-                      <p>{t(locale, "emptyPlan")}</p>
-                    </div>
-                  ) : (
-                    <>
-                      <ol
-                        className="selected-stops"
-                        data-testid="selected-stops"
-                      >
-                        {selected.map((place, index) => (
-                          <li key={place.id}>
-                            <span className="stop-number">{index + 1}</span>
-                            <strong>{place.name}</strong>
-                            <div className="stop-actions">
-                              <button
-                                type="button"
-                                className="icon-button"
-                                disabled={index === 0}
-                                aria-label={`${t(locale, "moveUp")}: ${place.name}`}
-                                onClick={() => moveStop(index, -1)}
-                              >
-                                <ArrowUp size={16} />
-                              </button>
-                              <button
-                                type="button"
-                                className="icon-button"
-                                disabled={index === selected.length - 1}
-                                aria-label={`${t(locale, "moveDown")}: ${place.name}`}
-                                onClick={() => moveStop(index, 1)}
-                              >
-                                <ArrowDown size={16} />
-                              </button>
-                              <button
-                                type="button"
-                                className="icon-button"
-                                aria-label={`${t(locale, "remove")}: ${place.name}`}
-                                onClick={() => {
-                                  updateStops(
-                                    selected.filter((p) => p.id !== place.id),
-                                  );
-                                }}
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                          </li>
-                        ))}
-                      </ol>
-                      <p className="return-summary">
-                        <RotateCcw size={15} />
-                        {t(
-                          locale,
-                          (itinerary?.request.return_to_origin ??
-                            (form.returnToOrigin ||
-                              textRequestsReturn(form.query)))
-                            ? "withReturn"
-                            : "oneWay",
-                        )}
-                      </p>
-                      {building ? (
-                        <p className="loading-state" role="status">
-                          <span className="spinner" />
-                          {mapText(locale, "connectingStops")}
-                        </p>
-                      ) : !itinerary?.route?.geometry ? (
+                        </details>
+                      </details>
+                      <details className="advanced-intent">
+                        <summary>{walkText(locale, "advancedIntent")}</summary>
+                        <IntentReview
+                          query={form.query}
+                          locale={locale}
+                          onApply={(selection) =>
+                            updateForm({
+                              constraints: applyIntentConstraints(
+                                form.constraints,
+                                selection.constraints,
+                              ),
+                              ...(selection.available_seconds !== null
+                                ? {
+                                    minutes: String(
+                                      selection.available_seconds / 60,
+                                    ),
+                                  }
+                                : {}),
+                            })
+                          }
+                        />
+                      </details>
+                      <div className="filter-footer">
                         <button
                           type="button"
-                          className="primary"
-                          onClick={() => void buildItinerary()}
+                          className="text-button"
+                          onClick={() =>
+                            updateForm({
+                              minutes: "",
+                              start: initialStart,
+                              returnToOrigin: false,
+                              constraints: {},
+                            })
+                          }
                         >
-                          {t(locale, "buildPlan")}
-                          <ArrowRight size={17} />
+                          {walkText(locale, "clearFilters")}
                         </button>
-                      ) : null}
-                      {!itinerary && !building && (
-                        <p className="field-hint">
-                          {origin
-                            ? t(locale, "needsRebuild")
-                            : mapText(locale, "journeyNeedsOrigin")}
-                        </p>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => setFiltersOpen(false)}
+                        >
+                          {walkText(locale, "done")}
+                        </button>
+                      </div>
+                    </section>
+                    {formError && (
+                      <p className="notice error" role="alert">
+                        {t(locale, "invalidForm")}
+                      </p>
+                    )}
+                    <p className="privacy-note">
+                      {walkText(locale, "aiPrivacy")}
+                    </p>
+                  </form>
+
+                  <section
+                    className="results"
+                    aria-labelledby="results-heading"
+                    aria-busy={searching}
+                  >
+                    <div className="results-heading">
+                      <div>
+                        <div className="section-label">
+                          <span>02</span>
+                          {t(
+                            locale,
+                            result?.journey_plan?.stages.length
+                              ? "plannedStops"
+                              : "recommendations",
+                          )}
+                        </div>
+                        <h2
+                          id="results-heading"
+                          ref={resultHeading}
+                          tabIndex={-1}
+                        >
+                          {t(
+                            locale,
+                            result?.journey_plan?.stages.length
+                              ? "plannedStops"
+                              : "recommendations",
+                          )}
+                        </h2>
+                      </div>
+                      {result && (
+                        <span className="result-count">
+                          {result.recommendations.length
+                            .toString()
+                            .padStart(2, "0")}
+                        </span>
                       )}
-                    </>
-                  )}
-                  <ErrorNotice error={itineraryError} locale={locale} />
-                  {itinerary && (
-                    <div className="itinerary-result" aria-live="polite">
-                      {itinerary.status === "no_match" ||
-                      itinerary.status === "needs_clarification" ? (
-                        <>
-                          <h3>
-                            {t(
-                              locale,
-                              itinerary.status === "no_match"
-                                ? "noMatch"
-                                : "clarify",
+                    </div>
+                    <ErrorNotice
+                      error={resultError}
+                      locale={locale}
+                      retry={() => void recommend()}
+                    />
+                    {searching && (
+                      <div className="loading-state" role="status">
+                        <span className="spinner" />
+                        {t(locale, "finding")}
+                      </div>
+                    )}
+                    {!result && !searching && !resultError && (
+                      <div className="empty-results">
+                        <div className="empty-icon">
+                          <Compass size={32} strokeWidth={1.3} />
+                        </div>
+                        <h3>{t(locale, "readyTitle")}</h3>
+                        <p>{t(locale, "readyText")}</p>
+                        <span className="empty-decoration" aria-hidden="true">
+                          ↗
+                        </span>
+                      </div>
+                    )}
+                    {result && (
+                      <>
+                        {(result.status === "matched" ||
+                          result.status === "partial") && (
+                          <>
+                            <p className="result-status" role="status">
+                              <ShieldCheck size={17} />
+                              {t(locale, result.status)}
+                            </p>
+                            {!result.journey_plan?.stages.length && (
+                              <p className="field-hint alternatives">
+                                {t(locale, "alternatives")}
+                              </p>
                             )}
-                          </h3>
-                          <p>{t(locale, "keptSelection")}</p>
-                          {itinerary.clarification_questions.map((q) => (
-                            <p key={q}>{q}</p>
-                          ))}
-                        </>
-                      ) : (
-                        <>
-                          <p className="result-status" role="status">
-                            <ShieldCheck size={17} />
-                            {t(
-                              locale,
-                              itinerary.status === "partial"
-                                ? "partial"
-                                : "matched",
+                            {building && (
+                              <p className="loading-state" role="status">
+                                <span className="spinner" />
+                                {mapText(locale, "connectingStops")}
+                              </p>
                             )}
-                          </p>
-                          <div className="journey-total">
-                            <span>{t(locale, "total")}</span>
-                            <strong>
-                              {duration(
-                                itinerary.total_duration_seconds,
-                                locale,
-                              )}
-                            </strong>
-                          </div>
-                          <TimeBudgetNote
-                            totalSeconds={itinerary.total_duration_seconds}
-                            budgetSeconds={itinerary.request.available_seconds}
-                            locale={locale}
-                          />
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={showRouteOverview}
-                          >
-                            <MapPin size={18} aria-hidden="true" />
-                            {mapText(locale, "overview")}
-                          </button>
-                          <p className="field-hint">
-                            {mapText(locale, "routePersists")}
-                          </p>
-                          <p>
-                            {t(
-                              locale,
-                              itinerary.request.return_to_origin
-                                ? "withReturn"
-                                : "oneWay",
-                            )}
-                          </p>
-                          <ol className="itinerary-visits">
-                            {itinerary.stops.map((stop, index) => {
-                              const place = itinerary.places.find(
-                                (p) => p.id === stop.place_id,
-                              );
-                              const description =
-                                place && sourceDescription(place, locale);
-                              const compromises =
-                                stop.constraint_evaluations.filter(
-                                  (evaluation) =>
-                                    evaluation.strength === "preferred" &&
-                                    evaluation.outcome !== "satisfied",
-                                );
-                              return (
-                                <li key={stop.place_id}>
-                                  <small>{stopTitle(locale, index)}</small>
-                                  <b>{place?.name}</b>
-                                  {description && <p>{description.text}</p>}
-                                  <span>
-                                    {t(locale, "visit")}{" "}
-                                    {duration(
-                                      stop.visit_duration_seconds,
-                                      locale,
-                                    )}
-                                  </span>
-                                  <p>
-                                    <small>{t(locale, "suggestion")}</small>
-                                    {stop.suggested_activity}
-                                  </p>
-                                  {compromises.map((evaluation) => (
-                                    <div
-                                      className="evaluation"
-                                      key={evaluation.key}
-                                    >
-                                      <strong>
-                                        {label(locale, evaluation.key)}
-                                      </strong>
-                                      <span>
-                                        {t(locale, evaluation.strength)} ·{" "}
-                                        {t(locale, evaluation.outcome)}
-                                      </span>
-                                      <p>{evaluation.explanation}</p>
-                                    </div>
-                                  ))}
-                                  {place && (
-                                    <button
-                                      type="button"
-                                      className="text-button"
-                                      onClick={() =>
-                                        void showDetails(stop.place_id)
-                                      }
-                                    >
-                                      {t(locale, "details")}
-                                    </button>
-                                  )}
-                                </li>
-                              );
-                            })}
-                          </ol>
-                          {itinerary.route && (
-                            <>
-                              <p>
-                                {t(locale, "travel")}:{" "}
-                                {duration(
-                                  itinerary.route.duration_seconds,
-                                  locale,
+                            {itinerary?.route?.geometry && (
+                              <p className="result-status" role="status">
+                                <Footprints size={18} aria-hidden="true" />
+                                {mapText(locale, "connectedStops").replace(
+                                  "{count}",
+                                  String(itinerary.stops.length),
                                 )}
                               </p>
-                              {(itinerary.route.method === "approximate" ||
-                                !itinerary.route.geometry) && (
-                                <p className="notice amber">
-                                  {t(locale, "approximateHint")}
+                            )}
+                            {itineraryError && (
+                              <p className="notice amber" role="status">
+                                {mapText(locale, "connectionFailed")}
+                              </p>
+                            )}
+                            {itinerary?.route && !itinerary.route.geometry && (
+                              <p className="notice amber" role="status">
+                                {t(locale, "approximateHint")}
+                              </p>
+                            )}
+                            {!result.journey_plan?.stages.length &&
+                              result.recommendations.length < 3 && (
+                                <p className="field-hint">
+                                  {mapText(locale, "fewerStops")}
                                 </p>
                               )}
-                              <RouteNotes
-                                route={itinerary.route}
-                                locale={locale}
+                          </>
+                        )}
+                        {result.status === "no_match" && (
+                          <div className="empty-results" role="status">
+                            <h3>{t(locale, "noMatch")}</h3>
+                            <p>{t(locale, "noMatchHint")}</p>
+                          </div>
+                        )}
+                        {result.status === "needs_clarification" && (
+                          <form
+                            className="clarification panel"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              const query = `${form.query}\n${answer}`;
+                              setForm((previous) => ({ ...previous, query }));
+                              void recommend(query);
+                            }}
+                          >
+                            <h3>{t(locale, "clarify")}</h3>
+                            {result.clarification_questions.map((q) => (
+                              <p key={q}>{q}</p>
+                            ))}
+                            <label className="field">
+                              <span>{t(locale, "answer")}</span>
+                              <input
+                                required
+                                maxLength={Math.max(
+                                  0,
+                                  1999 - form.query.length,
+                                )}
+                                value={answer}
+                                onChange={(e) => setAnswer(e.target.value)}
                               />
-                            </>
-                          )}
-                        </>
-                      )}
-                      <Warnings warnings={itinerary.warnings} locale={locale} />
-                    </div>
-                  )}
-                </section>
-
-                <Link href="/" className="text-button">
-                  {t(locale, "browse")}
-                </Link>
-              </>
-            )}
-            {view === "saved" && (
-              <section className="saved-page">
-                <>
-                  <p>{t(locale, "savedHint")}</p>
-                  {storageError && (
-                    <p className="notice amber" role="status">
-                      {t(locale, "storageError")}
-                    </p>
-                  )}
-                  {favorites.length === 0 ? (
-                    <p>{t(locale, "empty")}</p>
-                  ) : (
-                    <>
-                      <ul className="favorites">
-                        {favorites.map((place) => (
-                          <li key={place.id}>
-                            <button
-                              type="button"
-                              className="text-button"
-                              onClick={() => void showDetails(place.id)}
-                            >
-                              {place.name}
+                            </label>
+                            <button className="primary" type="submit">
+                              {t(locale, "sendAnswer")}
                               <ArrowRight size={16} />
                             </button>
-                            {place.is_synthetic && (
-                              <span className="badge amber">
-                                {t(locale, "synthetic")}
-                              </span>
-                            )}
+                          </form>
+                        )}
+                        <div className="result-cards">
+                          {result.recommendations.map((recommendation) => {
+                            const place = result.places.find(
+                              (p) => p.id === recommendation.place_id,
+                            );
+                            return place && card(place, recommendation);
+                          })}
+                        </div>
+                        <Warnings
+                          warnings={result.warnings}
+                          locale={locale}
+                          expanded={result.status === "no_match"}
+                        />
+                        <div className="feedback">
+                          <p>
+                            {feedbackState === "sent"
+                              ? t(locale, "thanks")
+                              : t(locale, "feedback")}
+                          </p>
+                          {feedbackState !== "sent" && (
+                            <div>
+                              <button
+                                type="button"
+                                className="chip"
+                                disabled={feedbackState === "loading"}
+                                onClick={() => void feedback("helpful")}
+                              >
+                                {t(locale, "helpful")}
+                              </button>
+                              <button
+                                type="button"
+                                className="chip"
+                                disabled={feedbackState === "loading"}
+                                onClick={() => void feedback("not_helpful")}
+                              >
+                                {t(locale, "notHelpful")}
+                              </button>
+                            </div>
+                          )}
+                          <small>{t(locale, "feedbackHint")}</small>
+                          <ErrorNotice error={feedbackError} locale={locale} />
+                        </div>
+                      </>
+                    )}
+                  </section>
+
+                  <section
+                    className="journey panel"
+                    aria-labelledby="plan-heading"
+                  >
+                    <div className="section-label">
+                      <span>03</span>
+                      {t(locale, "walking")}
+                    </div>
+                    <h2 id="plan-heading" ref={planHeading} tabIndex={-1}>
+                      {t(locale, "plan")}
+                      <span className="count">{selected.length}/6</span>
+                    </h2>
+                    <p className="field-hint">{t(locale, "planHint")}</p>
+                    {selected.length === 0 ? (
+                      <div className="empty-plan">
+                        <Plus size={20} />
+                        <p>{t(locale, "emptyPlan")}</p>
+                      </div>
+                    ) : (
+                      <>
+                        <ol
+                          className="selected-stops"
+                          data-testid="selected-stops"
+                        >
+                          {selected.map((place, index) => (
+                            <li key={place.id}>
+                              <span className="stop-number">{index + 1}</span>
+                              <strong>{place.name}</strong>
+                              <div className="stop-actions">
+                                <button
+                                  type="button"
+                                  className="icon-button"
+                                  disabled={index === 0}
+                                  aria-label={`${t(locale, "moveUp")}: ${place.name}`}
+                                  onClick={() => moveStop(index, -1)}
+                                >
+                                  <ArrowUp size={16} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="icon-button"
+                                  disabled={index === selected.length - 1}
+                                  aria-label={`${t(locale, "moveDown")}: ${place.name}`}
+                                  onClick={() => moveStop(index, 1)}
+                                >
+                                  <ArrowDown size={16} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="icon-button"
+                                  aria-label={`${t(locale, "remove")}: ${place.name}`}
+                                  onClick={() => {
+                                    updateStops(
+                                      selected.filter((p) => p.id !== place.id),
+                                    );
+                                  }}
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
+                        <p className="return-summary">
+                          <RotateCcw size={15} />
+                          {t(
+                            locale,
+                            (itinerary?.request.return_to_origin ??
+                              (form.returnToOrigin ||
+                                textRequestsReturn(form.query)))
+                              ? "withReturn"
+                              : "oneWay",
+                          )}
+                        </p>
+                        {building ? (
+                          <p className="loading-state" role="status">
+                            <span className="spinner" />
+                            {mapText(locale, "connectingStops")}
+                          </p>
+                        ) : !itinerary?.route?.geometry ? (
+                          <button
+                            type="button"
+                            className="primary"
+                            onClick={() => void buildItinerary()}
+                          >
+                            {t(locale, "buildPlan")}
+                            <ArrowRight size={17} />
+                          </button>
+                        ) : null}
+                        {!itinerary && !building && (
+                          <p className="field-hint">
+                            {origin
+                              ? t(locale, "needsRebuild")
+                              : mapText(locale, "journeyNeedsOrigin")}
+                          </p>
+                        )}
+                      </>
+                    )}
+                    <ErrorNotice error={itineraryError} locale={locale} />
+                    {itinerary && (
+                      <div className="itinerary-result" aria-live="polite">
+                        {itinerary.status === "no_match" ||
+                        itinerary.status === "needs_clarification" ? (
+                          <>
+                            <h3>
+                              {t(
+                                locale,
+                                itinerary.status === "no_match"
+                                  ? "noMatch"
+                                  : "clarify",
+                              )}
+                            </h3>
+                            <p>{t(locale, "keptSelection")}</p>
+                            {itinerary.clarification_questions.map((q) => (
+                              <p key={q}>{q}</p>
+                            ))}
+                          </>
+                        ) : (
+                          <>
+                            <p className="result-status" role="status">
+                              <ShieldCheck size={17} />
+                              {t(
+                                locale,
+                                itinerary.status === "partial"
+                                  ? "partial"
+                                  : "matched",
+                              )}
+                            </p>
+                            <div className="journey-total">
+                              <span>{t(locale, "total")}</span>
+                              <strong>
+                                {duration(
+                                  itinerary.total_duration_seconds,
+                                  locale,
+                                )}
+                              </strong>
+                            </div>
+                            <TimeBudgetNote
+                              totalSeconds={itinerary.total_duration_seconds}
+                              budgetSeconds={
+                                itinerary.request.available_seconds
+                              }
+                              locale={locale}
+                            />
                             <button
                               type="button"
-                              className="icon-button"
-                              onClick={() => toggleFavorite(place)}
-                              aria-label={`${t(locale, "unsave")}: ${place.name}`}
+                              className="secondary"
+                              onClick={showRouteOverview}
                             >
-                              <Trash2 size={17} />
+                              <MapPin size={18} aria-hidden="true" />
+                              {mapText(locale, "overview")}
                             </button>
-                          </li>
-                        ))}
-                      </ul>
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => saveFavorites([])}
-                      >
-                        {t(locale, "clearSaved")}
-                      </button>
-                    </>
-                  )}
-                </>
-              </section>
-            )}
-            {view === "about" && (
-              <section className="about-page">
-                <div className="privacy-panel">
-                  <h2>{t(locale, "privacyTitle")}</h2>
-                  <p>{t(locale, "privacyDetail")}</p>
-                  <p>{t(locale, "mapDataNotice")}</p>
-                </div>
-                <>
-                  <ErrorNotice
-                    error={dataError}
-                    locale={locale}
-                    retry={() => void showData()}
-                  />
-                  {!data && !dataError && (
-                    <p role="status">{t(locale, "loading")}</p>
-                  )}
-                  {data && (
-                    <>
-                      {showFixture && (
-                        <p className="notice amber">
-                          {t(locale, "fixtureBanner")}
-                        </p>
-                      )}
-                      <div className="data-total">
-                        <strong>{data.total_places}</strong>
-                        <span>{t(locale, "placesCount")}</span>
-                      </div>
-                      <p className="small">
-                        {t(locale, "checked")}:{" "}
-                        {dateTime(data.checked_at, locale)}
-                      </p>
-                      <p className="field-hint">{t(locale, "freshness")}</p>
-                      {data.sources.some((source) =>
-                        isOsmSourceUrl(source.source_url),
-                      ) && <OsmAttribution locale={locale} />}
-                      {!data.sources.length && <p>{t(locale, "noSources")}</p>}
-                      {data.sources.map((source, index) => (
-                        <article
-                          className="source-status"
-                          key={`${source.source_name}-${index}`}
-                        >
-                          <h3>
-                            {safeUrl(source.source_url) ? (
-                              <a
-                                href={safeUrl(source.source_url)}
-                                rel="noopener noreferrer"
-                                target="_blank"
-                              >
-                                {source.source_name}
-                              </a>
-                            ) : (
-                              source.source_name
-                            )}
-                          </h3>
-                          <span className="badge">
-                            {t(locale, source.status)}
-                          </span>
-                          <p>
-                            {t(locale, "placesCount")}: {source.place_count}
-                          </p>
-                          {source.last_success_at && (
-                            <p className="small">
-                              {t(locale, "retrieved")}:{" "}
-                              {dateTime(source.last_success_at, locale)}
+                            <p className="field-hint">
+                              {mapText(locale, "routePersists")}
                             </p>
-                          )}
-                          <Warnings
-                            warnings={source.warnings}
-                            locale={locale}
-                          />
-                        </article>
-                      ))}
-                    </>
-                  )}
+                            <p>
+                              {t(
+                                locale,
+                                itinerary.request.return_to_origin
+                                  ? "withReturn"
+                                  : "oneWay",
+                              )}
+                            </p>
+                            <ol className="itinerary-visits">
+                              {itinerary.stops.map((stop, index) => {
+                                const place = itinerary.places.find(
+                                  (p) => p.id === stop.place_id,
+                                );
+                                const description =
+                                  place && sourceDescription(place, locale);
+                                const compromises =
+                                  stop.constraint_evaluations.filter(
+                                    (evaluation) =>
+                                      evaluation.strength === "preferred" &&
+                                      evaluation.outcome !== "satisfied",
+                                  );
+                                return (
+                                  <li key={stop.place_id}>
+                                    <small>{stopTitle(locale, index)}</small>
+                                    <b>{place?.name}</b>
+                                    {description && <p>{description.text}</p>}
+                                    <span>
+                                      {t(locale, "visit")}{" "}
+                                      {duration(
+                                        stop.visit_duration_seconds,
+                                        locale,
+                                      )}
+                                    </span>
+                                    <p>
+                                      <small>{t(locale, "suggestion")}</small>
+                                      {stop.suggested_activity}
+                                    </p>
+                                    {compromises.map((evaluation) => (
+                                      <div
+                                        className="evaluation"
+                                        key={evaluation.key}
+                                      >
+                                        <strong>
+                                          {label(locale, evaluation.key)}
+                                        </strong>
+                                        <span>
+                                          {t(locale, evaluation.strength)} ·{" "}
+                                          {t(locale, evaluation.outcome)}
+                                        </span>
+                                        <p>{evaluation.explanation}</p>
+                                      </div>
+                                    ))}
+                                    {place && (
+                                      <button
+                                        type="button"
+                                        className="text-button"
+                                        onClick={() =>
+                                          void showDetails(stop.place_id)
+                                        }
+                                      >
+                                        {t(locale, "details")}
+                                      </button>
+                                    )}
+                                  </li>
+                                );
+                              })}
+                            </ol>
+                            {itinerary.route && (
+                              <>
+                                <p>
+                                  {t(locale, "travel")}:{" "}
+                                  {duration(
+                                    itinerary.route.duration_seconds,
+                                    locale,
+                                  )}
+                                </p>
+                                {(itinerary.route.method === "approximate" ||
+                                  !itinerary.route.geometry) && (
+                                  <p className="notice amber">
+                                    {t(locale, "approximateHint")}
+                                  </p>
+                                )}
+                                <RouteNotes
+                                  route={itinerary.route}
+                                  locale={locale}
+                                />
+                              </>
+                            )}
+                          </>
+                        )}
+                        <Warnings
+                          warnings={itinerary.warnings}
+                          locale={locale}
+                        />
+                      </div>
+                    )}
+                  </section>
+
+                  <Link href="/" className="text-button">
+                    {t(locale, "browse")}
+                  </Link>
                 </>
-              </section>
-            )}
-            {view !== "walk" && selected.length > 0 && (
-              <Link
-                href="/walk"
-                className="selection-shortcut primary"
-                scroll={false}
-              >
-                <Footprints size={18} />
-                {t(locale, "plan")} · {selected.length}/6
-                <ArrowRight size={18} />
-              </Link>
-            )}
+              )}
+              {view === "saved" && (
+                <section className="saved-page">
+                  <>
+                    <p>{t(locale, "savedHint")}</p>
+                    {storageError && (
+                      <p className="notice amber" role="status">
+                        {t(locale, "storageError")}
+                      </p>
+                    )}
+                    {favorites.length === 0 ? (
+                      <p>{t(locale, "empty")}</p>
+                    ) : (
+                      <>
+                        <ul className="favorites">
+                          {favorites.map((place) => (
+                            <li key={place.id}>
+                              <button
+                                type="button"
+                                className="text-button"
+                                onClick={() => void showDetails(place.id)}
+                              >
+                                {place.name}
+                                <ArrowRight size={16} />
+                              </button>
+                              {place.is_synthetic && (
+                                <span className="badge amber">
+                                  {t(locale, "synthetic")}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                className="icon-button"
+                                onClick={() => toggleFavorite(place)}
+                                aria-label={`${t(locale, "unsave")}: ${place.name}`}
+                              >
+                                <Trash2 size={17} />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => saveFavorites([])}
+                        >
+                          {t(locale, "clearSaved")}
+                        </button>
+                      </>
+                    )}
+                  </>
+                </section>
+              )}
+              {view === "about" && (
+                <section className="about-page">
+                  <div className="privacy-panel">
+                    <h2>{t(locale, "privacyTitle")}</h2>
+                    <p>{t(locale, "privacyDetail")}</p>
+                    <p>{t(locale, "mapDataNotice")}</p>
+                  </div>
+                  <>
+                    <ErrorNotice
+                      error={dataError}
+                      locale={locale}
+                      retry={() => void showData()}
+                    />
+                    {!data && !dataError && (
+                      <p role="status">{t(locale, "loading")}</p>
+                    )}
+                    {data && (
+                      <>
+                        {showFixture && (
+                          <p className="notice amber">
+                            {t(locale, "fixtureBanner")}
+                          </p>
+                        )}
+                        <div className="data-total">
+                          <strong>{data.total_places}</strong>
+                          <span>{t(locale, "placesCount")}</span>
+                        </div>
+                        <p className="small">
+                          {t(locale, "checked")}:{" "}
+                          {dateTime(data.checked_at, locale)}
+                        </p>
+                        <p className="field-hint">{t(locale, "freshness")}</p>
+                        {data.sources.some((source) =>
+                          isOsmSourceUrl(source.source_url),
+                        ) && <OsmAttribution locale={locale} />}
+                        {!data.sources.length && (
+                          <p>{t(locale, "noSources")}</p>
+                        )}
+                        {data.sources.map((source, index) => (
+                          <article
+                            className="source-status"
+                            key={`${source.source_name}-${index}`}
+                          >
+                            <h3>
+                              {safeUrl(source.source_url) ? (
+                                <a
+                                  href={safeUrl(source.source_url)}
+                                  rel="noopener noreferrer"
+                                  target="_blank"
+                                >
+                                  {source.source_name}
+                                </a>
+                              ) : (
+                                source.source_name
+                              )}
+                            </h3>
+                            <span className="badge">
+                              {t(locale, source.status)}
+                            </span>
+                            <p>
+                              {t(locale, "placesCount")}: {source.place_count}
+                            </p>
+                            {source.last_success_at && (
+                              <p className="small">
+                                {t(locale, "retrieved")}:{" "}
+                                {dateTime(source.last_success_at, locale)}
+                              </p>
+                            )}
+                            <Warnings
+                              warnings={source.warnings}
+                              locale={locale}
+                            />
+                          </article>
+                        ))}
+                      </>
+                    )}
+                  </>
+                </section>
+              )}
+              {view !== "walk" && selected.length > 0 && (
+                <Link
+                  href="/walk"
+                  className="selection-shortcut primary"
+                  scroll={false}
+                >
+                  <Footprints size={18} />
+                  {t(locale, "plan")} · {selected.length}/6
+                  <ArrowRight size={18} />
+                </Link>
+              )}
+            </div>
           </div>
         </main>
         <div className="app-map-stage">
@@ -2159,6 +2282,7 @@ export default function CompassApp({
             route={displayedRoute}
             routeStopIds={routeStopIds}
             overviewRequest={overviewRequest}
+            bottomInset={isMobile ? sheetHeight : 0}
             locationFoundRequest={locationFoundRequest}
             locale={locale}
             picking={

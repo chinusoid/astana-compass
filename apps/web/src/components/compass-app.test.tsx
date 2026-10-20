@@ -135,6 +135,99 @@ function scenarioResponse(
   };
 }
 
+it.each([false, true])(
+  "mobile planner collapses only after a successful itinerary, preserves edits (failure=%s)",
+  async (failure) => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("max-width"),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    const seed = structuredClone(
+      examples.cases.find((entry) => entry.name === "itinerary_valid")!
+        .instance,
+    ) as ItineraryResponse;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("/api/v1/places?"))
+          return Response.json({ places: seed.places, next_cursor: null });
+        const body = JSON.parse(String(init?.body));
+        if (url.endsWith("/recommendations"))
+          return Response.json(scenarioResponse(body, "matched"));
+        if (failure) throw new TypeError("Itinerary unavailable");
+        return Response.json(orderedJourneyResponse(body, seed.places));
+      }),
+    );
+    const user = userEvent.setup();
+    const { container } = render(
+      <CompassApp
+        initialStart="2026-10-19T12:00"
+        allowFixtures
+        mapProvider="none"
+      />,
+    );
+    const shell = container.querySelector(".app-shell")!;
+    expect(shell).toHaveAttribute("data-sheet-snap", "collapsed");
+    expect(container.querySelector("#mobile-sheet-content")).toHaveAttribute(
+      "inert",
+    );
+    await user.click(
+      screen.getByRole("link", { name: "Открыть планирование" }),
+    );
+    expect(shell).toHaveAttribute("data-sheet-snap", "expanded");
+    await user.click(screen.getByRole("button", { name: "Map pick" }));
+    const wish = screen.getByRole("textbox", { name: t("ru", "query") });
+    await user.type(wish, "Музей и кофе");
+    await user.click(screen.getByRole("button", { name: "Фильтры" }));
+    await user.type(
+      screen.getByRole("spinbutton", { name: t("ru", "timeBudget") }),
+      "180",
+    );
+    await user.click(
+      screen.getByRole("button", { name: intentText("ru", "scenarioFind") }),
+    );
+    if (failure) {
+      await waitFor(() =>
+        expect(
+          container.querySelector(".itinerary-error") ??
+            screen.queryByRole("alert"),
+        ).not.toBeNull(),
+      );
+      expect(shell).toHaveAttribute("data-sheet-snap", "expanded");
+    } else {
+      await waitFor(() =>
+        expect(shell).toHaveAttribute("data-sheet-snap", "collapsed"),
+      );
+      await waitFor(() =>
+        expect(container.querySelector("[data-sheet-handle]")).toHaveFocus(),
+      );
+      expect(
+        Number(screen.getByTestId("map").getAttribute("data-overview")),
+      ).toBeGreaterThan(0);
+      const route = screen.getByTestId("map").getAttribute("data-route");
+      await user.click(
+        screen.getByRole("link", { name: "Открыть планирование" }),
+      );
+      expect(screen.getByTestId("map")).toHaveAttribute("data-route", route!);
+    }
+    expect(wish).toHaveValue("Музей и кофе");
+    expect(
+      screen.getByRole("spinbutton", { name: t("ru", "timeBudget") }),
+    ).toHaveValue(180);
+    expect(screen.getByTestId("map")).toHaveAttribute(
+      "data-origin",
+      JSON.stringify({ lat: 51.09, lon: 71.42 }),
+    );
+    expect(screen.getByTestId("map").getAttribute("data-selected")).not.toBe(
+      "",
+    );
+  },
+);
+
 it.each(locales)(
   "geolocation denial in %s clears when the map finds a fix and preserves manual start",
   async (locale) => {

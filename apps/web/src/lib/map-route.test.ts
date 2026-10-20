@@ -18,6 +18,30 @@ function overviewMap(width = 900, height = 650) {
   };
 }
 
+it("fits every stop above the mobile sheet without retaining its camera padding", () => {
+  const map = overviewMap(390, 780);
+  expect(
+    fitJourney(
+      map as unknown as LibreMap,
+      null,
+      [
+        { lon: 71.43, lat: 51.12 },
+        { lon: 71.49, lat: 51.18 },
+      ],
+      false,
+      160,
+    ),
+  ).toBe(true);
+  const options = map.fitBounds.mock.calls[0][1];
+  expect(options.padding.bottom).toBeGreaterThanOrEqual(160);
+  expect(options.padding.top + options.padding.bottom).toBeLessThan(780);
+  expect(options.retainPadding).toBe(false);
+  expect(map.fitBounds.mock.calls[0][0]).toEqual([
+    [71.43, 51.12],
+    [71.49, 51.18],
+  ]);
+});
+
 it("includes stops outside the routed road in the full route overview", () => {
   const map = overviewMap();
   fitJourney(

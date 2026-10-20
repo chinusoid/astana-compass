@@ -70,6 +70,7 @@ type Props = {
   selectedIds: string[];
   routeStopIds?: string[];
   overviewRequest?: number;
+  bottomInset?: number;
   locationFoundRequest?: number;
   route: RouteEstimate | null;
   locale: Locale;
@@ -750,7 +751,13 @@ export default function CityMap(props: Props) {
     const map = mapRef.current;
     if (!ready || !map || !hasJourney) return;
     const fit = () => {
-      retryJourneyFit.current = fitJourney(map, geometry, journeyPoints, true)
+      retryJourneyFit.current = fitJourney(
+        map,
+        geometry,
+        journeyPoints,
+        true,
+        props.bottomInset,
+      )
         ? null
         : fit;
     };
@@ -758,7 +765,14 @@ export default function CityMap(props: Props) {
     return () => {
       retryJourneyFit.current = null;
     };
-  }, [ready, geometry, hasJourney, journeyPoints, props.overviewRequest]);
+  }, [
+    ready,
+    geometry,
+    hasJourney,
+    journeyPoints,
+    props.overviewRequest,
+    props.bottomInset,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1004,6 +1018,8 @@ export default function CityMap(props: Props) {
                       map,
                       geometry,
                       journeyPoints,
+                      false,
+                      props.bottomInset,
                     )
                       ? null
                       : fit;

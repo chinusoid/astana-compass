@@ -29,6 +29,13 @@ async function manualStart(page: Page, query = "Прогулка без спеш
   if (!new URL(page.url()).pathname.startsWith("/walk")) {
     await page.getByRole("navigation").locator('a[href="/walk"]').click();
   }
+  const mobileSearch = page.getByTestId("mobile-sheet-controls").locator("a");
+  if (
+    (await mobileSearch.isVisible()) &&
+    (await page.locator(".app-shell").getAttribute("data-sheet-snap")) ===
+      "collapsed"
+  )
+    await mobileSearch.click();
   const advanced = page.locator("details.advanced-origin");
   if ((await advanced.getAttribute("open")) === null)
     await advanced.locator("summary").click();
@@ -63,6 +70,86 @@ async function screenshot(page: Page, name: string) {
 }
 test.beforeEach(async ({ page }) => {
   await page.goto("/walk");
+});
+
+test("mobile map keeps the route visible and preserves the planner through sheet gestures", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const shell = page.locator(".app-shell");
+  const controls = page.getByTestId("mobile-sheet-controls");
+  const handle = controls.locator("[data-sheet-handle]");
+  await expect(shell).toHaveAttribute("data-sheet-snap", "collapsed");
+  await expect(controls).toBeVisible();
+  await expect(page.locator("#mobile-sheet-content")).toBeHidden();
+  expect(
+    (await page.locator(".app-map-stage").boundingBox())!.height,
+  ).toBeGreaterThan(844 * 0.8);
+  await screenshot(page, "mobile-map-collapsed");
+
+  const handleBox = (await handle.boundingBox())!;
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + 13);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y - 90, {
+    steps: 5,
+  });
+  await page.mouse.up();
+  await expect(shell).toHaveAttribute("data-sheet-snap", "half");
+  await handle.press("End");
+  await expect(shell).toHaveAttribute("data-sheet-snap", "expanded");
+  await handle.press("Home");
+  await expect(shell).toHaveAttribute("data-sheet-snap", "collapsed");
+
+  await fill(page);
+  await expect(shell).toHaveAttribute("data-sheet-snap", "expanded");
+  const response = page.waitForResponse(
+    (entry) =>
+      entry.url().endsWith("/itineraries") &&
+      entry.request().method() === "POST",
+  );
+  await search(page);
+  expect((await response).ok()).toBe(true);
+  await expect(shell).toHaveAttribute("data-sheet-snap", "collapsed");
+  await expect(handle).toBeFocused();
+  await expect(page.locator(".journey-preview .journey-stop")).toHaveCount(3);
+  await expect(page.getByTestId("map-journey-summary")).toBeVisible();
+  await screenshot(page, "mobile-map-route");
+
+  await controls.locator("a").click();
+  await expect(shell).toHaveAttribute("data-sheet-snap", "expanded");
+  await expect(page.locator('textarea[name="query"]')).toHaveValue(
+    "Прогулка без спешки",
+  );
+  await expect(page.locator('input[name="latitude"]')).toHaveValue("51.090");
+  await expect(page.locator('input[name="longitude"]')).toHaveValue("71.420");
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("90");
+  await expect(page.locator('input[name="return"]')).toBeChecked();
+  await expect(page.locator(".selected-stops > li")).toHaveCount(3);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollHeight <= innerHeight,
+    ),
+  ).toBe(true);
+  await screenshot(page, "mobile-planner-expanded");
+});
+
+test("mobile route failure keeps the planner open with the wish and filters", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/v1/itineraries", (route) => route.abort("failed"));
+  await fill(page);
+  await search(page);
+  await expect(page.locator(".journey [role=alert]")).toBeVisible();
+  await expect(page.locator(".app-shell")).toHaveAttribute(
+    "data-sheet-snap",
+    "expanded",
+  );
+  await expect(page.locator('textarea[name="query"]')).toHaveValue(
+    "Прогулка без спешки",
+  );
+  await expect(page.locator('input[name="minutes"]')).toHaveValue("90");
+  await expect(page.locator(".selected-stops > li")).toHaveCount(3);
 });
 
 test("walk starts without filters and searches without adding a return or time target", async ({
