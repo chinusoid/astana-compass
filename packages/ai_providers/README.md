@@ -62,6 +62,12 @@ coverage, not proof that arbitrary semantics were understood correctly. The
 fallback and planner warnings are intended to remain visible to users. Neither
 mocked tests nor a well-formed plan establish live model quality or POI coverage.
 
+Standalone negative clauses are copied into every stage's retrieval phrase in
+both hosted and rules modes, preserving global exclusions after decomposition.
+If the 300-character search bound cannot retain all exclusions, that stage
+becomes unresolved and asks for clarification. Spelled-out duration budgets,
+companions and basic mobility context do not become extra stops.
+
 ```python
 import os
 from astana_ai_providers import create_generator

@@ -416,3 +416,69 @@ def test_rules_generic_meal_suggestion_respects_explicit_multilingual_sequences(
     kazakh = rules_journey_plan("Алдымен кофе, содан кейін саябақ", "kk")
     assert kazakh["order"] == "explicit" and len(kazakh["stages"]) == 2
     assert all(item["kind"] != "unresolved" for item in kazakh["stages"])
+
+
+@pytest.mark.parametrize("query,locale,quotes", [
+    ("Хочу кофе и музей. У меня два часа", "ru", ["кофе", "музей"]),
+    ("Coffee and museum. I have two hours", "en", ["Coffee", "museum"]),
+    ("Кофе және мұражай. Менде екі сағат бар", "kk", ["Кофе", "мұражай"]),
+    ("Coffee and museum. With children. No car", "en", ["Coffee", "museum"]),
+    ("Кофе и музей. С детьми. Нет машины", "ru", ["Кофе", "музей"]),
+])
+def test_spelled_durations_companions_and_mobility_are_context_not_stops(query, locale, quotes):
+    answer = plan([stage(quote) for quote in quotes])
+    result = hosted(query, answer, locale=locale)
+    assert result["provider"] == "openai"
+    assert len(result["stages"]) == 2
+    fallback = rules_journey_plan(query, locale)
+    assert len(fallback["stages"]) == 2
+    assert all("No car" not in item["search_query"] and "Нет машины" not in item["search_query"]
+               for item in fallback["stages"])
+
+
+def test_context_detection_does_not_hide_an_actual_goal_with_a_duration():
+    query = "Visit a museum for two hours and visit a swimming pool"
+    assert len(rules_journey_plan(query, "en")["stages"]) == 2
+    assert hosted(query, plan([stage("museum")]))["provider"] == "rules"
+    query = "Coffee and museum and a trampoline"
+    assert len(hosted(query, plan([stage("Coffee"), stage("museum")]))["stages"]) == 3
+
+
+@pytest.mark.parametrize("query,quotes,exclusions", [
+    ("a walk, not Botanical Garden", ["a walk"], ["not Botanical Garden"]),
+    ("Coffee and museum. No pizza. Don't visit a theatre", ["Coffee", "museum"], ["No pizza", "Don't visit a theatre"]),
+    ("Don't go to a museum and visit a cafe", ["visit a cafe"], ["Don't go to a museum"]),
+    ("кофе и музей, без суши", ["кофе", "музей"], ["без суши"]),
+    ("Кофе және саябақ. Мұражай керек емес", ["Кофе", "саябақ"], ["Мұражай керек емес"]),
+])
+def test_global_named_food_and_verbal_exclusions_reach_every_retrieval_stage(query, quotes, exclusions):
+    hosted_result = hosted(query, plan([stage(quote) for quote in quotes]))
+    assert hosted_result["provider"] == "openai"
+    for result in (hosted_result, rules_journey_plan(query, "en")):
+        assert len(result["stages"]) == len(quotes)
+        for item in result["stages"]:
+            assert item["kind"] != "unresolved"
+            assert all(exclusion in item["search_query"] for exclusion in exclusions)
+            assert item["source_quote"] in query
+            assert len(item["search_query"]) <= 300
+
+
+def test_global_exclusion_append_is_idempotent():
+    query = "coffee, no pizza"
+    result = hosted(query, plan([stage("coffee", "coffee; no pizza", kind="meal")]))
+    assert result["provider"] == "openai"
+    assert result["stages"][0]["search_query"] == "coffee; no pizza"
+
+
+def test_unrepresentable_exclusion_marks_stage_unresolved_instead_of_executing_without_it():
+    positive = "x" * 280
+    query = positive + ", not Some Specific Excluded Destination"
+    hosted_result = hosted(query, plan([stage(positive)]), locale="en")
+    assert hosted_result["provider"] == "openai"
+    for result in (hosted_result, rules_journey_plan(query, "en")):
+        assert result["stages"][0]["kind"] == "unresolved"
+        assert result["stages"][0]["source_quote"] == positive
+        assert len(result["stages"][0]["search_query"]) <= 300
+        assert result["clarification_questions"]
+        assert any("exclusions" in warning for warning in result["warnings"])
+        validate_payload("JourneyPlan", result)

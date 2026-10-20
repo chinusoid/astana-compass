@@ -16,7 +16,7 @@ from astana_contracts import load_schema, validate_payload
 
 from .budgets import RequestBudget
 from .generators import HostedExplanationGenerator, ProviderError, _strict_json
-from .intents import json_dumps
+from .intents import _time, json_dumps
 
 
 JourneyProvider = Literal["rules", "openai", "nvidia"]
@@ -37,11 +37,15 @@ _NEGATIVE = re.compile(
 )
 _NEGATION_WORD = re.compile(r"(?<!\w)(?:не|без|not|no|without|avoid|don['’]?t|емес)(?!\w)", re.I)
 _CONTEXT = re.compile(
-    r"^\s*(?:(?:у\s+меня|у\s+нас|есть|на|за|всего|располагаю)|"
-    r"(?:I|we)\s+have|for|only|available|менде|бізде)\b.*\d.*"
-    r"(?:час|мин|hour|minute|\bhrs?\b|\bmins?\b|сағат)|"
-    r"^\s*(?:с\s+(?:детьми|реб[её]нком)|with\s+(?:children|kids|a\s+child)|баламен)\s*$",
+    r"\s*(?:с\s+(?:детьми|реб[её]нком)|with\s+(?:children|kids|a\s+child)|баламен|балалармен|"
+    r"(?:нет|без)\s+(?:машины|авто)|(?:(?:I|we)\s+have\s+)?no\s+car|without\s+(?:a\s+)?car|"
+    r"on\s+foot|walking\s+only|көліксіз|көліг(?:ім|іміз)\s+жоқ)\s*",
     re.I,
+)
+_DURATION_CONTEXT = re.compile(
+    r"\s*(?:(?:у\s+меня|у\s+нас|(?:I|we)\s+have|менде|бізде)\s*)?"
+    r"(?:(?:есть|на|за|всего|располагаю|осталось|остались|примерно|около|свободного\s+времени|"
+    r"for|only|available|left|about|roughly|just|бар)\s*)*", re.I,
 )
 _RELATIVE_ORDER = re.compile(
     r"(?<!\w)(?:перед|прежде\s+чем|после(?!\s+этого)|before|after(?!\s+that)|дейін|кейін)(?!\w)", re.I,
@@ -105,6 +109,11 @@ _COPY = {
         "Часть запроса требует уточнения и сохранена отдельным этапом.",
         "Сұраудың бір бөлігі нақтылауды қажет етеді және жеке кезең ретінде сақталды.",
         "Part of the request needs clarification and has been retained as a separate stage.",
+    ),
+    "exclusion_limit": (
+        "Все исключения не помещаются в поисковый запрос этапа; уточните или сократите пожелания.",
+        "Кезеңнің іздеу сұрауына барлық шектеу сыймайды; қалауыңызды нақтылаңыз немесе қысқартыңыз.",
+        "All exclusions cannot fit in the stage search; clarify or shorten the request.",
     ),
 }
 
@@ -191,6 +200,43 @@ def _negative_only(text: str) -> bool:
     return bool(_NEGATIVE.search(text)) and adjective is None
 
 
+def _context_only(text: str) -> bool:
+    if _CONTEXT.fullmatch(text):
+        return True
+    seconds, quote, _, _ = _time(text)
+    return seconds is not None and quote is not None and bool(_DURATION_CONTEXT.fullmatch(text.replace(quote, "", 1)))
+
+
+def _preserve_exclusions(result: dict[str, Any], query: str, locale: str) -> dict[str, Any]:
+    """Retain exact global exclusions in every executable retrieval request."""
+    exclusions = list(dict.fromkeys(part for part in _segments(query) if _negative_only(part) and not _context_only(part)))
+    unresolved = False
+    for stage in result["stages"]:
+        search = stage["search_query"]
+        missing = [part for part in exclusions if part not in search]
+        if not missing:
+            continue
+        augmented = "; ".join([search, *missing])
+        if len(augmented) <= 300:
+            stage["search_query"] = augmented
+        else:
+            # A positive query must not execute after discarding a required
+            # exclusion. Its complete source remains in the original request.
+            stage["kind"] = "unresolved"
+            stage["named_place"] = None
+            stage["cuisine"] = None
+            stage["categories"] = []
+            unresolved = True
+    if unresolved:
+        question = _text("clarify", locale)
+        warning = _text("exclusion_limit", locale)
+        if question not in result["clarification_questions"]:
+            result["clarification_questions"] = result["clarification_questions"][:4] + [question]
+        if warning not in result["warnings"]:
+            result["warnings"] = result["warnings"][:7] + [warning]
+    return result
+
+
 def _relative_markers(query: str) -> list[re.Match[str]]:
     sequence_spans = [(marker.start(), marker.end()) for marker in _NEXT.finditer(query)]
     return [marker for marker in _RELATIVE_ORDER.finditer(query)
@@ -202,7 +248,7 @@ def _rules(query: str, locale: str) -> dict[str, Any]:
     stages = []
     relative_order = bool(_relative_markers(query))
     for part in ([] if _broad_discovery(query) else _segments(query)):
-        if _negative_only(part) or _CONTEXT.search(part):
+        if _negative_only(part) or _context_only(part):
             continue
         for quote in _pieces(part):
             # A free-text activity can be searched without claiming a known
@@ -233,11 +279,11 @@ def _rules(query: str, locale: str) -> dict[str, Any]:
         if _text("clarify", locale) not in questions:
             questions.append(_text("clarify", locale))
         warnings.append(_text("unresolved", locale))
-    return {
+    return _preserve_exclusions({
         "provider": "rules", "stages": stages,
         "order": "explicit" if explicit else "suggested",
         "clarification_questions": questions, "warnings": warnings,
-    }
+    }, query, locale)
 
 
 _INSTRUCTIONS = (
@@ -323,7 +369,7 @@ def _safe_text(value: str) -> bool:
 
 def _validate_coverage(query: str, result: dict[str, Any], protected: list[tuple[int, int]]) -> None:
     clauses = [] if _broad_discovery(query) else _clauses(query, protected)
-    active = [(left, right, text) for left, right, text in clauses if not _negative_only(text) and not _CONTEXT.search(text)]
+    active = [(left, right, text) for left, right, text in clauses if not _negative_only(text) and not _context_only(text)]
     assignments: list[list[int]] = [[] for _ in active]
     safely_unresolved: set[int] = set()
     for stage_index, stage in enumerate(result["stages"]):
@@ -430,7 +476,7 @@ def _validate_order(query: str, result: dict[str, Any], protected: list[tuple[in
             raise ValueError("relative order changed")
 
 
-def _ground(raw: Any, query: str, provider: str) -> dict[str, Any]:
+def _ground(raw: Any, query: str, provider: str, locale: str) -> dict[str, Any]:
     result = validate_payload("JourneyPlan", raw)
     if result["provider"] != provider:
         raise ValueError("invalid planning provider")
@@ -462,7 +508,7 @@ def _ground(raw: Any, query: str, provider: str) -> dict[str, Any]:
     protected = _compound_names(query, result["stages"])
     _validate_coverage(query, result, protected)
     _validate_order(query, result, protected)
-    return result
+    return validate_payload("JourneyPlan", _preserve_exclusions(result, query, locale))
 
 
 def rules_journey_plan(query: str, locale: str) -> dict[str, Any]:
@@ -516,7 +562,7 @@ class JourneyPlanner:
         if self._hosted and not self._closed:
             try:
                 envelope = await self._hosted._request(self._payload(query, locale))
-                return _ground(_strict_json(self._hosted._output_text(envelope)), query, self._hosted.provider)
+                return _ground(_strict_json(self._hosted._output_text(envelope)), query, self._hosted.provider, locale)
             except (ProviderError, ValueError, TypeError, UnicodeError, RecursionError):
                 result = _rules(query, locale)
                 result["warnings"].append(_text("fallback", locale))
