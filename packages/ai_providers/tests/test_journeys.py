@@ -537,6 +537,8 @@ def test_shopping_mall_alias_is_canonicalized_without_vetoing_other_categories()
 @pytest.mark.parametrize("alias,categories", [
     ("botanical_garden", ["park", "garden"]), ("art_gallery", ["gallery"]),
     ("arts_center", ["arts_centre"]), ("movie_theater", ["cinema"]), ("movie_theatre", ["cinema"]),
+    ("art", ["gallery", "arts_centre", "artwork"]),
+    ("culture", ["museum", "gallery", "arts_centre", "theatre"]),
 ])
 def test_common_semantic_type_aliases_expand_only_to_existing_source_groups(alias, categories):
     result = hosted("visit a place", plan([stage("place", categories=[alias, "future_place_type"])]))
@@ -687,7 +689,11 @@ def test_broad_goal_recovery_never_drops_negation_or_exclusivity(query):
     assert not any(item["kind"] != "unresolved" for item in result["stages"])
 
 
-def test_original_three_goal_query_recovers_source_backed_cultural_goal_without_extra_model_calls():
+@pytest.mark.parametrize("culture_kind,culture_categories", [
+    ("unresolved", []), ("activity", ["art"]), ("activity", ["culture"]),
+    ("activity", ["museum"]), ("activity", ["museum", "theatre"]),
+])
+def test_original_three_goal_query_recovers_source_backed_cultural_goal_without_extra_model_calls(culture_kind, culture_categories):
     from datetime import datetime, timedelta
     from pathlib import Path
     from astana_city_data import SnapshotRepository
@@ -703,8 +709,8 @@ def test_original_three_goal_query_recovers_source_backed_cultural_goal_without_
     answer = plan([
         stage("покушать пиццу", "пицца", kind="meal", cuisine="pizza", categories=["restaurant", "cafe"]),
         stage("в ботанический сад", "ботанический сад", categories=["botanical_garden"]),
-        stage("сходить в какое-нибудь место культурного искусства", kind="unresolved"),
-    ], order="explicit", questions=["Какой вид искусства интересен?"])
+        stage("сходить в какое-нибудь место культурного искусства", kind=culture_kind, categories=culture_categories),
+    ], order="explicit", questions=["Какой вид искусства интересен?"] if culture_kind == "unresolved" else [])
 
     async def check():
         repository, context, calls = SnapshotRepository(path, clock=lambda: now), Context(), []
@@ -722,7 +728,7 @@ def test_original_three_goal_query_recovers_source_backed_cultural_goal_without_
         ids = [item["place_id"] for item in result["recommendations"]]
         assert len(ids) == 3 and len(set(ids)) == 3
         assert ids[1] == "osm:way/1196402246"
-        assert {"museum", "gallery", "arts_centre", "theatre"}.intersection(core[ids[2]]["categories"])
+        assert {"museum", "gallery", "arts_centre", "theatre", "artwork"}.intersection(core[ids[2]]["categories"])
         assert len(calls) == 1 and len(context.routes) == 3
         assert result["journey_plan"]["clarification_questions"] == answer["clarification_questions"]
         assert all(not place["is_synthetic"] for place in result["places"])

@@ -81,6 +81,8 @@ _CATEGORY_ALIASES = {
     "shopping_mall": ("mall",), "shopping_center": ("mall",), "shopping_centre": ("mall",),
     "botanical_garden": ("park", "garden"), "art_gallery": ("gallery",),
     "arts_center": ("arts_centre",), "movie_theater": ("cinema",), "movie_theatre": ("cinema",),
+    "art": ("gallery", "arts_centre", "artwork"),
+    "culture": ("museum", "gallery", "arts_centre", "theatre"),
 }
 _UNSAFE_TEXT = re.compile(r"https?://|www\.|[\x00-\x08\x0b-\x1f\x7f]", re.I)
 _FILLER = frozenset(
@@ -486,7 +488,10 @@ _INSTRUCTIONS = (
     "categories contains semantic place-type search filters, not facts about a venue. "
     "Use the user's purpose to distinguish reading books (library) from buying books "
     "(bookshop), watching a movie (cinema), or swimming (swimming_pool). Eating can use "
-    "restaurant or cafe with the requested cuisine. Other relevant source category "
+    "restaurant or cafe with the requested cuisine. Broad source category "
+    "groups are art (gallery, arts_centre, artwork) and culture (museum, gallery, "
+    "arts_centre, theatre); use these source types for broad cultural/art wishes. "
+    "Other relevant source category "
     "identifiers are allowed; do not force an unsupported activity into a familiar "
     "category. Named destinations may use an empty categories array when their type "
     "is not established by the user's text. Every property must be returned. "

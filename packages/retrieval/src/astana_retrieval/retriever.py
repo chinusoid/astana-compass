@@ -199,7 +199,11 @@ class LexicalRetriever:
                 # A garden plus pizza may retrieve both stages. Generic food
                 # categories still require explicit cuisine, including named cafes.
                 other_categories = query.categories - FOOD_CATEGORIES
-                food_categories = FOOD_CATEGORIES if "restaurant" in query.categories else query.categories & FOOD_CATEGORIES
+                # A structured source type already selects the food subtype;
+                # lexical wording must still require known cuisine, but cannot
+                # veto a restaurant merely because it mentions a cafe.
+                food_categories = (FOOD_CATEGORIES if required_categories or "restaurant" in query.categories
+                                   else query.categories & FOOD_CATEGORIES)
                 cuisine_match = query.cuisines.intersection(cuisines) and (
                     not food_categories or food_categories.intersection(place["categories"])
                 )
@@ -207,7 +211,12 @@ class LexicalRetriever:
                     other_categories.intersection(place["categories"]) or cuisine_match
                 ):
                     continue
-            elif query.categories and not is_named and not query.categories.intersection(place["categories"]):
+            elif (not required_categories and query.categories and not is_named
+                  and not query.categories.intersection(place["categories"])):
+                # A grounded structured type already restricts source categories
+                # above. Incidental lexical guesses (art wording for a museum)
+                # must not add a second, incompatible positive type filter.
+                # Cuisine, source names, exclusions and hard facts still apply.
                 continue
             terms = document_terms(place)
             if any("category:" + theme in terms for theme in query.excluded_themes):

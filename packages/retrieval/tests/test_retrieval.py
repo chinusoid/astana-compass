@@ -91,6 +91,75 @@ def test_structured_mall_type_requires_source_category_even_for_a_named_cafe(cat
 
 
 @pytest.mark.parametrize("query,locale", [
+    ("место культурного искусства", "ru"), ("a cultural art place", "en"), ("мәдени өнер орны", "kk"),
+])
+def test_grounded_structured_types_are_not_vetoed_by_incidental_lexical_art_category(query, locale):
+    museum, theatre, gallery, cafe = (place("Museum", "museum"), place("Theatre", "theatre"),
+                                     place("Gallery", "gallery"), place("Cafe", "cafe"))
+    result = search([museum, theatre, gallery, cafe], query, locale, categories=["museum", "theatre"])
+    assert set(ids(result)) == {museum["id"], theatre["id"]}
+    # With no structured semantic filter, ordinary lexical intent still applies.
+    assert ids(search([museum, gallery], query, locale, categories=[])) == [gallery["id"]]
+
+
+def test_unknown_structured_type_cannot_substitute_a_lexical_cultural_match():
+    museum = place("Museum", "museum", description="A planetarium and art exhibition are mentioned here.")
+    assert ids(search([museum], "art museum planetarium", categories=["planetarium"])) == []
+
+
+@pytest.mark.parametrize("named", ["SYNTHETIC Museum", "Unlisted Museum"])
+def test_structured_category_does_not_replace_an_exact_or_unknown_named_destination(named):
+    museum, gallery = place("Museum", "museum"), place("Gallery", "gallery")
+    assert ids(search([museum, gallery], "art", named_place=named, categories=["gallery"])) == []
+
+
+def test_structured_cultural_categories_preserve_category_and_exact_name_exclusions():
+    museum, gallery = place("Museum", "museum"), place("Gallery", "gallery")
+    assert ids(search([museum, gallery], "art, not a museum", categories=["museum", "gallery"])) == [gallery["id"]]
+    assert ids(search([museum, gallery], "art, not SYNTHETIC Museum", categories=["museum", "gallery"])) == [gallery["id"]]
+
+
+@pytest.mark.parametrize("cuisine", [None, "pizza"])
+def test_structured_types_do_not_bypass_independent_food_cuisine_or_its_exclusion(cuisine):
+    pizza = place("Pizzeria", "restaurant", facts={"osm:cuisine": ["pizza"]})
+    unknown = place("Restaurant", "restaurant")
+    museum = place("Museum", "museum", facts={"osm:cuisine": ["pizza"]})
+    sources = [unknown, museum, pizza]
+    result = search(sources, "pizza art", cuisine=cuisine, categories=["restaurant", "museum"])
+    assert ids(result) == [pizza["id"]]
+    assert ids(search(sources, "art, not pizza", cuisine="pizza", categories=["restaurant"])) == []
+
+
+@pytest.mark.parametrize("query,cuisine", [("cafe art", "pizza"), ("pizza cafe art", None)])
+def test_structured_food_type_is_not_vetoed_by_lexical_type_when_cuisine_is_confirmed(query, cuisine):
+    restaurant = place("Restaurant", "restaurant", facts={"osm:cuisine": ["pizza"]})
+    unknown = place("UnknownCuisine", "restaurant")
+    museum = place("Museum", "museum", facts={"osm:cuisine": ["pizza"]})
+    result = search([unknown, museum, restaurant], query, cuisine=cuisine, categories=["restaurant"])
+    assert ids(result) == [restaurant["id"]]
+    assert "osm:cuisine" in result["hits"][0]["matched_fact_keys"]
+
+
+@pytest.mark.parametrize("category", ["museum", "theatre"])
+@pytest.mark.parametrize("actual", [False, None, True])
+def test_structured_cultural_types_keep_required_hard_facts_strict(category, actual):
+    target = place("Target", category, facts={"indoor": actual})
+    result = search([target], "a cultural art place", categories=["museum", "theatre"], constraints=[
+        {"key": "indoor", "value": True, "strength": "required"},
+    ])
+    if actual is False:
+        assert ids(result) == []
+    else:
+        assert ids(result) == [target["id"]]
+        if actual is None:
+            assert result["hits"][0]["matched_fact_keys"] == []
+            assert any("deferred" in warning for warning in result["warnings"])
+        else:
+            assert result["hits"][0]["matched_fact_keys"] == ["indoor"]
+            assert not any("deferred" in warning for warning in result["warnings"])
+
+
+@pytest.mark.parametrize("query,locale", [
     ("Не кафе, а музей", "ru"), ("not a cafe but a museum", "en"),
     ("кафе емес, мұражай керек", "kk"), ("Кафе не нужно, хочу музей", "ru"),
 ])
